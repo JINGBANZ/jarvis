@@ -35,6 +35,7 @@ jobs:
           ditto -x -k .build/ui-probe-candidate/Jarvis-installation.zip .build/ui-probe-candidate
           mkdir -p "$HOME/Applications"
           ditto .build/ui-probe-candidate/Jarvis.app "$HOME/Applications/Jarvis.app"
+          python3 scripts/verify-packaged-resources.py "$HOME/Applications/Jarvis.app"
       - name: Inspect supported UI automation setup
         run: |
           sw_vers

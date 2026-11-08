@@ -4,35 +4,10 @@ ObjC.import("AppKit");
 function run() {
     let stage = "input";
     const diagnostics = {
-        uiElementsEnabled: false,
-        processCount: 0,
-        windowCount: 0,
-        ownerContainerCount: 0,
-        usernameCount: 0,
-        secureCount: 0,
-        modifySettingsCount: 0,
-        recognizedHeading: false,
-        recognizedText: false,
-        frontmostProcessCount: 0,
-        frontmostContainerCount: 0,
-        frontmostUsernameCount: 0,
-        frontmostSecureCount: 0,
-        frontmostModifySettingsCount: 0,
-        frontmostIsSystemSettings: false,
-        frontmostIsLocalAuthentication: false,
-        frontmostRecognizedHeading: false,
-        frontmostRecognizedText: false,
-        focusAvailable: false,
-        focusContainerAvailable: false,
-        focusIsSecureField: false,
-        focusOwnerIsLocalAuthentication: false,
-        focusOwnerIsSystemSettings: false,
-        focusOwnerIsSecurityAgent: false,
-        focusOwnerPID: 0,
-        focusContainerPID: 0,
-        focusContainerIsSheet: false,
-        focusContainerIsWindow: false,
-        focusError: 0
+        processCount: 0, formCount: 0, usernameCount: 0, secureCount: 0, modifySettingsCount: 0,
+        uiElementsEnabled: false, recognizedHeading: false, recognizedText: false,
+        focusAvailable: false, focusIsSecureField: false, focusOwnerIsAuthenticationAgent: false,
+        focusOwnerIsSystemSettings: false, focusOwnerPID: 0, focusError: 0
     };
     const receipt = authorized => JSON.stringify({authorized, stage, diagnostics});
     let lastProgress = null;
@@ -42,6 +17,12 @@ function run() {
             $.NSFileHandle.fileHandleWithStandardOutput.writeData($(value + "\n").dataUsingEncoding($.NSUTF8StringEncoding));
             lastProgress = value;
         }
+    }
+    function fail(code = -25200) {
+        diagnostics.focusError = Number.isInteger(code) && code >= -25214 && code <= -25200 ? code : -25200;
+        const error = new Error();
+        error.axError = diagnostics.focusError;
+        throw error;
     }
     try {
         publish();
@@ -72,308 +53,222 @@ function run() {
         ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id *"]]);
         ObjC.bindFunction("AXUIElementGetPid", ["int", ["id", "int *"]]);
         ObjC.bindFunction("AXUIElementSetMessagingTimeout", ["int", ["id", "float"]]);
+        ObjC.bindFunction("AXUIElementIsAttributeSettable", ["int", ["id", "id", "bool *"]]);
+        ObjC.bindFunction("AXUIElementSetAttributeValue", ["int", ["id", "id", "id"]]);
+        ObjC.bindFunction("AXUIElementPerformAction", ["int", ["id", "id"]]);
+        ObjC.bindFunction("CFEqual", ["bool", ["id", "id"]]);
+        const system = $.AXUIElementCreateSystemWide();
+        function check(error) { if (Number(error) !== 0) { fail(Number(error)); } }
+        check($.AXUIElementSetMessagingTimeout(system, 0.25));
 
-        function attribute(element, name) {
-            const value = element.attributes.byName(name);
-            return value.exists() ? value.value() : null;
+        function attribute(element, name, optional = false) {
+            const value = Ref();
+            const error = Number($.AXUIElementCopyAttributeValue(element, $(name), value));
+            if (optional && (error === -25205 || error === -25212)) { return null; }
+            check(error);
+            return value[0] && !value[0].isNil() ? value[0] : null;
         }
+        function scalar(element, name, optional = false) {
+            const value = attribute(element, name, optional);
+            return value ? ObjC.unwrap(value) : null;
+        }
+        function pid(element) {
+            const value = Ref();
+            check($.AXUIElementGetPid(element, value));
+            const identifier = Number(value[0]);
+            if (!Number.isInteger(identifier) || identifier <= 0 || identifier > 2147483647) { fail(); }
+            return identifier;
+        }
+        function owner(identifier) {
+            const application = $.NSRunningApplication.runningApplicationWithProcessIdentifier(identifier);
+            return application.isNil() ? null : ObjC.unwrap(application.bundleIdentifier);
+        }
+        function isNativeOwner(identifier) {
+            const name = owner(identifier);
+            return name === "com.apple.LocalAuthentication.UIAgent" || name === "com.apple.systempreferences";
+        }
+        function isSecure(element) {
+            return scalar(element, "AXRole") === "AXSecureTextField"
+                || scalar(element, "AXSubrole", true) === "AXSecureTextField";
+        }
+        function same(first, second) { return first !== null && second !== null && Boolean($.CFEqual(first, second)); }
+        function budget() { return {remaining: 128, deadline: Date.now() + 3000}; }
 
-        function inspect(window, discoveryBudget = null) {
-            const nodes = [];
-            const pending = [window];
-            const withinDeadline = () => discoveryBudget === null || Date.now() < discoveryBudget.deadline;
+        function inspect(root, focused, limits) {
+            const pending = [root];
+            const text = [];
+            const usernames = [];
+            const secrets = [];
+            const buttons = [];
+            let complete = true;
             while (pending.length > 0) {
-                if (!withinDeadline() || (discoveryBudget !== null && discoveryBudget.remaining === 0)) { break; }
-                if (nodes.length >= 256) { throw new Error(); }
-                if (discoveryBudget !== null) { discoveryBudget.remaining -= 1; }
+                if (limits.remaining === 0 || Date.now() >= limits.deadline) { complete = false; break; }
+                limits.remaining -= 1;
                 const element = pending.shift();
-                nodes.push({element, role: attribute(element, "AXRole"), subrole: attribute(element, "AXSubrole")});
-                if (withinDeadline()) { pending.push(...element.uiElements()); }
-            }
-            const textValues = [];
-            for (const node of nodes.filter(node => node.role === "AXStaticText")) {
-                for (const name of ["AXValue", "AXTitle", "AXDescription"]) {
-                    if (!withinDeadline()) { break; }
-                    const value = attribute(node.element, name);
-                    if (typeof value === "string") { textValues.push(value); }
-                }
-            }
-            const text = textValues.join(" ").replace(/\s+/g, " ");
-            const username = nodes.filter(node => node.role === "AXTextField" && node.subrole !== "AXSecureTextField");
-            const secure = nodes.filter(node => node.role === "AXSecureTextField" || node.subrole === "AXSecureTextField");
-            const modify = nodes.filter(node => node.role === "AXButton" && withinDeadline()
-                && (attribute(node.element, "AXTitle") === "Modify Settings"
-                    || attribute(node.element, "AXDescription") === "Modify Settings"));
-            const summary = {
-                recognizedHeading: text.includes("Privacy & Security"),
-                recognizedText: text.toLowerCase().includes("modify your system settings"),
-                usernameCount: username.length,
-                secureCount: secure.length,
-                modifySettingsCount: modify.length
-            };
-            const form = discoveryBudget === null && summary.recognizedHeading && summary.recognizedText
-                && username.length === 1 && secure.length === 1 && modify.length === 1
-                ? {window, username: username[0].element, secure: secure[0].element, modify: modify[0].element} : null;
-            return {form, diagnostics: summary};
-        }
-
-        function inspectContainers(containers, budget) {
-            let summary = {usernameCount: 0, secureCount: 0, modifySettingsCount: 0,
-                recognizedHeading: false, recognizedText: false};
-            let bestScore = -1;
-            for (const container of containers.slice(0, 256)) {
-                if (budget.remaining === 0 || Date.now() >= budget.deadline) { break; }
-                try {
-                    const observed = inspect(container, budget).diagnostics;
-                    const score = 8 * (Number(observed.recognizedHeading) + Number(observed.recognizedText))
-                        + Number(observed.usernameCount === 1) + Number(observed.secureCount === 1)
-                        + Number(observed.modifySettingsCount === 1);
-                    if (score > bestScore) {
-                        bestScore = score;
-                        summary = observed;
+                const role = scalar(element, "AXRole");
+                const subrole = scalar(element, "AXSubrole", true);
+                if (role === "AXStaticText" || same(element, root)) {
+                    for (const name of role === "AXStaticText" ? ["AXValue", "AXTitle", "AXDescription"] : ["AXTitle", "AXDescription"]) {
+                        const value = scalar(element, name, true);
+                        if (typeof value === "string") { text.push(value); }
                     }
-                } catch (_) {
-                    // A disappearing discovery tree must not abort authorization.
+                }
+                if (role === "AXSecureTextField" || subrole === "AXSecureTextField") { secrets.push(element); }
+                else if (role === "AXTextField") { usernames.push(element); }
+                if (role === "AXButton" && (scalar(element, "AXTitle", true) === "Modify Settings"
+                    || scalar(element, "AXDescription", true) === "Modify Settings")) { buttons.push(element); }
+                const children = attribute(element, "AXChildren", true);
+                if (children) {
+                    const count = Number(children.count);
+                    if (!Number.isInteger(count) || count < 0 || count > 256) { complete = false; break; }
+                    for (let index = 0; index < count; index++) { pending.push(children.objectAtIndex(index)); }
                 }
             }
-            return summary;
-        }
-
-        function inspectOwnerRoots(process, budget) {
-            const summary = {ownerContainerCount: 0, usernameCount: 0, secureCount: 0,
-                modifySettingsCount: 0, recognizedHeading: false, recognizedText: false};
-            try {
-                const containers = process.uiElements();
-                summary.ownerContainerCount = Math.min(containers.length, 256);
-                if (summary.ownerContainerCount !== diagnostics.ownerContainerCount) {
-                    diagnostics.ownerContainerCount = summary.ownerContainerCount;
-                    publish();
-                }
-                Object.assign(summary, inspectContainers(containers, budget));
-            } catch (_) {
-                // Windowless discovery cannot authorize credential entry.
-            }
-            return summary;
-        }
-
-        function inspectFrontmost(budget) {
+            const content = text.join(" ").replace(/\s+/g, " ");
             const summary = {
-                frontmostProcessCount: 0,
-                frontmostContainerCount: 0,
-                frontmostUsernameCount: 0,
-                frontmostSecureCount: 0,
-                frontmostModifySettingsCount: 0,
-                frontmostIsSystemSettings: false,
-                frontmostIsLocalAuthentication: false,
-                frontmostRecognizedHeading: false,
-                frontmostRecognizedText: false
+                usernameCount: usernames.length, secureCount: secrets.length, modifySettingsCount: buttons.length,
+                recognizedHeading: content.includes("Privacy & Security"),
+                recognizedText: content.toLowerCase().includes("modify your system settings")
             };
-            try {
-                const processes = events.processes.whose({frontmost: true})();
-                summary.frontmostProcessCount = Math.min(processes.length, 256);
-                if (processes.length !== 1) { return summary; }
-                const identifier = processes[0].bundleIdentifier();
-                summary.frontmostIsSystemSettings = identifier === "com.apple.systempreferences";
-                summary.frontmostIsLocalAuthentication = identifier === "com.apple.LocalAuthenticationRemoteService";
-                const containers = processes[0].uiElements();
-                summary.frontmostContainerCount = Math.min(containers.length, 256);
-                const basicFields = ["frontmostProcessCount", "frontmostContainerCount",
-                    "frontmostIsSystemSettings", "frontmostIsLocalAuthentication"];
-                if (basicFields.some(key => summary[key] !== diagnostics[key])) {
-                    Object.assign(diagnostics, summary);
-                    publish();
-                }
-                const observed = inspectContainers(containers, budget);
-                Object.assign(summary, {
-                    frontmostUsernameCount: observed.usernameCount,
-                    frontmostSecureCount: observed.secureCount,
-                    frontmostModifySettingsCount: observed.modifySettingsCount,
-                    frontmostRecognizedHeading: observed.recognizedHeading,
-                    frontmostRecognizedText: observed.recognizedText
-                });
-            } catch (_) {
-                // Foreground discovery is read-only and independent of the validated form.
-            }
-            return summary;
+            const matches = complete && summary.recognizedHeading && summary.recognizedText
+                && usernames.length === 1 && secrets.length === 1 && buttons.length === 1
+                && same(secrets[0], focused) && scalar(buttons[0], "AXEnabled") === true;
+            return {summary, complete, secrets, form: matches
+                ? {root, username: usernames[0], secure: secrets[0], modify: buttons[0]} : null};
         }
 
-        function inspectFocus(budget) {
-            const summary = {
-                focusAvailable: false, focusContainerAvailable: false, focusIsSecureField: false,
-                focusOwnerIsLocalAuthentication: false, focusOwnerIsSystemSettings: false,
-                focusOwnerIsSecurityAgent: false, focusOwnerPID: 0, focusContainerPID: 0,
-                focusContainerIsSheet: false, focusContainerIsWindow: false, focusError: 0
-            };
-            function recordError(code) {
-                if (summary.focusError === 0 && code !== 0) {
-                    summary.focusError = Number.isInteger(code) && code >= -25214 && code <= -25200 ? code : -25200;
-                }
-            }
-            function withinDeadline() {
-                if (Date.now() < budget.deadline) { return true; }
-                recordError(-25204);
-                return false;
-            }
-            function read(element, name) {
-                if (!withinDeadline()) { return null; }
-                const value = Ref();
-                const error = Number($.AXUIElementCopyAttributeValue(element, $(name), value));
-                recordError(error);
-                return error === 0 ? value[0] : null;
-            }
-            function pid(element) {
-                if (!withinDeadline()) { return 0; }
-                const value = Ref();
-                const error = Number($.AXUIElementGetPid(element, value));
-                recordError(error);
-                if (error !== 0) { return 0; }
-                const identifier = Number(value[0]);
-                if (Number.isInteger(identifier) && identifier > 0 && identifier <= 2147483647) { return identifier; }
-                recordError(-25200);
-                return 0;
-            }
-            function roleValue(element, name) {
-                const value = read(element, name);
-                return value ? ObjC.unwrap(value) : null;
-            }
-            try {
-                publish();
-                if (!withinDeadline()) { return summary; }
-                const system = $.AXUIElementCreateSystemWide();
-                const timeoutError = Number($.AXUIElementSetMessagingTimeout(system, 0.25));
-                recordError(timeoutError);
-                if (timeoutError !== 0) { return summary; }
-                const focused = read(system, "AXFocusedUIElement");
-                if (!focused) { return summary; }
-                summary.focusAvailable = true;
-                summary.focusOwnerPID = pid(focused);
-                if (summary.focusOwnerPID > 0) {
-                    const application = $.NSRunningApplication.runningApplicationWithProcessIdentifier(summary.focusOwnerPID);
-                    const identifier = ObjC.unwrap(application.bundleIdentifier);
-                    summary.focusOwnerIsLocalAuthentication = identifier === "com.apple.LocalAuthenticationRemoteService";
-                    summary.focusOwnerIsSystemSettings = identifier === "com.apple.systempreferences";
-                    summary.focusOwnerIsSecurityAgent = identifier === "com.apple.SecurityAgent";
-                }
-                const role = roleValue(focused, "AXRole");
-                const subrole = roleValue(focused, "AXSubrole");
-                summary.focusIsSecureField = role === "AXSecureTextField" || subrole === "AXSecureTextField";
-                const container = read(focused, "AXTopLevelUIElement") || read(focused, "AXWindow");
-                if (container) {
-                    summary.focusContainerAvailable = true;
-                    summary.focusContainerPID = pid(container);
-                    const containerRole = roleValue(container, "AXRole");
-                    summary.focusContainerIsSheet = containerRole === "AXSheet";
-                    summary.focusContainerIsWindow = containerRole === "AXWindow";
-                }
-            } catch (_) {
-                recordError(-25200);
-            }
-            return summary;
-        }
-
-        const deadline = Date.now() + 180000;
-        const owner = "com.apple.LocalAuthenticationRemoteService";
         let form = null;
         let hydrationDeadline = null;
+        const deadline = Date.now() + 180000;
         stage = "owner";
         publish();
         while (Date.now() < deadline && form === null) {
-            const processes = events.processes.whose({bundleIdentifier: owner})();
-            diagnostics.processCount = Math.min(processes.length, 256);
-            if (processes.length === 0) {
-                stage = "owner";
-                Object.assign(diagnostics, {windowCount: 0, ownerContainerCount: 0, usernameCount: 0, secureCount: 0,
-                    modifySettingsCount: 0, recognizedHeading: false, recognizedText: false});
-            }
-            publish();
-            if (processes.length > 1) { return receipt(false); }
-            if (processes.length === 1) {
-                if (stage === "owner") { stage = "form"; publish(); }
-                const windows = processes[0].windows();
-                diagnostics.windowCount = Math.min(windows.length, 256);
-                if (windows.length === 0) {
-                    stage = "form";
-                    const budget = {remaining: 128, deadline: Date.now() + 3000};
-                    Object.assign(diagnostics, inspectFocus(budget));
-                    publish();
-                    Object.assign(diagnostics, inspectOwnerRoots(processes[0], budget));
-                    Object.assign(diagnostics, inspectFrontmost(budget));
-                } else {
-                    diagnostics.ownerContainerCount = 0;
-                }
+            try {
+                diagnostics.focusError = 0;
+                const focused = attribute(system, "AXFocusedUIElement", true);
+                const identifier = focused ? pid(focused) : 0;
+                const name = identifier > 0 ? owner(identifier) : null;
+                const secure = focused !== null && isSecure(focused);
+                const native = name === "com.apple.LocalAuthentication.UIAgent" || name === "com.apple.systempreferences";
+                Object.assign(diagnostics, {
+                    focusAvailable: focused !== null, focusIsSecureField: secure, focusOwnerPID: identifier,
+                    focusOwnerIsAuthenticationAgent: name === "com.apple.LocalAuthentication.UIAgent",
+                    focusOwnerIsSystemSettings: name === "com.apple.systempreferences", processCount: native ? 1 : 0
+                });
                 publish();
-                if (windows.length > 256) { return receipt(false); }
-                if (windows.length > 0 && hydrationDeadline === null) { hydrationDeadline = Date.now() + 10000; }
-                const inspected = windows.map(window => inspect(window));
-                const matches = inspected.filter(value => value.form !== null);
-                if (matches.length > 1) { return receipt(false); }
-                const selected = matches[0]
-                    || inspected.find(value => value.diagnostics.recognizedHeading || value.diagnostics.recognizedText)
-                    || inspected[0];
-                if (selected) {
-                    Object.assign(diagnostics, selected.diagnostics);
-                    if (diagnostics.recognizedHeading && diagnostics.recognizedText) { stage = "fields"; }
+                if (native && secure) {
+                    stage = "form";
+                    if (hydrationDeadline === null) { hydrationDeadline = Date.now() + 10000; }
+                    const limits = budget();
+                    let ancestor = attribute(focused, "AXParent", true);
+                    for (let depth = 0; ancestor !== null && depth < 8; depth++) {
+                        if (limits.remaining === 0 || Date.now() >= limits.deadline
+                            || scalar(ancestor, "AXRole") === "AXApplication") { break; }
+                        const inspected = inspect(ancestor, focused, limits);
+                        Object.assign(diagnostics, inspected.summary);
+                        if (inspected.form) {
+                            form = {...inspected.form, pid: identifier};
+                            diagnostics.formCount = 1;
+                            break;
+                        }
+                        if (!inspected.complete) { break; }
+                        ancestor = attribute(ancestor, "AXParent", true);
+                    }
+                    publish();
                 }
-                if (matches.length === 1) { form = matches[0].form; }
+            } catch (error) {
+                if (![-25202, -25204, -25212].includes(error.axError)) { throw error; }
+                stage = "owner";
+                Object.assign(diagnostics, {
+                    processCount: 0, formCount: 0, usernameCount: 0, secureCount: 0, modifySettingsCount: 0,
+                    recognizedHeading: false, recognizedText: false, focusAvailable: false, focusIsSecureField: false,
+                    focusOwnerIsAuthenticationAgent: false, focusOwnerIsSystemSettings: false, focusOwnerPID: 0
+                });
                 publish();
             }
             if (form === null && hydrationDeadline !== null && Date.now() >= hydrationDeadline) { return receipt(false); }
             if (form === null) { $.NSThread.sleepForTimeInterval(0.25); }
         }
         if (form === null) { return receipt(false); }
+        stage = "fields";
+        publish();
 
-        function fill(field, value) {
+        function revalidate() {
+            if (!isNativeOwner(form.pid) || pid(form.secure) !== form.pid) { fail(); }
+            const current = inspect(form.root, form.secure, budget()).form;
+            if (!current || !same(current.username, form.username) || !same(current.modify, form.modify)) { fail(); }
+        }
+        function settable(element, name) {
+            const value = Ref();
+            check($.AXUIElementIsAttributeSettable(element, $(name), value));
+            return Boolean(value[0]);
+        }
+        function requireFocus(field) {
+            if (scalar(field, "AXFocused") !== true || !same(attribute(system, "AXFocusedUIElement"), field)) { fail(); }
+        }
+        function fill(field, value, secure) {
+            revalidate();
+            if (pid(field) !== form.pid) { fail(); }
+            if (!same(attribute(system, "AXFocusedUIElement"), field)) {
+                if (settable(field, "AXFocused")) { check($.AXUIElementSetAttributeValue(field, $("AXFocused"), $(true))); }
+                else { check($.AXUIElementPerformAction(field, $("AXPress"))); }
+            }
+            requireFocus(field);
             stage = "fill";
             publish();
-            const attribute = field.attributes.byName("AXValue");
-            if (attribute.exists() && attribute.settable()) {
-                attribute.value = value;
-                return;
-            }
-            stage = "clipboard";
-            publish();
-            const clipboard = $.NSPasteboard.generalPasteboard;
-            const saved = [];
-            const items = clipboard.pasteboardItems;
-            for (let index = 0; index < Number(items.count); index++) {
-                const original = items.objectAtIndex(index);
-                const copy = $.NSPasteboardItem.alloc.init;
-                const types = original.types;
-                for (let typeIndex = 0; typeIndex < Number(types.count); typeIndex++) {
-                    const type = types.objectAtIndex(typeIndex);
-                    copy.setDataForType(original.dataForType(type), type);
-                }
-                saved.push(copy);
-            }
-            clipboard.clearContents;
-            try {
-                if (!clipboard.setStringForType(value, $.NSPasteboardTypeString)) { throw new Error(); }
-                events.click(field);
-                const focused = field.attributes.byName("AXFocused");
-                if (!focused.exists() || focused.value() !== true) { throw new Error(); }
+            if (settable(field, "AXValue")) { check($.AXUIElementSetAttributeValue(field, $("AXValue"), $(value))); }
+            else {
+                requireFocus(field);
                 events.keystroke("a", {using: ["command down"]});
-                events.keystroke("v", {using: ["command down"]});
-            } finally {
-                clipboard.clearContents;
-                if (saved.length > 0 && !clipboard.writeObjects($(saved))) { throw new Error(); }
+                requireFocus(field);
+                events.keystroke(value);
             }
+            const readbackDeadline = Date.now() + 5000;
+            while (Date.now() < readbackDeadline) {
+                const observed = scalar(field, secure ? "AXNumberOfCharacters" : "AXValue", secure);
+                if (secure ? observed === null || Number(observed) === value.length : observed === value) { return; }
+                $.NSThread.sleepForTimeInterval(0.05);
+            }
+            fail();
         }
-
-        fill(form.username, credentials.username);
-        fill(form.secure, credentials.password);
+        fill(form.username, credentials.username, false);
+        fill(form.secure, credentials.password, true);
+        revalidate();
+        requireFocus(form.secure);
         stage = "submit";
         publish();
-        events.click(form.modify);
+        check($.AXUIElementPerformAction(form.modify, $("AXPress")));
         stage = "dismiss";
         publish();
         const dismissalDeadline = Date.now() + 15000;
         while (Date.now() < dismissalDeadline) {
-            if (!form.window.exists()) {
+            const value = Ref();
+            const error = Number($.AXUIElementCopyAttributeValue(form.secure, $("AXParent"), value));
+            if (error === -25202 || error === -25212) {
                 stage = "complete";
                 publish(true);
                 return receipt(true);
             }
-            $.NSThread.sleepForTimeInterval(0.25);
+            check(error);
+            let inspected;
+            try {
+                inspected = inspect(form.root, form.secure, budget());
+            } catch (error) {
+                if (error.axError !== -25202) { throw error; }
+                const rootRole = Ref();
+                const rootError = Number($.AXUIElementCopyAttributeValue(form.root, $("AXRole"), rootRole));
+                if (rootError !== -25202) { throw error; }
+                stage = "complete";
+                diagnostics.focusError = 0;
+                publish(true);
+                return receipt(true);
+            }
+            if (inspected.complete && !inspected.secrets.some(element => same(element, form.secure))) {
+                stage = "complete";
+                publish(true);
+                return receipt(true);
+            }
+            $.NSThread.sleepForTimeInterval(0.1);
         }
         return receipt(false);
     } catch (_) {

@@ -50,19 +50,19 @@ class ProbeResultsTests(unittest.TestCase):
 
 
 class NativeAuthorizationTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.dict(PROBE["collect_authorization"].__globals__, {"describe_focus_owner": mock.Mock()})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def receipt(self, *, authorized=True, stage="complete"):
         return {"authorized": authorized, "stage": stage, "diagnostics": {
-            "uiElementsEnabled": True, "processCount": 1, "windowCount": 1,
+            "uiElementsEnabled": True, "processCount": 1, "formCount": 1,
             "usernameCount": 1, "secureCount": 1, "modifySettingsCount": 1,
             "recognizedHeading": True, "recognizedText": True,
-            "ownerContainerCount": 0, "frontmostProcessCount": 0, "frontmostContainerCount": 0, "frontmostUsernameCount": 0,
-            "frontmostSecureCount": 0, "frontmostModifySettingsCount": 0,
-            "frontmostIsSystemSettings": False, "frontmostIsLocalAuthentication": False,
-            "frontmostRecognizedHeading": False, "frontmostRecognizedText": False,
-            "focusAvailable": False, "focusContainerAvailable": False, "focusIsSecureField": False,
-            "focusOwnerIsLocalAuthentication": False, "focusOwnerIsSystemSettings": False,
-            "focusOwnerIsSecurityAgent": False, "focusOwnerPID": 0, "focusContainerPID": 0, "focusError": 0,
-            "focusContainerIsSheet": False, "focusContainerIsWindow": False,
+            "focusAvailable": True, "focusIsSecureField": True,
+            "focusOwnerIsAuthenticationAgent": True, "focusOwnerIsSystemSettings": False,
+            "focusOwnerPID": 12345, "focusError": 0,
         }}
 
     def test_only_allowlisted_scalar_receipts_are_accepted(self):
@@ -73,10 +73,14 @@ class NativeAuthorizationTests(unittest.TestCase):
                             {"diagnostics": {**receipt["diagnostics"], "processCount": True}},
                             {"diagnostics": {**receipt["diagnostics"], "processCount": 257}},
                             {"diagnostics": {**receipt["diagnostics"], "secureCount": 0}},
-                            {"diagnostics": {**receipt["diagnostics"], "frontmostProcessCount": True}},
-                            {"diagnostics": {**receipt["diagnostics"], "frontmostRecognizedText": "private"}},
+                            {"diagnostics": {**receipt["diagnostics"], "formCount": 0}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusAvailable": False}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusIsSecureField": False}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusOwnerIsAuthenticationAgent": False}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusOwnerIsSystemSettings": True}},
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": 2_147_483_648}},
-                            {"diagnostics": {**receipt["diagnostics"], "focusContainerPID": True}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": True}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": 0}},
                             {"diagnostics": {**receipt["diagnostics"], "focusError": -1}},
                             {"diagnostics": {**receipt["diagnostics"], "uiElementsEnabled": False}}):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):

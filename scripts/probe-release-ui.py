@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import plistlib
 import pwd
+import re
 import runpy
 import subprocess
 import sys
@@ -15,18 +16,12 @@ import uuid
 ROOT = Path(__file__).resolve().parent.parent
 
 AUTHORIZATION_STAGES = {
-    "input", "accessibility", "owner", "form", "fields", "fill", "clipboard", "submit", "dismiss", "complete",
+    "input", "accessibility", "owner", "form", "fields", "fill", "submit", "dismiss", "complete",
 }
-AUTHORIZATION_COUNTS = {"processCount", "windowCount", "usernameCount", "secureCount", "modifySettingsCount"}
+AUTHORIZATION_COUNTS = {"processCount", "formCount", "usernameCount", "secureCount", "modifySettingsCount"}
 AUTHORIZATION_FLAGS = {"uiElementsEnabled", "recognizedHeading", "recognizedText"}
-DISCOVERY_COUNTS = {"ownerContainerCount", "frontmostProcessCount", "frontmostContainerCount", "frontmostUsernameCount",
-                    "frontmostSecureCount", "frontmostModifySettingsCount"}
-DISCOVERY_FLAGS = {"frontmostIsSystemSettings", "frontmostIsLocalAuthentication",
-                   "frontmostRecognizedHeading", "frontmostRecognizedText"}
-FOCUS_FLAGS = {"focusAvailable", "focusContainerAvailable", "focusIsSecureField",
-               "focusOwnerIsLocalAuthentication", "focusOwnerIsSystemSettings", "focusOwnerIsSecurityAgent",
-               "focusContainerIsSheet", "focusContainerIsWindow"}
-FOCUS_PIDS = {"focusOwnerPID", "focusContainerPID"}
+FOCUS_FLAGS = {"focusAvailable", "focusIsSecureField", "focusOwnerIsAuthenticationAgent", "focusOwnerIsSystemSettings"}
+FOCUS_PIDS = {"focusOwnerPID"}
 FOCUS_ERRORS = {0, *range(-25214, -25199)}
 
 
@@ -41,13 +36,12 @@ def validate_authorization_receipt(output):
             or not isinstance(receipt["diagnostics"], dict)):
         raise ValueError("Invalid native-authorization receipt")
     diagnostics = receipt["diagnostics"]
-    if set(diagnostics) != (AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS | DISCOVERY_COUNTS
-                            | DISCOVERY_FLAGS | FOCUS_FLAGS | FOCUS_PIDS | {"focusError"}):
+    if set(diagnostics) != (AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS | FOCUS_FLAGS | FOCUS_PIDS | {"focusError"}):
         raise ValueError("Invalid native-authorization diagnostics")
     if any(type(diagnostics[key]) is not int or not 0 <= diagnostics[key] <= 256
-           for key in AUTHORIZATION_COUNTS | DISCOVERY_COUNTS):
+           for key in AUTHORIZATION_COUNTS):
         raise ValueError("Invalid native-authorization counts")
-    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS | DISCOVERY_FLAGS | FOCUS_FLAGS):
+    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS | FOCUS_FLAGS):
         raise ValueError("Invalid native-authorization flags")
     if (any(type(diagnostics[key]) is not int or not 0 <= diagnostics[key] <= 2_147_483_647 for key in FOCUS_PIDS)
             or type(diagnostics["focusError"]) is not int or diagnostics["focusError"] not in FOCUS_ERRORS):
@@ -56,8 +50,10 @@ def validate_authorization_receipt(output):
         raise ValueError("Inconsistent native-authorization receipt")
     if receipt["authorized"] and (
             not all(diagnostics[key] for key in AUTHORIZATION_FLAGS)
-            or any(diagnostics[key] != 1 for key in AUTHORIZATION_COUNTS - {"windowCount"})
-            or diagnostics["windowCount"] < 1):
+            or any(diagnostics[key] != 1 for key in AUTHORIZATION_COUNTS)
+            or not diagnostics["focusAvailable"] or not diagnostics["focusIsSecureField"]
+            or diagnostics["focusOwnerPID"] == 0
+            or diagnostics["focusOwnerIsAuthenticationAgent"] == diagnostics["focusOwnerIsSystemSettings"]):
         raise ValueError("Native-authorization completion lacks form proof")
     return receipt
 
@@ -129,10 +125,41 @@ def collect_authorization(process, evidence, *, required):
         return
     (evidence / "authorization.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print("Native authorization: " + json.dumps(receipt, sort_keys=True), flush=True)
+    describe_focus_owner(receipt["diagnostics"]["focusOwnerPID"], evidence)
     if required and timed_out:
         raise ValueError("Native-authorization helper did not finish")
     if required and (process.returncode != 0 or not receipt["authorized"]):
         raise ValueError("Native recording authorization failed at stage " + receipt["stage"])
+
+
+def describe_focus_owner(pid, evidence):
+    if pid == 0:
+        return
+    identity = {"pid": pid, "stage": "process", "appleSigned": False,
+                "executable": "unavailable", "bundleIdentifier": "unavailable"}
+    try:
+        result = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "comm="],
+                                capture_output=True, text=True, timeout=5, check=True)
+        path = Path(result.stdout.strip()).resolve(strict=True)
+        identity["stage"] = "path"
+        if not path.is_relative_to("/System/Library") or not path.is_file() or path.stat().st_uid != 0:
+            raise ValueError
+        identity["stage"] = "signature"
+        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", "-R", "anchor apple", str(path)],
+                       capture_output=True, timeout=5, check=True)
+        identity.update(appleSigned=True, executable=str(path), stage="metadata")
+        for bundle in path.parents:
+            if bundle.suffix not in {".app", ".bundle", ".xpc"}:
+                continue
+            with (bundle / "Contents/Info.plist").open("rb") as source:
+                identifier = plistlib.load(source).get("CFBundleIdentifier")
+            if isinstance(identifier, str) and re.fullmatch(r"com\.apple\.[A-Za-z0-9_.-]{1,128}", identifier):
+                identity.update(bundleIdentifier=identifier, stage="complete")
+            break
+    except (OSError, ValueError, subprocess.SubprocessError, plistlib.InvalidFileException):
+        pass
+    (evidence / "authorization-owner.json").write_text(json.dumps(identity, indent=2) + "\n")
+    print("Native authorization owner: " + json.dumps(identity, sort_keys=True), flush=True)
 
 
 def run(arguments, *, timeout, log=None):
