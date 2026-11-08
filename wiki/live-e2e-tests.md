@@ -125,8 +125,8 @@ The transcription benchmark retains its own capture instrumentation and scoring 
 in [transcription-benchmark.md](./transcription-benchmark.md). It is not an alternate entry point for
 coaching regression suites.
 
-The external installed-app probe uses a standalone Xcode UI-test project because SwiftPM cannot
-host XCUIAutomation. It launches the installed production bundle with ordinary launch arguments
+The external installed-app probe requires full Xcode and uses a standalone UI-test project because
+SwiftPM cannot host XCUIAutomation. It launches the installed production bundle with ordinary launch arguments
 and drives onboarding, Settings, Skills, and Quit. Profile mutation is restricted to the disposable
 GitHub-hosted runner account. Its credential-free permission case supplies a clearly invalid stored
 key only to reach the permission step; it neither starts a provider session nor establishes

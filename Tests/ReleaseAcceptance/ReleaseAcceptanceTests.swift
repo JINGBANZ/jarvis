@@ -40,14 +40,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
         }
         XCTAssertFalse(window.staticTexts["No skills are installed."].exists)
         attachEvidence(app, name: "installed-skills")
-        window.buttons[XCUIIdentifierCloseWindow].click()
-        app.activate()
-        let applicationMenu = app.menuBars.menuBarItems["Jarvis"]
-        XCTAssertTrue(applicationMenu.waitForExistence(timeout: 10))
-        applicationMenu.click()
-        let quit = applicationMenu.menuItems["Quit Jarvis"]
-        XCTAssertTrue(quit.waitForExistence(timeout: 10))
-        quit.click()
+        window.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "Normal Quit must terminate the installed app")
     }
 
@@ -58,48 +51,61 @@ final class ReleaseAcceptanceTests: XCTestCase {
         let grant = welcome.buttons["Grant Access"]
         XCTAssertTrue(grant.waitForExistence(timeout: 20), "Stored-key precondition must expose ordinary permission onboarding")
         attachEvidence(app, name: "permissions-before-grants")
-        grant.click()
-        var relaunched = false
-        for permission in ["microphone", "audio", "screen"] {
-            switch try permissionPrompt(for: permission, onboarding: welcome) {
-            case .consent(let dialog):
-                if permission == "screen", dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
+        var grantProcesses: Set<pid_t> = []
+        var acceptedConsents: Set<String> = []
+        var reachedReady = false
+        for step in 1...12 {
+            switch try nextPermissionAction(onboarding: welcome, acceptedConsents: acceptedConsents) {
+            case .consent(let permissions, let dialog):
+                acceptedConsents.formUnion(permissions)
+                if permissions.contains("screen"), dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
+                    let previousPID = try candidateProcessID()
                     dialog.buttons["Open System Settings"].click()
-                    relaunched = try grantScreenRecordingInSettings()
+                    if try grantScreenRecordingInSettings() { waitForReplacement(of: previousPID) }
+                    app.activate()
                 } else {
                     let allow = consentButtons(in: dialog)
                     XCTAssertEqual(allow.count, 1, "Consent requires one unambiguous Allow control")
                     allow.element.click()
                 }
-            case .relaunch:
-                let previous = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first)
-                welcome.buttons["Quit & Reopen"].click()
-                let reopened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                    let running = NSRunningApplication.runningApplications(withBundleIdentifier: self.bundleID)
-                    return running.count == 1 && running[0].processIdentifier != previous.processIdentifier
-                        && running[0].bundleURL?.resolvingSymlinksInPath() == self.installedURL
-                        && running[0].executableArchitecture == NSRunningApplication.current.executableArchitecture
-                }, object: nil)
-                XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 15), .completed,
-                               "Normal Quit & Reopen must replace the installed candidate process")
-                relaunched = true
+            case .onboarding(let title):
+                attachEvidence(app, name: "permission-step-\(step)-\(title)")
+                print("permissionStep=\(step) normalAction=\(title)")
+                switch title {
+                case "Grant Access":
+                    let pid = try candidateProcessID()
+                    XCTAssertTrue(grantProcesses.insert(pid).inserted,
+                                  "A repeated inconclusive permission walk in one process must fail acceptance")
+                    welcome.buttons[title].click()
+                case "Open System Settings":
+                    XCTAssertEqual(grantedPermissionCount(in: welcome), 2,
+                                   "The observed screen-settings branch requires microphone and system audio proof")
+                    XCTAssertTrue(welcome.staticTexts["Screen Recording"].exists)
+                    let previousPID = try candidateProcessID()
+                    welcome.buttons[title].click()
+                    if try grantScreenRecordingInSettings() { waitForReplacement(of: previousPID) }
+                    app.activate()
+                case "Quit & Reopen":
+                    XCTAssertEqual(grantedPermissionCount(in: welcome), 2,
+                                   "Relaunch requires microphone and system audio proof")
+                    let previousPID = try candidateProcessID()
+                    welcome.buttons[title].click()
+                    waitForReplacement(of: previousPID)
+                    app.activate()
+                case "I’m Ready":
+                    XCTAssertEqual(grantedPermissionCount(in: welcome), 3, "Every permission must be positively granted")
+                    XCTAssertTrue(acceptedConsents.contains("microphone"), "Fresh acceptance must grant native microphone consent")
+                    XCTAssertTrue(acceptedConsents.contains("audio"), "Fresh acceptance must grant native system-audio consent")
+                    XCTAssertTrue(acceptedConsents.contains("screen"), "Fresh acceptance must observe native screen-recording consent")
+                    welcome.buttons[title].click()
+                    reachedReady = true
+                default:
+                    throw AcceptanceFailure("Unexpected permission action: \(title)")
+                }
             }
+            if reachedReady { break }
         }
-        app.activate()
-        if welcome.buttons["Open System Settings"].waitForExistence(timeout: 5) {
-            welcome.buttons["Open System Settings"].click()
-            relaunched = try grantScreenRecordingInSettings() || relaunched
-            app.activate()
-        }
-        if welcome.buttons["Quit & Reopen"].waitForExistence(timeout: 5) {
-            welcome.buttons["Quit & Reopen"].click()
-            relaunched = true
-        }
-        attachEvidence(app, name: "permissions-after-grants")
-        let ready = welcome.buttons["I’m Ready"]
-        let readyExists = ready.waitForExistence(timeout: relaunched ? 5 : 30)
-        if !relaunched { XCTAssertTrue(readyExists, "Every grant must reach the ordinary I’m Ready action") }
-        if readyExists { ready.click() }
+        XCTAssertTrue(reachedReady, "The bounded permission journey must reach and use the ordinary I’m Ready action")
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: welcome)
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 15), .completed,
                        "Permission onboarding must actually close")
@@ -117,22 +123,24 @@ final class ReleaseAcceptanceTests: XCTestCase {
                       "Normal onboarding must prove every grant before entering the stopped app")
     }
 
-    private enum PermissionPrompt {
-        case consent(XCUIElement)
-        case relaunch
+    private enum PermissionAction {
+        case consent(Set<String>, XCUIElement)
+        case onboarding(String)
     }
 
-    private func permissionPrompt(for permission: String, onboarding: XCUIElement) throws -> PermissionPrompt {
-        let owners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent"]
+    private func nextPermissionAction(onboarding: XCUIElement, acceptedConsents: Set<String>) throws -> PermissionAction {
+        let owners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent",
+                      "com.apple.accessibility.universalAccessAuthWarn"]
         var captured: Set<String> = []
-        var found: (String, XCUIElement)?
-        var needsRelaunch = false
+        var action: PermissionAction?
+        var consentOwner: String?
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            var matches: [(String, XCUIElement)] = []
+            var matches: [(String, Set<String>, XCUIElement)] = []
+            var hasConsentPrompt = false
             for identifier in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
                 let candidate = XCUIApplication(bundleIdentifier: identifier)
                 if captured.insert(identifier).inserted {
-                    self.attachEvidence(candidate, name: "\(permission)-owner-first-\(identifier)")
+                    self.attachEvidence(candidate, name: "permission-owner-first-\(identifier)")
                 }
                 let dialogs = candidate.dialogs.allElementsBoundByIndex
                 let containers = dialogs.isEmpty ? candidate.windows.allElementsBoundByIndex : dialogs
@@ -140,55 +148,80 @@ final class ReleaseAcceptanceTests: XCTestCase {
                     let text = container.staticTexts.allElementsBoundByIndex.map {
                         $0.label + " " + ($0.value as? String ?? "")
                     }.joined(separator: "\n")
-                    guard text.localizedCaseInsensitiveContains("Jarvis"),
-                          text.localizedCaseInsensitiveContains(permission) else { continue }
+                    guard text.localizedCaseInsensitiveContains("Jarvis") else { continue }
+                    let permissions = Set(["microphone", "audio", "screen"].filter {
+                        text.localizedCaseInsensitiveContains($0)
+                    })
+                    guard !permissions.isEmpty else { continue }
+                    hasConsentPrompt = true
                     let allow = self.consentButtons(in: container)
-                    let opensSettings = permission == "screen" && container.buttons.matching(identifier: "Open System Settings").count == 1
-                    if allow.count == 1 || opensSettings { matches.append((identifier, container)) }
+                    let opensSettings = permissions.contains("screen")
+                        && container.buttons.matching(identifier: "Open System Settings").count == 1
+                    if allow.count == 1 || opensSettings { matches.append((identifier, permissions, container)) }
                 }
             }
             if matches.count == 1 {
-                found = matches[0]
+                let (owner, permissions, dialog) = matches[0]
+                action = .consent(permissions, dialog)
+                consentOwner = owner
                 return true
             }
-            if matches.isEmpty, permission == "screen",
-               onboarding.staticTexts.matching(NSPredicate(format: "value == 'Granted' OR label == 'Granted'")).count == 2,
-               onboarding.staticTexts["Screen Recording"].exists,
-               onboarding.staticTexts["Reopen to finish"].exists,
-               onboarding.buttons["Quit & Reopen"].exists {
-                needsRelaunch = true
-                return true
+            guard matches.isEmpty, !hasConsentPrompt else { return false }
+            let titles = ["Grant Access", "Open System Settings", "Quit & Reopen", "I’m Ready"].filter {
+                guard $0 == "Grant Access" || acceptedConsents.contains("screen") else { return false }
+                let button = onboarding.buttons[$0]
+                return button.exists && button.isEnabled
             }
-            return false
+            guard titles.count == 1 else { return false }
+            action = .onboarding(titles[0])
+            return true
         }, object: nil)
         let result = XCTWaiter.wait(for: [visible], timeout: 20)
         attachRunningApplicationInventory()
         for identifier in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
             let candidate = XCUIApplication(bundleIdentifier: identifier)
-            print("permission=\(permission) owner=\(identifier) dialogs=\(candidate.dialogs.count) windows=\(candidate.windows.count)")
-            attachEvidence(candidate, name: "\(permission)-owner-final-\(identifier)")
+            print("permissionOwner=\(identifier) dialogs=\(candidate.dialogs.count) windows=\(candidate.windows.count)")
+            attachEvidence(candidate, name: "permission-owner-final-\(identifier)")
         }
-        guard result == .completed else {
-            throw AcceptanceFailure("No unique system dialog identified Jarvis and the expected \(permission) permission")
+        guard result == .completed, let action else {
+            throw AcceptanceFailure("No unique validated system consent or ordinary permission action became available")
         }
-        if needsRelaunch {
-            let attachment = XCTAttachment(string: onboarding.debugDescription)
-            attachment.name = "screen-recording-requires-normal-relaunch"
+        if case .consent(let permissions, let dialog) = action {
+            let owner = try XCTUnwrap(consentOwner)
+            let attachment = XCTAttachment(string: dialog.debugDescription)
+            attachment.name = "\(permissions.sorted().joined(separator: "-"))-consent-container-\(owner)"
             attachment.lifetime = .keepAlways
             add(attachment)
-            print("permission=screen normalAction=Quit & Reopen; microphone/audio Granted, screen Reopen to finish")
-            return .relaunch
+            let text = dialog.staticTexts.allElementsBoundByIndex.map {
+                $0.label + " " + ($0.value as? String ?? "")
+            }.joined(separator: "\n")
+            print("permissions=\(permissions.sorted()) owner=\(owner) type=\(dialog.elementType.rawValue) matchedText=\(String(text.prefix(1500)))")
         }
-        let (identifier, dialog) = try XCTUnwrap(found)
-        let attachment = XCTAttachment(string: dialog.debugDescription)
-        attachment.name = "\(permission)-consent-container-\(identifier)"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        let text = dialog.staticTexts.allElementsBoundByIndex.map {
-            $0.label + " " + ($0.value as? String ?? "")
-        }.joined(separator: "\n")
-        print("permission=\(permission) owner=\(identifier) type=\(dialog.elementType.rawValue) matchedText=\(String(text.prefix(1500)))")
-        return .consent(dialog)
+        return action
+    }
+
+    private func grantedPermissionCount(in onboarding: XCUIElement) -> Int {
+        onboarding.staticTexts.matching(NSPredicate(format: "value == 'Granted' OR label == 'Granted'")).count
+    }
+
+    private func candidateProcessID() throws -> pid_t {
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+        XCTAssertEqual(running.count, 1, "Exactly one installed candidate must run")
+        let candidate = try XCTUnwrap(running.first)
+        XCTAssertEqual(candidate.bundleURL?.resolvingSymlinksInPath(), installedURL)
+        XCTAssertEqual(candidate.executableArchitecture, NSRunningApplication.current.executableArchitecture)
+        return candidate.processIdentifier
+    }
+
+    private func waitForReplacement(of previousPID: pid_t) {
+        let reopened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let running = NSRunningApplication.runningApplications(withBundleIdentifier: self.bundleID)
+            return running.count == 1 && running[0].processIdentifier != previousPID
+                && running[0].bundleURL?.resolvingSymlinksInPath() == self.installedURL
+                && running[0].executableArchitecture == NSRunningApplication.current.executableArchitecture
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 15), .completed,
+                       "Normal Quit & Reopen must replace the installed candidate process")
     }
 
     private func consentButtons(in dialog: XCUIElement) -> XCUIElementQuery {
