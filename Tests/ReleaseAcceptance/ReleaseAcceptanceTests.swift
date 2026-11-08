@@ -63,7 +63,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
                 dialog.buttons["Open System Settings"].click()
                 relaunched = try grantScreenRecordingInSettings()
             } else {
-                let allow = dialog.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow' OR label == 'OK'"))
+                let allow = consentButtons(in: dialog)
                 XCTAssertEqual(allow.count, 1, "Consent requires one unambiguous Allow control")
                 allow.element.click()
             }
@@ -119,7 +119,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
                     }.joined(separator: "\n")
                     guard text.localizedCaseInsensitiveContains("Jarvis"),
                           text.localizedCaseInsensitiveContains(permission) else { continue }
-                    let allow = container.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow' OR label == 'OK'"))
+                    let allow = self.consentButtons(in: container)
                     let opensSettings = permission == "screen" && container.buttons.matching(identifier: "Open System Settings").count == 1
                     if allow.count == 1 || opensSettings { matches.append((identifier, container)) }
                 }
@@ -147,6 +147,11 @@ final class ReleaseAcceptanceTests: XCTestCase {
         }.joined(separator: "\n")
         print("permission=\(permission) owner=\(identifier) type=\(dialog.elementType.rawValue) matchedText=\(String(text.prefix(1500)))")
         return dialog
+    }
+
+    private func consentButtons(in dialog: XCUIElement) -> XCUIElementQuery {
+        dialog.buttons.matching(NSPredicate(format:
+            "label BEGINSWITH[c] 'Allow' OR title BEGINSWITH[c] 'Allow' OR label == 'OK' OR title == 'OK'"))
     }
 
     private func attachRunningApplicationInventory() {
