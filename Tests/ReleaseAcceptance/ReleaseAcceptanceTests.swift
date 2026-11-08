@@ -180,11 +180,6 @@ final class ReleaseAcceptanceTests: XCTestCase {
         }, object: nil)
         let result = XCTWaiter.wait(for: [visible], timeout: 20)
         attachRunningApplicationInventory()
-        for identifier in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
-            let candidate = XCUIApplication(bundleIdentifier: identifier)
-            print("permissionOwner=\(identifier) dialogs=\(candidate.dialogs.count) windows=\(candidate.windows.count)")
-            attachEvidence(candidate, name: "permission-owner-final-\(identifier)")
-        }
         guard result == .completed, let action else {
             throw AcceptanceFailure("No unique validated system consent or ordinary permission action became available")
         }
@@ -237,6 +232,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
         attachment.name = "permission-running-application-identifiers"
         attachment.lifetime = .keepAlways
         add(attachment)
+        print("Permission UI application identifiers: \(String(identifiers.joined(separator: ", ").prefix(6000)))")
     }
 
     private func grantScreenRecordingInSettings() throws -> Bool {
@@ -276,10 +272,11 @@ final class ReleaseAcceptanceTests: XCTestCase {
     }
 
     private func authorizeRecordingSettings(_ settings: XCUIApplication, toggle: XCUIElement) throws {
-        let agent = XCUIApplication(bundleIdentifier: "com.apple.SecurityAgent")
+        let owner = "com.apple.LocalAuthenticationRemoteService"
+        let agent = XCUIApplication(bundleIdentifier: owner)
         var dialog: XCUIElement?
         let authorization = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").isEmpty {
+            if !NSRunningApplication.runningApplications(withBundleIdentifier: owner).isEmpty {
                 let dialogs = agent.dialogs.allElementsBoundByIndex
                 let containers = dialogs.isEmpty ? agent.windows.allElementsBoundByIndex : dialogs
                 let matches = containers.filter { container in
@@ -297,7 +294,8 @@ final class ReleaseAcceptanceTests: XCTestCase {
         }, object: nil)
         let result = XCTWaiter.wait(for: [authorization], timeout: 10)
         attachRunningApplicationInventory()
-        if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").isEmpty {
+        if (dialog != nil || result != .completed),
+           !NSRunningApplication.runningApplications(withBundleIdentifier: owner).isEmpty {
             attachEvidence(agent, name: "screen-recording-authorization-before-credentials")
             print("Screen-recording authorization UI:\n\(String(agent.debugDescription.prefix(12000)))")
         }

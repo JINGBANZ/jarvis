@@ -43,23 +43,27 @@ def command(arguments, *, stage, input_text=None):
     return result
 
 
-def account_identity():
-    try:
-        account = pwd.getpwnam(ACCOUNT)
-    except KeyError:
+def account_identity(stage="account-identity"):
+    listing = command(["/usr/bin/dscl", "/Local/Default", "-list", "/Users"], stage=f"{stage}-list")
+    names = listing.stdout.splitlines()
+    if not {"root", "runner"}.issubset(names):
+        raise ValueError(f"{stage}-list")
+    if ACCOUNT not in names:
         return None
-    if account.pw_dir != ACCOUNT_HOME:
-        raise ValueError("account-home")
-    result = command(["/usr/bin/dscl", "-plist", ".", "-read", f"/Users/{ACCOUNT}", "GeneratedUID"],
-                     stage="account-identity")
+    result = command(["/usr/bin/dscl", "-plist", "/Local/Default", "-read", f"/Users/{ACCOUNT}",
+                      "UniqueID", "GeneratedUID", "NFSHomeDirectory"], stage=f"{stage}-read")
     try:
         values = plistlib.loads(result.stdout.encode())
+        unique_id = values["dsAttrTypeStandard:UniqueID"]
         generated_uid = values["dsAttrTypeStandard:GeneratedUID"]
-        if len(generated_uid) != 1 or not isinstance(generated_uid[0], str) or account.pw_uid < 501:
+        home = values["dsAttrTypeStandard:NFSHomeDirectory"]
+        if (len(unique_id) != 1 or not isinstance(unique_id[0], str) or not unique_id[0].isdigit()
+                or int(unique_id[0]) < 501 or len(generated_uid) != 1
+                or not isinstance(generated_uid[0], str) or not generated_uid[0] or home != [ACCOUNT_HOME]):
             raise ValueError
-        return {"uid": account.pw_uid, "generated_uid": generated_uid[0]}
+        return {"uid": int(unique_id[0]), "generated_uid": generated_uid[0]}
     except (ValueError, KeyError, TypeError, plistlib.InvalidFileException):
-        raise ValueError("account-identity") from None
+        raise ValueError(f"{stage}-format") from None
 
 
 def write_record(fd, record):
@@ -104,7 +108,7 @@ def verify_authentication(password):
 
 
 def prepare(directory):
-    if account_identity() is not None:
+    if account_identity("prepare-before") is not None:
         raise ValueError("account-already-exists")
     if os.path.lexists(ACCOUNT_HOME):
         raise ValueError("account-home-already-exists")
@@ -121,7 +125,7 @@ def prepare(directory):
                     stage="account-creation", input_text=record["password"] + "\n")
         except ValueError as error:
             creation_error = error
-        identity = account_identity()
+        identity = account_identity("prepare-after")
         if identity is not None:
             record.update(identity)
             write_record(descriptor, record)
@@ -145,13 +149,13 @@ def cleanup(directory):
         record, original = read_record(directory)
     except FileNotFoundError:
         return
-    identity = account_identity()
+    identity = account_identity("cleanup-before")
     if identity is not None:
         if identity != {"uid": record.get("uid"), "generated_uid": record.get("generated_uid")}:
             raise ValueError("cleanup-identity-mismatch")
         command(["/usr/bin/sudo", "-n", "/usr/sbin/sysadminctl", "-deleteUser", ACCOUNT],
                 stage="account-deletion")
-        if account_identity() is not None:
+        if account_identity("cleanup-after") is not None:
             raise ValueError("account-deletion")
     current = os.lstat(directory / FILENAME)
     if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino):

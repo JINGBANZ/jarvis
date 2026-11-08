@@ -4,6 +4,7 @@
 from pathlib import Path
 import json
 import os
+import plistlib
 import runpy
 import subprocess
 import tempfile
@@ -47,6 +48,38 @@ class ProbeResultsTests(unittest.TestCase):
 
 
 class TemporaryAccountSafetyTests(unittest.TestCase):
+    def test_identity_uses_local_directory_record_fields(self):
+        metadata = {"dsAttrTypeStandard:UniqueID": ["502"], "dsAttrTypeStandard:GeneratedUID": ["created"],
+                    "dsAttrTypeStandard:NFSHomeDirectory": ["/Users/jarvisacceptance"]}
+        command = mock.Mock(side_effect=[subprocess.CompletedProcess([], 0, "root\nrunner\njarvisacceptance\n", ""),
+            subprocess.CompletedProcess([], 0, plistlib.dumps(metadata).decode(), "")])
+        with mock.patch.dict(ACCOUNT_GLOBALS, {"command": command}), mock.patch("pwd.getpwnam") as cached:
+            self.assertEqual(ACCOUNT["account_identity"](), {"uid": 502, "generated_uid": "created"})
+            cached.assert_not_called()
+            self.assertIn("/Local/Default", command.call_args.args[0])
+
+    def test_authoritative_absence_does_not_read_cached_password_record(self):
+        with mock.patch.dict(ACCOUNT_GLOBALS, {"command": mock.Mock(
+            return_value=subprocess.CompletedProcess([], 0, "root\nrunner\n", ""))
+        }), mock.patch("pwd.getpwnam") as cached:
+            self.assertIsNone(ACCOUNT["account_identity"]())
+            cached.assert_not_called()
+
+    def test_empty_listing_and_wrong_home_are_not_accepted_as_safe_absence(self):
+        with mock.patch.dict(ACCOUNT_GLOBALS, {"command": mock.Mock(
+            return_value=subprocess.CompletedProcess([], 0, "", ""))
+        }):
+            with self.assertRaisesRegex(ValueError, "account-identity-list"):
+                ACCOUNT["account_identity"]()
+        metadata = {"dsAttrTypeStandard:UniqueID": ["502"], "dsAttrTypeStandard:GeneratedUID": ["created"],
+                    "dsAttrTypeStandard:NFSHomeDirectory": ["/Users/runner"]}
+        with mock.patch.dict(ACCOUNT_GLOBALS, {"command": mock.Mock(side_effect=[
+            subprocess.CompletedProcess([], 0, "root\nrunner\njarvisacceptance\n", ""),
+            subprocess.CompletedProcess([], 0, plistlib.dumps(metadata).decode(), "")])
+        }):
+            with self.assertRaisesRegex(ValueError, "account-identity-format"):
+                ACCOUNT["account_identity"]()
+
     def test_unsafe_host_cannot_prepare(self):
         with mock.patch("sys.platform", "linux"), mock.patch("subprocess.run") as run:
             with self.assertRaisesRegex(ValueError, "host-guard"):
