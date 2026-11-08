@@ -67,6 +67,11 @@ function run() {
         publish();
         if (!diagnostics.uiElementsEnabled) { return receipt(false); }
         ObjC.import("ApplicationServices");
+        // Automatic metadata exposes copied CF attributes as opaque pointers; AX references are toll-free objects.
+        ObjC.bindFunction("AXUIElementCreateSystemWide", ["id", []]);
+        ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id *"]]);
+        ObjC.bindFunction("AXUIElementGetPid", ["int", ["id", "int *"]]);
+        ObjC.bindFunction("AXUIElementSetMessagingTimeout", ["int", ["id", "float"]]);
 
         function attribute(element, name) {
             const value = element.attributes.byName(name);
