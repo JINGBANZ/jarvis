@@ -34,12 +34,12 @@ import Testing
 
     }
 
-    @Test func speakGuidanceAddressesEachFieldWithShortSchemaLabels() throws {
+    @Test func speakGuidanceAddressesEachFieldWithConciseSchemaDescriptions() throws {
         let schema = try #require(try JSONSerialization.jsonObject(
             with: Data(speakTool.parametersJSON.utf8)) as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: [String: Any]])
-        #expect(properties["hint"]?["description"] as? String == "The short reply displayed to the user.")
-        #expect(properties["detail"]?["description"] as? String == "Optional Markdown displayed below the hint.")
+        #expect(properties["hint"]?["description"] as? String == "One brief, direct, connected reply; the overlay handles wrapping.")
+        #expect(properties["detail"]?["description"] as? String == "Markdown shown under the hint for requested content that cannot fit there, supporting content required by a loaded skill, or a warranted explanation; otherwise null.")
         let guidance = speakTool.guidance
         let hint = try #require(guidance.range(of: "# Hint"))
         let detail = try #require(guidance.range(of: "# Detail"))

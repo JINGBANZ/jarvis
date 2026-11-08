@@ -7,8 +7,8 @@ public let speakTool = ToolDef(
     description: "Display a short hint and optional Markdown detail in the private overlay, not audio.",
     parametersJSON: #"""
         {"type":"object","properties":{
-            "hint":{"type":"string","description":"The short reply displayed to the user."},
-            "detail":{"type":["string","null"],"description":"Optional Markdown displayed below the hint."}
+            "hint":{"type":"string","description":"One brief, direct, connected reply; the overlay handles wrapping."},
+            "detail":{"type":["string","null"],"description":"Markdown shown under the hint for requested content that cannot fit there, supporting content required by a loaded skill, or a warranted explanation; otherwise null."}
         },"required":["hint","detail"],"additionalProperties":false}
         """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
     guidance: """

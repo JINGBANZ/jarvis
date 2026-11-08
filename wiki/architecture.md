@@ -417,8 +417,8 @@ history retain that accepted content. `detail` is nullable rather than absent, w
 field optional under strict Structured Outputs.
 
 Nothing in the runtime decides what belongs in a detail. The `speak` guidance begins with shared
-reply rules, then addresses `hint` and `detail` separately. The schema fields carry short descriptive
-labels. The skill that owns a domain says what its blocks are: the `coding` skill carries the code
+reply rules, then addresses `hint` and `detail` separately. The schema fields carry concise
+descriptions. The skill that owns a domain says what its blocks are: the `coding` skill carries the code
 block rules and the `diff` correction shape; the design skills (`system-design` and
 `customer-scenario-design`) carry the mermaid guidance. System-design stage-entry/help replies pair
 short upper-panel coaching with a lower-panel reference: grouped requirements, entities with
