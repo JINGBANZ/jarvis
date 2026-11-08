@@ -1,0 +1,80 @@
+name: Release UI feasibility
+
+on:
+  push:
+    branches: [fix/release-resource-verification]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-ui-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Reuse the already built universal candidate while probing the external driver.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: universal-installation-candidate
+          run-id: 42390572297
+          github-token: ${{ github.token }}
+          path: .build/ui-probe-candidate
+      - name: Install the normal app outside the checkout
+        run: |
+          (cd .build/ui-probe-candidate && shasum -a 256 -c Jarvis-installation.sha256)
+          ditto -x -k .build/ui-probe-candidate/Jarvis-installation.zip .build/ui-probe-candidate
+          mkdir -p "$HOME/Applications"
+          ditto .build/ui-probe-candidate/Jarvis.app "$HOME/Applications/Jarvis.app"
+      - name: Inspect supported UI automation setup
+        run: |
+          sw_vers
+          /usr/bin/automationmodetool
+          /usr/bin/automationmodetool | grep -F 'DOES NOT REQUIRE'
+      - name: Install the pinned virtual audio driver
+        run: |
+          curl --fail --location --retry 3 \
+            https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg \
+            --output "$RUNNER_TEMP/BlackHole2ch.pkg"
+          printf '%s  %s\n' \
+            57b540f27a3e29c37e310e01bee0fdfab76733087e47f997ef9dccf851400dcf \
+            "$RUNNER_TEMP/BlackHole2ch.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "$RUNNER_TEMP/BlackHole2ch.pkg" -target /
+          sudo killall coreaudiod
+          sleep 3
+      - name: Verify virtual audio carries a real signal
+        run: |
+          mkdir -p .jarvis/release-ui-probe
+          swiftc -swift-version 6 -strict-concurrency=complete -warnings-as-errors \
+            -parse-as-library -module-cache-path "$RUNNER_TEMP/audio-probe-module-cache" \
+            -framework CoreAudio Tests/ReleaseAcceptance/AudioProbe.swift \
+            -o "$RUNNER_TEMP/AudioProbe"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          with Path('.jarvis/release-ui-probe/audio-probe.json').open('w') as receipt:
+              subprocess.run([os.environ['RUNNER_TEMP'] + '/AudioProbe', '--verify-blackhole'],
+                             stdout=receipt, timeout=30, check=True)
+          PY
+      - name: Exercise normal launch and permissions without provider credentials
+        if: ${{ !cancelled() }}
+        run: python3 scripts/probe-release-ui.py "$HOME/Applications/Jarvis.app"
+      - name: Retain synthetic UI evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-ui-probe-${{ matrix.os }}
+          path: .jarvis/release-ui-probe/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 3
