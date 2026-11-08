@@ -11,7 +11,16 @@ function run() {
         secureCount: 0,
         modifySettingsCount: 0,
         recognizedHeading: false,
-        recognizedText: false
+        recognizedText: false,
+        frontmostProcessCount: 0,
+        frontmostContainerCount: 0,
+        frontmostUsernameCount: 0,
+        frontmostSecureCount: 0,
+        frontmostModifySettingsCount: 0,
+        frontmostIsSystemSettings: false,
+        frontmostIsLocalAuthentication: false,
+        frontmostRecognizedHeading: false,
+        frontmostRecognizedText: false
     };
     const receipt = authorized => JSON.stringify({authorized, stage, diagnostics});
     let lastProgress = null;
@@ -82,6 +91,54 @@ function run() {
             return {form, diagnostics: summary};
         }
 
+        function inspectFrontmost() {
+            const summary = {
+                frontmostProcessCount: 0,
+                frontmostContainerCount: 0,
+                frontmostUsernameCount: 0,
+                frontmostSecureCount: 0,
+                frontmostModifySettingsCount: 0,
+                frontmostIsSystemSettings: false,
+                frontmostIsLocalAuthentication: false,
+                frontmostRecognizedHeading: false,
+                frontmostRecognizedText: false
+            };
+            try {
+                const processes = events.processes.whose({frontmost: true})();
+                summary.frontmostProcessCount = Math.min(processes.length, 256);
+                if (processes.length !== 1) { return summary; }
+                const identifier = processes[0].bundleIdentifier();
+                summary.frontmostIsSystemSettings = identifier === "com.apple.systempreferences";
+                summary.frontmostIsLocalAuthentication = identifier === "com.apple.LocalAuthenticationRemoteService";
+                const containers = processes[0].uiElements();
+                summary.frontmostContainerCount = Math.min(containers.length, 256);
+                let bestScore = -1;
+                for (const container of containers.slice(0, 256)) {
+                    try {
+                        const observed = inspect(container).diagnostics;
+                        const score = 8 * (Number(observed.recognizedHeading) + Number(observed.recognizedText))
+                            + Number(observed.usernameCount === 1) + Number(observed.secureCount === 1)
+                            + Number(observed.modifySettingsCount === 1);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            Object.assign(summary, {
+                                frontmostUsernameCount: observed.usernameCount,
+                                frontmostSecureCount: observed.secureCount,
+                                frontmostModifySettingsCount: observed.modifySettingsCount,
+                                frontmostRecognizedHeading: observed.recognizedHeading,
+                                frontmostRecognizedText: observed.recognizedText
+                            });
+                        }
+                    } catch (_) {
+                        // A disappearing or oversized foreground tree must not abort authorization.
+                    }
+                }
+            } catch (_) {
+                // Foreground discovery is read-only and independent of the validated form.
+            }
+            return summary;
+        }
+
         const deadline = Date.now() + 180000;
         const owner = "com.apple.LocalAuthenticationRemoteService";
         let form = null;
@@ -106,6 +163,7 @@ function run() {
                     stage = "form";
                     Object.assign(diagnostics, {usernameCount: 0, secureCount: 0,
                         modifySettingsCount: 0, recognizedHeading: false, recognizedText: false});
+                    Object.assign(diagnostics, inspectFrontmost());
                 }
                 publish();
                 if (windows.length > 256) { return receipt(false); }

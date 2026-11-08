@@ -19,6 +19,10 @@ AUTHORIZATION_STAGES = {
 }
 AUTHORIZATION_COUNTS = {"processCount", "windowCount", "usernameCount", "secureCount", "modifySettingsCount"}
 AUTHORIZATION_FLAGS = {"uiElementsEnabled", "recognizedHeading", "recognizedText"}
+DISCOVERY_COUNTS = {"frontmostProcessCount", "frontmostContainerCount", "frontmostUsernameCount",
+                    "frontmostSecureCount", "frontmostModifySettingsCount"}
+DISCOVERY_FLAGS = {"frontmostIsSystemSettings", "frontmostIsLocalAuthentication",
+                   "frontmostRecognizedHeading", "frontmostRecognizedText"}
 
 
 def validate_authorization_receipt(output):
@@ -32,12 +36,12 @@ def validate_authorization_receipt(output):
             or not isinstance(receipt["diagnostics"], dict)):
         raise ValueError("Invalid native-authorization receipt")
     diagnostics = receipt["diagnostics"]
-    if set(diagnostics) != AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS:
+    if set(diagnostics) != AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS | DISCOVERY_COUNTS | DISCOVERY_FLAGS:
         raise ValueError("Invalid native-authorization diagnostics")
     if any(type(diagnostics[key]) is not int or not 0 <= diagnostics[key] <= 256
-           for key in AUTHORIZATION_COUNTS):
+           for key in AUTHORIZATION_COUNTS | DISCOVERY_COUNTS):
         raise ValueError("Invalid native-authorization counts")
-    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS):
+    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS | DISCOVERY_FLAGS):
         raise ValueError("Invalid native-authorization flags")
     if receipt["authorized"] != (receipt["stage"] == "complete"):
         raise ValueError("Inconsistent native-authorization receipt")
