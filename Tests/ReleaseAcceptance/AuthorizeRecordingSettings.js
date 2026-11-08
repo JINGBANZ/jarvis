@@ -7,6 +7,7 @@ function run() {
         uiElementsEnabled: false,
         processCount: 0,
         windowCount: 0,
+        ownerContainerCount: 0,
         usernameCount: 0,
         secureCount: 0,
         modifySettingsCount: 0,
@@ -60,22 +61,30 @@ function run() {
             return value.exists() ? value.value() : null;
         }
 
-        function inspect(window) {
+        function inspect(window, discoveryBudget = null) {
             const nodes = [];
             const pending = [window];
+            const withinDeadline = () => discoveryBudget === null || Date.now() < discoveryBudget.deadline;
             while (pending.length > 0) {
+                if (!withinDeadline() || (discoveryBudget !== null && discoveryBudget.remaining === 0)) { break; }
                 if (nodes.length >= 256) { throw new Error(); }
+                if (discoveryBudget !== null) { discoveryBudget.remaining -= 1; }
                 const element = pending.shift();
                 nodes.push({element, role: attribute(element, "AXRole"), subrole: attribute(element, "AXSubrole")});
-                pending.push(...element.uiElements());
+                if (withinDeadline()) { pending.push(...element.uiElements()); }
             }
-            const text = nodes.filter(node => node.role === "AXStaticText").flatMap(node =>
-                ["AXValue", "AXTitle", "AXDescription"].map(name => attribute(node.element, name))
-                    .filter(value => typeof value === "string")
-            ).join(" ").replace(/\s+/g, " ");
+            const textValues = [];
+            for (const node of nodes.filter(node => node.role === "AXStaticText")) {
+                for (const name of ["AXValue", "AXTitle", "AXDescription"]) {
+                    if (!withinDeadline()) { break; }
+                    const value = attribute(node.element, name);
+                    if (typeof value === "string") { textValues.push(value); }
+                }
+            }
+            const text = textValues.join(" ").replace(/\s+/g, " ");
             const username = nodes.filter(node => node.role === "AXTextField" && node.subrole !== "AXSecureTextField");
             const secure = nodes.filter(node => node.role === "AXSecureTextField" || node.subrole === "AXSecureTextField");
-            const modify = nodes.filter(node => node.role === "AXButton"
+            const modify = nodes.filter(node => node.role === "AXButton" && withinDeadline()
                 && (attribute(node.element, "AXTitle") === "Modify Settings"
                     || attribute(node.element, "AXDescription") === "Modify Settings"));
             const summary = {
@@ -85,13 +94,52 @@ function run() {
                 secureCount: secure.length,
                 modifySettingsCount: modify.length
             };
-            const form = summary.recognizedHeading && summary.recognizedText
+            const form = discoveryBudget === null && summary.recognizedHeading && summary.recognizedText
                 && username.length === 1 && secure.length === 1 && modify.length === 1
                 ? {window, username: username[0].element, secure: secure[0].element, modify: modify[0].element} : null;
             return {form, diagnostics: summary};
         }
 
-        function inspectFrontmost() {
+        function inspectContainers(containers, budget) {
+            let summary = {usernameCount: 0, secureCount: 0, modifySettingsCount: 0,
+                recognizedHeading: false, recognizedText: false};
+            let bestScore = -1;
+            for (const container of containers.slice(0, 256)) {
+                if (budget.remaining === 0 || Date.now() >= budget.deadline) { break; }
+                try {
+                    const observed = inspect(container, budget).diagnostics;
+                    const score = 8 * (Number(observed.recognizedHeading) + Number(observed.recognizedText))
+                        + Number(observed.usernameCount === 1) + Number(observed.secureCount === 1)
+                        + Number(observed.modifySettingsCount === 1);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        summary = observed;
+                    }
+                } catch (_) {
+                    // A disappearing discovery tree must not abort authorization.
+                }
+            }
+            return summary;
+        }
+
+        function inspectOwnerRoots(process, budget) {
+            const summary = {ownerContainerCount: 0, usernameCount: 0, secureCount: 0,
+                modifySettingsCount: 0, recognizedHeading: false, recognizedText: false};
+            try {
+                const containers = process.uiElements();
+                summary.ownerContainerCount = Math.min(containers.length, 256);
+                if (summary.ownerContainerCount !== diagnostics.ownerContainerCount) {
+                    diagnostics.ownerContainerCount = summary.ownerContainerCount;
+                    publish();
+                }
+                Object.assign(summary, inspectContainers(containers, budget));
+            } catch (_) {
+                // Windowless discovery cannot authorize credential entry.
+            }
+            return summary;
+        }
+
+        function inspectFrontmost(budget) {
             const summary = {
                 frontmostProcessCount: 0,
                 frontmostContainerCount: 0,
@@ -112,27 +160,20 @@ function run() {
                 summary.frontmostIsLocalAuthentication = identifier === "com.apple.LocalAuthenticationRemoteService";
                 const containers = processes[0].uiElements();
                 summary.frontmostContainerCount = Math.min(containers.length, 256);
-                let bestScore = -1;
-                for (const container of containers.slice(0, 256)) {
-                    try {
-                        const observed = inspect(container).diagnostics;
-                        const score = 8 * (Number(observed.recognizedHeading) + Number(observed.recognizedText))
-                            + Number(observed.usernameCount === 1) + Number(observed.secureCount === 1)
-                            + Number(observed.modifySettingsCount === 1);
-                        if (score > bestScore) {
-                            bestScore = score;
-                            Object.assign(summary, {
-                                frontmostUsernameCount: observed.usernameCount,
-                                frontmostSecureCount: observed.secureCount,
-                                frontmostModifySettingsCount: observed.modifySettingsCount,
-                                frontmostRecognizedHeading: observed.recognizedHeading,
-                                frontmostRecognizedText: observed.recognizedText
-                            });
-                        }
-                    } catch (_) {
-                        // A disappearing or oversized foreground tree must not abort authorization.
-                    }
+                const basicFields = ["frontmostProcessCount", "frontmostContainerCount",
+                    "frontmostIsSystemSettings", "frontmostIsLocalAuthentication"];
+                if (basicFields.some(key => summary[key] !== diagnostics[key])) {
+                    Object.assign(diagnostics, summary);
+                    publish();
                 }
+                const observed = inspectContainers(containers, budget);
+                Object.assign(summary, {
+                    frontmostUsernameCount: observed.usernameCount,
+                    frontmostSecureCount: observed.secureCount,
+                    frontmostModifySettingsCount: observed.modifySettingsCount,
+                    frontmostRecognizedHeading: observed.recognizedHeading,
+                    frontmostRecognizedText: observed.recognizedText
+                });
             } catch (_) {
                 // Foreground discovery is read-only and independent of the validated form.
             }
@@ -150,7 +191,7 @@ function run() {
             diagnostics.processCount = Math.min(processes.length, 256);
             if (processes.length === 0) {
                 stage = "owner";
-                Object.assign(diagnostics, {windowCount: 0, usernameCount: 0, secureCount: 0,
+                Object.assign(diagnostics, {windowCount: 0, ownerContainerCount: 0, usernameCount: 0, secureCount: 0,
                     modifySettingsCount: 0, recognizedHeading: false, recognizedText: false});
             }
             publish();
@@ -161,14 +202,16 @@ function run() {
                 diagnostics.windowCount = Math.min(windows.length, 256);
                 if (windows.length === 0) {
                     stage = "form";
-                    Object.assign(diagnostics, {usernameCount: 0, secureCount: 0,
-                        modifySettingsCount: 0, recognizedHeading: false, recognizedText: false});
-                    Object.assign(diagnostics, inspectFrontmost());
+                    const budget = {remaining: 128, deadline: Date.now() + 3000};
+                    Object.assign(diagnostics, inspectOwnerRoots(processes[0], budget));
+                    Object.assign(diagnostics, inspectFrontmost(budget));
+                } else {
+                    diagnostics.ownerContainerCount = 0;
                 }
                 publish();
                 if (windows.length > 256) { return receipt(false); }
                 if (windows.length > 0 && hydrationDeadline === null) { hydrationDeadline = Date.now() + 10000; }
-                const inspected = windows.map(inspect);
+                const inspected = windows.map(window => inspect(window));
                 const matches = inspected.filter(value => value.form !== null);
                 if (matches.length > 1) { return receipt(false); }
                 const selected = matches[0]

@@ -55,7 +55,7 @@ class NativeAuthorizationTests(unittest.TestCase):
             "uiElementsEnabled": True, "processCount": 1, "windowCount": 1,
             "usernameCount": 1, "secureCount": 1, "modifySettingsCount": 1,
             "recognizedHeading": True, "recognizedText": True,
-            "frontmostProcessCount": 0, "frontmostContainerCount": 0, "frontmostUsernameCount": 0,
+            "ownerContainerCount": 0, "frontmostProcessCount": 0, "frontmostContainerCount": 0, "frontmostUsernameCount": 0,
             "frontmostSecureCount": 0, "frontmostModifySettingsCount": 0,
             "frontmostIsSystemSettings": False, "frontmostIsLocalAuthentication": False,
             "frontmostRecognizedHeading": False, "frontmostRecognizedText": False,

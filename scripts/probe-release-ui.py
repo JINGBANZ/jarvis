@@ -19,7 +19,7 @@ AUTHORIZATION_STAGES = {
 }
 AUTHORIZATION_COUNTS = {"processCount", "windowCount", "usernameCount", "secureCount", "modifySettingsCount"}
 AUTHORIZATION_FLAGS = {"uiElementsEnabled", "recognizedHeading", "recognizedText"}
-DISCOVERY_COUNTS = {"frontmostProcessCount", "frontmostContainerCount", "frontmostUsernameCount",
+DISCOVERY_COUNTS = {"ownerContainerCount", "frontmostProcessCount", "frontmostContainerCount", "frontmostUsernameCount",
                     "frontmostSecureCount", "frontmostModifySettingsCount"}
 DISCOVERY_FLAGS = {"frontmostIsSystemSettings", "frontmostIsLocalAuthentication",
                    "frontmostRecognizedHeading", "frontmostRecognizedText"}
