@@ -139,10 +139,11 @@ upgrade checks. This runner is a hosted acceptance boundary, separate from the s
 command above.
 
 [`ReleaseAudioDevices`](../Tests/ReleaseReadiness/ReleaseAudioDevices.swift) selects BlackHole 16-channel
-input for silent microphone frames and BlackHole 2-channel output for system playback, verifies the
-selected defaults, and restores them at teardown. The external runner plays a fixed synthetic question
-generated with the built-in speech tool. Audio stays owner-only under the run's workspace-local
-`.jarvis/` directory. The app receives it through its ordinary system-audio capture path.
+input for silent microphone frames, preserves the hosted Mac's existing output, verifies those
+defaults, and restores them at teardown. The existing output keeps system playback working under
+hosted UI automation. The external runner plays a fixed synthetic question generated with the
+built-in speech tool. Audio stays owner-only under the run's workspace-local `.jarvis/` directory.
+The app receives it through its ordinary system-audio capture path.
 
 [`ReleaseReadinessTests+Journey.swift`](../Tests/ReleaseReadiness/ReleaseReadinessTests+Journey.swift)
 owns the basic working-app contract: all five bundled skills, native permissions,
@@ -165,8 +166,10 @@ runner. Permission-form automation uses a temporary owned administrator account 
 The setup matrix requires Apple silicon on macOS 15 and 26, and Intel on macOS 15. Intel macOS 26
 retains ordinary source-Gate coverage; installed-app readiness has no Intel macOS 26 coverage. The
 product minimum is macOS 15. The setup-feasibility workflow uses a checksum-pinned public signed
-release to exercise the runner. It is not the production premerge gate: required fresh candidate
-acceptance and exact-artifact promotion are not yet wired into the source and release workflows.
+release to exercise the runner; its receipts cannot authorize release publication. The
+[`release-ready.yml`](../.github/workflows/release-ready.yml) worker owns required fresh-candidate
+and retained-profile upgrade validation before merge, and
+[`release.yml`](../.github/workflows/release.yml) promotes its accepted artifacts after merge.
 
 ## Evaluation suites
 

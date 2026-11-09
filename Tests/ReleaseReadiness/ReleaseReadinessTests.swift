@@ -64,10 +64,13 @@ final class ReleaseReadinessTests: XCTestCase {
                 reachedReady = true
                 completionPath = "relaunch-automatic"
             case .consent(let permissions, let dialog):
+                attachEvidence(name: "permission-consent-selected")
                 acceptedConsents.formUnion(permissions)
                 if permissions.contains("screen"), dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
                     let previousPID = try candidateProcessID()
+                    attachEvidence(name: "permission-settings-click")
                     dialog.buttons["Open System Settings"].click()
+                    attachEvidence(name: "permission-settings-clicked")
                     if try grantScreenRecordingInSettings() {
                         app = try waitForReplacement(of: previousPID)
                         welcome = app.windows["Welcome to Jarvis"]

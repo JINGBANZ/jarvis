@@ -169,10 +169,11 @@ extension ReleaseReadinessTests {
         let player = Process()
         player.executableURL = URL(fileURLWithPath: try XCTUnwrap(environment["JARVIS_READINESS_PLAYER"]))
         player.arguments = [try XCTUnwrap(environment["JARVIS_READINESS_SPEECH_FILE"])]
+        player.environment = [:]
         player.standardOutput = FileHandle.nullDevice
         player.standardError = FileHandle.nullDevice
         defer { if player.isRunning { player.terminate() } }
-        try player.run() // ghost-mode-allowed: external runner plays the fixed fixture through the selected virtual output
+        try player.run() // ghost-mode-allowed: external runner plays the fixed fixture through the hosted system output
         try waitUntil("The fixed question must finish playback", timeout: 30) { !player.isRunning }
         XCTAssertEqual(player.terminationReason, .exit)
         XCTAssertEqual(player.terminationStatus, 0, "The system player must finish successfully")
