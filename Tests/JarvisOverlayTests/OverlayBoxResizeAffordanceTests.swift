@@ -26,10 +26,11 @@ import AppKit
     private func withHostedView(_ body: (OverlayBoxResizeAffordanceView) -> Void) {
         let host = NSPanel(contentRect: bounds, styleMask: [.nonactivatingPanel, .borderless],
                            backing: .buffered, defer: false)
+        host.isReleasedWhenClosed = false
+        defer { host.close() }
         let view = OverlayBoxResizeAffordanceView(frame: bounds)
         host.contentView?.addSubview(view)
         body(view)
-        withExtendedLifetime(host) {}
     }
 
     // MARK: - Zones

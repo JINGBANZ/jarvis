@@ -466,7 +466,19 @@ class Supervisor:
                 else:
                     if not self.descendant(pid):
                         raise Refused('Caller is outside the admitted command chain')
-                    if operation == 'build-guard':
+                    if operation == 'register-test-host':
+                        if not self.admitted or self.failure or self.interruption:
+                            raise Refused('Test host cannot start outside an active admitted command')
+                        host = birth(parent)
+                        if any(x['pid'] == host['pid'] and x['start'] == host['start'] for x in self.clients):
+                            raise Refused('Test host already registered')
+                        host['scope'] = 'command'
+                        host['role'] = 'test-host'
+                        self.clients.append(host)
+                        lifecycle_request = True
+                        self.record_clients()
+                        result = {}
+                    elif operation == 'build-guard':
                         root_build = self.entry == 'build-app.sh' and parent == self.root['pid'] and same(self.root)
                         if request.get('launch') and not root_build:
                             raise Refused('Nested build-app.sh --run is unsupported; use a tracked debug harness. Nested builds without --run are supported.')
@@ -624,6 +636,8 @@ class Supervisor:
             if time.monotonic() >= deadline:
                 break
         command.wait(timeout=2)
+        if self.command_group_exists() or any(same(x) for x in self.clients):
+            raise Refused('Cancellation could not prove every owned process exited; journal remains unfinished')
 
     def record_clients(self):
         self.lease.write(self.lease.state['phase'], owned_processes=self.clients,
@@ -649,20 +663,22 @@ class Supervisor:
     def wait_clients(self, stop, scope=None):
         if self.failure:
             raise Refused(self.failure)
-        clients = [x for x in self.clients if scope is None or x['scope'] == scope]
+        def clients():
+            return [x for x in self.clients if scope is None or x['scope'] == scope]
         deadline = time.monotonic() + EXIT_SECONDS
         if stop:
-            for identity in clients:
-                if same(identity):
-                    os.kill(identity['pid'], signal.SIGTERM)
-        while any(same(x) for x in clients):
+            for identity in clients():
+                signal_owned(identity, signal.SIGTERM)
+        while any(same(x) for x in clients()):
             if time.monotonic() >= deadline:
-                for identity in clients:
-                    if same(identity):
-                        os.kill(identity['pid'], signal.SIGKILL)
+                exit_deadline = time.monotonic() + 2
+                while any(same(x) for x in clients()) and time.monotonic() < exit_deadline:
+                    for identity in clients():
+                        signal_owned(identity, signal.SIGKILL)
+                    self.service()
                 self.failure = 'App/helper exit deadline; journal remains unfinished'
                 raise Refused(self.failure)
-            time.sleep(.05)
+            self.service()
         if self.pending_launch or any(scope is None or x['scope'] == scope for x in self.pending_children.values()):
             self.failure = 'Launch never registered; lifecycle is uncertain'
             raise Refused(self.failure)
@@ -858,8 +874,8 @@ def main():
     if operation == 'build-guard':
         client(operation, launch='--run' in arguments)
         return 0
-    if operation == 'admit':
-        client('admit')
+    if operation in ('admit', 'register-test-host'):
+        client(operation)
         return 0
     if operation == 'register-app':
         client('register-app', launch=os.environ.get('JARVIS_TEST_APP_LAUNCH'))

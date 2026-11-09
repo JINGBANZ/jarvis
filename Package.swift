@@ -25,6 +25,8 @@ let package = Package(
         // The ordinary spawn seam is shared by production OS adapters and executable composition.
         .target(name: "JarvisProcess"),
         .target(name: "JarvisTestProcesses", dependencies: ["JarvisProcess"], path: "Tests/Support/ProcessOwnership"),
+        .target(name: "JarvisTestDisplay", path: "Tests/Support/TestDisplay"),
+        .target(name: "JarvisTestHost", path: "Tests/Support/TestHost"),
         .target(name: "JarvisScenarioHarness", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"], path: "Tests/Support/ScenarioHarness", resources: [.copy("Resources/test-providers.json")], swiftSettings: liveE2ESettings),
         .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore", "JarvisProcess"]),
         .target(name: "JarvisEvaluation", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"]),
@@ -41,6 +43,7 @@ let package = Package(
             dependencies: [
                 "JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisOverlay",
                 "JarvisScreenCapture", "JarvisProcess", "JarvisTestProcesses", "JarvisScenarioHarness", "CJarvisAEC",
+                "JarvisTestDisplay",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             // Prebuilt by scripts/build-vad.sh. `.process` would flatten the .mlmodelc directory.
@@ -76,7 +79,7 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisOverlayTests",
-            dependencies: ["JarvisOverlay"]
+            dependencies: ["JarvisOverlay", "JarvisTestDisplay"]
         ),
         .testTarget(
             name: "JarvisScreenCaptureTests",
@@ -96,3 +99,11 @@ let package = Package(
         ),
     ]
 )
+
+// Swift Build creates a separate test product per target; each must register before discovery.
+for target in package.targets where target.type == .test {
+    target.dependencies.append("JarvisTestHost")
+    target.linkerSettings = (target.linkerSettings ?? []) + [
+        .unsafeFlags(["-Xlinker", "-u", "-Xlinker", "_jarvis_test_host_link"]),
+    ]
+}

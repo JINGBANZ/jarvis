@@ -232,7 +232,8 @@ import Testing
     }
 
     @MainActor @Test func hintsCarryAMarkerAndACollapsedBoxRetainsTheDetail() throws {
-        let box = OverlayBoxPanel()
+        let (box, closeBox) = makeTestOverlayBox()
+        defer { closeBox() }
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown: "Use a window.\n\n```python\nleft = 0\n```"))
@@ -259,7 +260,8 @@ import Testing
         "```mermaid\ngraph LR\nA[Client] --> B[Service]\n```"
     ])
     func detailsArrivingWhileCollapsedAreAvailableAfterExpansion(markdown: String) throws {
-        let box = OverlayBoxPanel()
+        let (box, closeBox) = makeTestOverlayBox()
+        defer { closeBox() }
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         box.clickCollapseButton()
@@ -276,7 +278,8 @@ import Testing
     }
 
     @MainActor @Test func anInactiveSessionRejectsDetailEvenDuringAPreview() throws {
-        let box = OverlayBoxPanel()
+        let (box, closeBox) = makeTestOverlayBox()
+        defer { closeBox() }
         box.showAppearancePreview(true)
         defer { box.showAppearancePreview(false) }
         let detail = try #require(ReplyDetail(markdown: "A late reply."))
@@ -286,7 +289,8 @@ import Testing
     }
 
     @MainActor @Test func aDetailWithNothingLeftToDrawDoesNotTakeTheBox() throws {
-        let box = OverlayBoxPanel()
+        let (box, closeBox) = makeTestOverlayBox()
+        defer { closeBox() }
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let good = try #require(ReplyDetail(markdown: "Here.\n\n```python\nleft = 0\n```"))
@@ -298,7 +302,8 @@ import Testing
     }
 
     @MainActor @Test func clearAndStopEmptyBothBoxes() throws {
-        let box = OverlayBoxPanel()
+        let (box, closeBox) = makeTestOverlayBox()
+        defer { closeBox() }
         box.setSessionLive(true)
         let detail = try #require(ReplyDetail(markdown: "A window is the current range."))
         _ = box.deliver("Move the left edge.", detail: detail)

@@ -17,7 +17,8 @@ import Testing
 
     @Test func streamedDiagramStaysConnectedAndReadableThroughPanelResizes() throws {
         let previous = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 360, height: 600))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 360, height: 600))
+        defer { closePanel() }
         let window = try #require(NSApp.windows.first { !previous.contains(ObjectIdentifier($0)) })
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }

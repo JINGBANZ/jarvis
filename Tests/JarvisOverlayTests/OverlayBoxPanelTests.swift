@@ -10,19 +10,22 @@ import JarvisCore
 
     @MainActor @Test
     func excludedFromScreenCaptureAtInit() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         #expect(panel.currentSharingType == .none)
     }
 
     @MainActor @Test
     func staysHiddenUntilASessionStarts() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         #expect(!panel.isPanelVisible, "the box must stay hidden until a session starts")
     }
 
     @MainActor @Test
     func sessionStartShowsTheBoxAndReassertsCaptureExclusion() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         let before = panel.captureExclusionReassertCount
         panel.setSessionLive(true)
         #expect(panel.isPanelVisible, "Start must put the box on screen")
@@ -32,14 +35,16 @@ import JarvisCore
 
     @MainActor @Test
     func sessionStopHidesTheBox() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.setSessionLive(false)
         #expect(!panel.isPanelVisible, "Stop must take the box off screen")
     }
 
     @MainActor @Test
     func aClosedPreviewLeavesTheBoxToAppearOnStart() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         panel.showAppearancePreview(true)
         panel.showAppearancePreview(false)
         #expect(!panel.isPanelVisible, "still nothing to show: no session is running")
@@ -49,7 +54,8 @@ import JarvisCore
 
     @MainActor @Test
     func aPreviewDoesNotOpenWhileASessionIsRunning() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
 
         panel.showAppearancePreview(true)
 
@@ -59,7 +65,8 @@ import JarvisCore
 
     @MainActor @Test
     func stoppingWithTheOverlayTabStillOpenBringsTheSampleUp() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showAppearancePreview(true)
         #expect(!panel.currentText.contains("Ask about the time complexity"))
 
@@ -72,14 +79,16 @@ import JarvisCore
 
     @MainActor @Test
     func stoppingWithNoPreviewRequestedJustHidesTheBox() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.setSessionLive(false)
         #expect(!panel.isPanelVisible)
     }
 
     @MainActor @Test
     func startDoesNotInheritACollapseSnapshotFromAnOpenPreview() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.clickCollapseButton()
         panel.setSessionLive(false)
 
@@ -93,7 +102,8 @@ import JarvisCore
 
     @MainActor @Test
     func isResizableAndHonorsAResize() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         #expect(panel.isResizable, "the box must be resizable by dragging its edges")
         panel.setContentSize(NSSize(width: 500, height: 400))
         #expect(panel.currentContentSize.width == 500)
@@ -102,7 +112,8 @@ import JarvisCore
 
     @MainActor @Test
     func startsAtTheDefaultSizeUntilOneIsRestored() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         // Explicit Double(): #expect fails an implicit CGFloat/Double comparison even for equal
         // values.
         #expect(Double(panel.currentContentSize.width) == Defaults.Overlay.Box.width)
@@ -111,7 +122,8 @@ import JarvisCore
 
     @MainActor @Test
     func minimumSizeMatchesThePersistedRangeFloor() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         #expect(Double(panel.minimumContentSize.width)
             == Defaults.Overlay.Box.widthRange.lowerBound)
         #expect(Double(panel.minimumContentSize.height)
@@ -120,20 +132,23 @@ import JarvisCore
 
     @MainActor @Test
     func isConstructedAtASavedSize() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 900, height: 700))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 900, height: 700))
+        defer { closePanel() }
         #expect(panel.currentContentSize.width == 900)
         #expect(panel.currentContentSize.height == 700)
     }
 
     @MainActor @Test
     func usesTheRegisteredOpacityBeforeAnySetterRuns() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         #expect(abs(panel.currentBoxOpacity - CGFloat(Defaults.Overlay.Box.opacity)) < 0.001)
     }
 
     @MainActor @Test
     func reportsTheNewSizeWhenAResizeDragFinishes() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         var reported: [(Double, Double)] = []
         panel.onSizeChanged = { reported.append(($0, $1)) }
 
@@ -147,7 +162,8 @@ import JarvisCore
 
     @MainActor @Test
     func aProgrammaticResizeDoesNotReportAUserResize() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         var reportCount = 0
         panel.onSizeChanged = { _, _ in reportCount += 1 }
 
@@ -159,7 +175,8 @@ import JarvisCore
 
     @MainActor @Test
     func usesAutoHidingOverlayScroller() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         #expect(panel.currentScrollerStyle == .overlay,
                 "the box must not inherit a persistent legacy scroller from the release SDK")
         #expect(panel.scrollersAutohide,
@@ -168,7 +185,8 @@ import JarvisCore
 
     @MainActor @Test
     func appearanceSettersChangeOpacityAndFontSize() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         panel.setOpacity(0.5)
         panel.setFontSize(22)
         #expect(abs(panel.currentBoxOpacity - 0.5) < 0.001)
@@ -177,7 +195,8 @@ import JarvisCore
 
     @MainActor @Test
     func previewShowsSampleThenRestoresPriorState() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         let before = panel.captureExclusionReassertCount
         panel.showAppearancePreview(true)
         #expect(panel.isPanelVisible, "preview must show the box so size/opacity are visible")
@@ -192,7 +211,8 @@ import JarvisCore
 
     @MainActor @Test
     func previewKeepsBoxShownIfItWasAlreadyOpen() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showAppearancePreview(true)
         panel.showAppearancePreview(false)
         #expect(panel.isPanelVisible, "a box open before preview must stay open after it closes")
@@ -200,7 +220,8 @@ import JarvisCore
 
     @MainActor @Test
     func clearEmptiesTheLog() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         panel.render("kept for now")
         // No wait: append runs on a later main-actor hop, and clear must empty regardless.
         panel.clear()
@@ -212,7 +233,8 @@ import JarvisCore
 
     @MainActor @Test
     func theHeaderIsSizedFromTheBox() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 140))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 140))
+        defer { closePanel() }
         #expect(panel.currentHeaderHeight == 26)
         panel.setContentSize(NSSize(width: 520, height: 900))
         #expect(panel.currentHeaderHeight == 44, "resizing the box must resize its header")
@@ -220,7 +242,8 @@ import JarvisCore
 
     @MainActor @Test
     func collapsingLeavesOnlyTheHeaderOnScreen() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.clickCollapseButton()
         #expect(panel.isCollapsed)
         #expect(panel.currentContentSize.height == panel.currentHeaderHeight)
@@ -231,7 +254,8 @@ import JarvisCore
 
     @MainActor @Test
     func collapseShortcutTogglesLikeTheHeaderButton() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 700))
+        defer { closePanel() }
         panel.setSessionLive(true)
         panel.toggleCollapse()
         #expect(panel.isCollapsed)
@@ -243,12 +267,14 @@ import JarvisCore
 
     @MainActor @Test
     func collapseShortcutIgnoresAStoppedBoxIncludingItsAppearancePreview() {
-        let stopped = OverlayBoxPanel()
+        let (stopped, closeStopped) = makeTestOverlayBox()
+        defer { closeStopped() }
         stopped.toggleCollapse()
         #expect(!stopped.isCollapsed, "the shortcut must not reshape a box that isn't on screen")
 
         // The sample replaces the log only while stopped; the preview owns its collapse snapshot.
-        let previewing = OverlayBoxPanel()
+        let (previewing, closePreviewing) = makeTestOverlayBox()
+        defer { closePreviewing() }
         previewing.showAppearancePreview(true)
         previewing.toggleCollapse()
         #expect(!previewing.isCollapsed)
@@ -257,7 +283,8 @@ import JarvisCore
 
     @MainActor @Test
     func expandingRestoresTheHeightTheUserDraggedTo() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 700))
+        defer { closePanel() }
         panel.clickCollapseButton()
         panel.clickCollapseButton()
         #expect(!panel.isCollapsed)
@@ -267,7 +294,8 @@ import JarvisCore
 
     @MainActor @Test
     func collapsingDoesNotReportAUserResize() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 700))
+        defer { closePanel() }
         var reportCount = 0
         panel.onSizeChanged = { _, _ in reportCount += 1 }
 
@@ -279,7 +307,8 @@ import JarvisCore
 
     @MainActor @Test
     func aCollapsedBoxCannotBeDraggedTaller() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         panel.clickCollapseButton()
         #expect(panel.minimumContentSize.height == panel.currentHeaderHeight)
         #expect(panel.maximumContentSize.height == panel.currentHeaderHeight)
@@ -293,7 +322,8 @@ import JarvisCore
 
     @MainActor @Test
     func aNewSessionOpensACollapsedBox() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.clickCollapseButton()
         panel.setSessionLive(false)
         panel.setSessionLive(true)
@@ -303,7 +333,8 @@ import JarvisCore
 
     @MainActor @Test
     func aWidthDragWhileCollapsedKeepsTheExpandedHeight() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 700))
+        defer { closePanel() }
         var reported: [(Double, Double)] = []
         panel.onSizeChanged = { reported.append(($0, $1)) }
 
@@ -320,7 +351,8 @@ import JarvisCore
     /// it keeps the bottom-left. Stop orders the box out.
     @MainActor @Test
     func collapsingRollsTheBoxDownFromAFixedTopEdge() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         let before = panel.currentFrame
 
         panel.clickCollapseButton()
@@ -335,7 +367,8 @@ import JarvisCore
     /// exclusion.
     @MainActor @Test
     func theHeaderButtonsCarryNoTooltipButKeepTheirLabels() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         #expect(panel.headerButtonTooltips.allSatisfy { $0 == nil })
         #expect(panel.headerButtonLabels == ["Collapse", "Clear history"],
                 "dropping the tooltips must not cost the buttons their VoiceOver labels")
@@ -343,7 +376,8 @@ import JarvisCore
 
     @MainActor @Test
     func theSettingsPreviewOffersNoClearButton() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         panel.showAppearancePreview(true)
         #expect(!panel.isClearButtonVisible)
         panel.showAppearancePreview(false)
@@ -352,7 +386,8 @@ import JarvisCore
 
     @MainActor @Test
     func theSettingsPreviewRollsACollapsedBoxOpenAndPutsItBack() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.clickCollapseButton()
         panel.setSessionLive(false)   // the preview only opens while stopped
 
@@ -397,7 +432,8 @@ import JarvisCore
 
     @MainActor @Test
     func theHeaderNamesManualModeForTheWholeSession() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         #expect(panel.currentTitle == "Jarvis")
         panel.showCoachingMode(.manual, notice: nil)
         #expect(panel.currentTitle == "Jarvis · Manual")
@@ -407,7 +443,8 @@ import JarvisCore
 
     @MainActor @Test
     func stoppingResetsTheHeaderTitle() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
         panel.setSessionLive(false)
         #expect(panel.currentTitle == "Jarvis")
@@ -425,7 +462,8 @@ import JarvisCore
 
     @MainActor @Test
     func theTranscriptColumnWidensTheBoxToTheRightAndBack() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         panel.setSessionLive(true)
         let before = panel.currentFrame
         #expect(!panel.isTranscriptColumnShown)
@@ -443,7 +481,8 @@ import JarvisCore
 
     @MainActor @Test
     func theColumnAndTheHeaderAboveItShareTheBoxFill() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         panel.setSessionLive(true)
         panel.setTranscriptPaneVisible(true)
         panel.setOpacity(0.7)
@@ -462,7 +501,8 @@ import JarvisCore
 
     @MainActor @Test
     func theSavedWidthLeavesTheTranscriptColumnOut() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         var saved: (Double, Double)?
         panel.onSizeChanged = { saved = ($0, $1) }
         panel.setTranscriptPaneVisible(true)
@@ -472,7 +512,8 @@ import JarvisCore
 
     @MainActor @Test
     func theHeaderButtonTogglesTheColumnAndReportsIt() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         panel.setSessionLive(true)
         var reported: [Bool] = []
         panel.onTranscriptPaneToggled = { reported.append($0) }
@@ -484,7 +525,8 @@ import JarvisCore
 
     @MainActor @Test
     func transcriptRowsNameTheSpeakerAndDimHandledLines() throws {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         panel.setSessionLive(true)
         panel.setTranscriptPaneVisible(true)
         panel.showTranscript(TranscriptPaneContent(rows: [
@@ -504,7 +546,8 @@ import JarvisCore
 
     @MainActor @Test
     func theTranscriptKeepsFollowingSpeechAcrossCollapseAndExpand() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         panel.setSessionLive(true)
         panel.setTranscriptPaneVisible(true)
         panel.showTranscript(transcriptLines(60))
@@ -521,7 +564,8 @@ import JarvisCore
 
     @MainActor @Test
     func scrollingBackStaysPutAcrossCollapseAndExpand() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         panel.setSessionLive(true)
         panel.setTranscriptPaneVisible(true)
         panel.showTranscript(transcriptLines(60))
@@ -537,7 +581,8 @@ import JarvisCore
 
     @MainActor @Test
     func stoppingClearsTheTranscriptColumn() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         panel.setSessionLive(true)
         panel.setTranscriptPaneVisible(true)
         panel.showTranscript(TranscriptPaneContent(rows: [
@@ -549,7 +594,8 @@ import JarvisCore
 
     @MainActor @Test
     func aCollapsedBoxHidesTheTranscriptColumn() {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         panel.setSessionLive(true)
         panel.setTranscriptPaneVisible(true)
         panel.toggleCollapse()
@@ -561,10 +607,10 @@ import JarvisCore
 
 // MARK: - Main-actor checks (awaited from nonisolated tests so render's main-actor hop can run)
 
-@MainActor private func liveBox() -> OverlayBoxPanel {
-    let panel = OverlayBoxPanel()
+@MainActor private func liveBox() -> TestOverlayBox {
+    let (panel, closePanel) = makeTestOverlayBox()
     panel.setSessionLive(true)
-    return panel
+    return (panel, closePanel)
 }
 
 @MainActor
@@ -579,7 +625,8 @@ private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async
 
 @MainActor
 private func checkReassertOnRenderWhileVisible() async {
-    let panel = liveBox()
+    let (panel, closePanel) = liveBox()
+    defer { closePanel() }
     let before = panel.captureExclusionReassertCount
     panel.render("A new response.")
     #expect(await waitUntil { panel.entryCount == 1 }, "the response should be logged")
@@ -589,7 +636,8 @@ private func checkReassertOnRenderWhileVisible() async {
 
 @MainActor
 private func checkAppendDuringPreview() async {
-    let panel = OverlayBoxPanel()
+    let (panel, closePanel) = makeTestOverlayBox()
+    defer { closePanel() }
     panel.showAppearancePreview(true)
     panel.render("Mid-preview response.")
     #expect(await waitUntil { panel.entryCount == 1 }, "the response is logged even during preview")
@@ -602,7 +650,8 @@ private func checkAppendDuringPreview() async {
 
 @MainActor
 private func checkClearButtonFollowsTheLog() async {
-    let panel = liveBox()
+    let (panel, closePanel) = liveBox()
+    defer { closePanel() }
     #expect(!panel.isClearButtonVisible, "an empty box offers nothing to erase")
     panel.render("A new response.")
     #expect(await waitUntil { panel.isClearButtonVisible }, "the first tip must reveal the clear button")
@@ -615,7 +664,8 @@ private func checkClearButtonFollowsTheLog() async {
 
 @MainActor
 private func checkPreviewClearLeavesTheLogAlone() async {
-    let panel = liveBox()
+    let (panel, closePanel) = liveBox()
+    defer { closePanel() }
     panel.render("A real tip.")
     #expect(await waitUntil { panel.entryCount == 1 }, "the tip should be logged")
     panel.setSessionLive(false)          // the preview only opens while stopped
@@ -630,7 +680,8 @@ private func checkPreviewClearLeavesTheLogAlone() async {
 
 @MainActor
 private func checkAppendsEntries() async {
-    let panel = OverlayBoxPanel()
+    let (panel, closePanel) = makeTestOverlayBox()
+    defer { closePanel() }
     panel.render("Ask about the time complexity.")
     panel.render("Mention the edge case.")
 
@@ -641,7 +692,8 @@ private func checkAppendsEntries() async {
 
 @MainActor
 private func checkDropsEmptyTips() async {
-    let panel = OverlayBoxPanel()
+    let (panel, closePanel) = makeTestOverlayBox()
+    defer { closePanel() }
     panel.render("")
     panel.render("     \n\t")
     try? await Task.sleep(nanoseconds: 200_000_000)   // lets an erroneous append run
@@ -649,7 +701,8 @@ private func checkDropsEmptyTips() async {
 }
 
 @MainActor private func checkSwitchNoticeExpires() async {
-    let panel = liveBox()
+    let (panel, closePanel) = liveBox()
+    defer { closePanel() }
     panel.coachingModeNoticeDuration = .milliseconds(20)
     panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
     #expect(panel.currentTitle == "Manual — press ⌥⌘J to send")
@@ -657,7 +710,8 @@ private func checkDropsEmptyTips() async {
 }
 
 @MainActor private func checkNewerNoticeOutlivesEarlierTimer() async {
-    let panel = liveBox()
+    let (panel, closePanel) = liveBox()
+    defer { closePanel() }
     // Each notice reads the duration when it is shown: the first expires long before the second.
     panel.coachingModeNoticeDuration = .milliseconds(20)
     panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")

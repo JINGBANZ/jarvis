@@ -8,7 +8,7 @@ import JarvisOverlay
 final class ShortcutReplacementHarness: OverlayRendering {
     private let keyboard: HotkeyController
     private let mouse: MouseHotkeyController
-    private let panel = OverlayBoxPanel()
+    private let panel = OverlayComposition.makeBox()
     private let turns = TurnTaskBox()
     private var driver: CoachDriver?
     private var delivered: [String] = []

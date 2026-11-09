@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """DISPLAY-FREE fixtures in copied checkouts; never runs the native display worker."""
 import importlib.util
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import signal
 import subprocess
 import sys
@@ -701,6 +703,126 @@ wait $!
 
     def test_outer_cancellation_forces_term_ignoring_app_after_grace(self):
         self.check_outer_cancellation(True)
+
+    def compile_test_host(self):
+        binary = self.repo / 'fixture-test-host-binary'
+        subprocess.run(['cc', '-Wall', '-Wextra', '-Werror',
+                        '-I', str(ROOT / 'Tests/Support/TestHost/include'),
+                        str(ROOT / 'Tests/Support/TestHost/TestHost.c'),
+                        str(ROOT / 'scripts/test-command-ownership/TestHostFixture.c'),
+                        '-o', str(binary)], check=True, env=BASE_ENV, timeout=30)
+        return binary
+
+    def test_native_test_host_refuses_missing_or_refused_ownership_before_main(self):
+        binary = self.compile_test_host()
+        marker = self.repo / 'fixture-main-entered'
+        for environment in (BASE_ENV, {**BASE_ENV, 'JARVIS_TEST_RUN_SOCKET': '/nonexistent.sock',
+                                       'JARVIS_TEST_RUN_TOKEN': 'fixture',
+                                       'JARVIS_TEST_PYTHON': sys.executable,
+                                       'JARVIS_TEST_SUPERVISOR': str(self.source)}):
+            result = subprocess.run([str(binary), str(marker)], env=environment,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 70, result.stderr)
+            self.assertFalse(marker.exists(), 'unowned host entered the test body')
+
+    def test_native_test_host_cannot_start_before_command_admission(self):
+        binary = self.compile_test_host()
+        marker = self.repo / 'fixture-main-entered'
+        self.prepare()
+        self.script(shlex.join([str(binary), str(marker)]) + '\n')
+        result = self.result(self.start())
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('Test host cannot start outside an active admitted command', result[1])
+        self.assertFalse(marker.exists())
+        self.assertNotEqual(self.state()['phase'], 'completed')
+
+    @contextmanager
+    def detached_test_host(self):
+        self.prepare()
+        self.compile_test_host()
+        self.source.write_text(self.source.read_text().replace('CANCEL_GRACE_SECONDS = 10', 'CANCEL_GRACE_SECONDS = 0.1'))
+        shutil.copy2(ROOT / 'scripts/lib/swift-test-flags.sh', self.repo / 'scripts/lib')
+        tools = self.repo / 'fixture-bin'
+        tools.mkdir()
+        (tools / 'xcode-select').write_text('#!/bin/sh\necho /fixture/Xcode\n')
+        (tools / 'xcode-select').chmod(0o700)
+        (tools / 'swift').write_text('#!' + sys.executable + '\n' + '''import pathlib, subprocess, sys
+host = subprocess.Popen([str(pathlib.Path('fixture-test-host-binary').resolve()), 'fixture-test-host'],
+                        start_new_session=True, stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+host.wait()
+''')
+        (tools / 'swift').chmod(0o700)
+        self.script('''python3 "$JARVIS_TEST_SUPERVISOR" admit
+export PATH="$PWD/fixture-bin:$PATH"
+source scripts/lib/swift-test-flags.sh
+run_swift_tests "$PWD/test.log"
+''')
+        owner = self.start()
+        try:
+            yield owner, self.repo / 'fixture-test-host'
+        finally:
+            try:
+                if owner.poll() is None:
+                    owner.send_signal(signal.SIGTERM)
+                owner.communicate(timeout=8)
+            finally:
+                hosts = [x for x in self.state()['owned_processes'] if x.get('role') == 'test-host']
+                for host in hosts:
+                    self.module.signal_owned(host, signal.SIGKILL)
+                deadline = time.monotonic() + 2
+                while any(self.module.same(host) for host in hosts) and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertFalse(any(self.module.same(host) for host in hosts),
+                                 'fixture cleanup left an exact registered test host alive')
+
+    def wait_for_test_host(self, owner, marker, timeout=3):
+        deadline = time.monotonic() + timeout
+        while not marker.exists():
+            if owner.poll() is not None:
+                self.fail(f'command exited before the test host started: {self.result(owner)}')
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        return self.module.birth(int(marker.read_text()))
+
+    def test_swift_test_cancellation_reaps_detached_test_host(self):
+        with self.detached_test_host() as (owner, marker):
+            host = self.wait_for_test_host(owner, marker)
+            unrelated = subprocess.Popen(['/bin/sleep', '30'])
+            try:
+                owner.send_signal(signal.SIGTERM)
+                result = self.result(owner)
+                self.assertEqual(result[0], 128 + signal.SIGTERM, result)
+                deadline = time.monotonic() + 2
+                while self.module.same(host) and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertFalse(self.module.same(host), 'detached SwiftPM test host survived command cancellation')
+                self.assertNotEqual(self.state()['phase'], 'completed')
+                registered = self.state()['owned_processes']
+                self.assertEqual([(x['pid'], x['start'], x.get('role')) for x in registered],
+                                 [(host['pid'], host['start'], 'test-host')])
+                self.assertIsNone(unrelated.poll(), 'cancellation signalled an unrelated process')
+            finally:
+                unrelated.terminate()
+                unrelated.wait(timeout=3)
+
+    def test_detached_test_host_cleanup_survives_malformed_marker(self):
+        with self.assertRaises(ValueError):
+            with self.detached_test_host() as (owner, marker):
+                host = self.wait_for_test_host(owner, marker)
+                marker.write_text('not-a-pid')
+                self.wait_for_test_host(owner, marker)
+        self.assertFalse(self.module.same(host))
+        self.assertIsNotNone(owner.poll())
+
+    def test_detached_test_host_cleanup_survives_missing_marker(self):
+        with self.assertRaises(AssertionError):
+            with self.detached_test_host() as (owner, marker):
+                host = self.wait_for_test_host(owner, marker)
+                marker.unlink()
+                self.wait_for_test_host(owner, marker, timeout=.1)
+        self.assertFalse(self.module.same(host))
+        self.assertIsNotNone(owner.poll())
 
     def test_signal_during_teardown_never_completes(self):
         self.prepare()

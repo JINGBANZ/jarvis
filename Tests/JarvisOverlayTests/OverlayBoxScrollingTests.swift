@@ -8,8 +8,8 @@ import Testing
 
     @MainActor @Test(arguments: [false, true], [false, true])
     func deliveredHintIsFullyVisibleAfterALongHistory(withDetail: Bool, scrolledUp: Bool) throws {
-        let (panel, text) = try makeBoxWithHistory(scrolledUp: scrolledUp)
-        defer { panel.setSessionLive(false) }
+        let (panel, text, closePanel) = try makeBoxWithHistory(scrolledUp: scrolledUp)
+        defer { closePanel() }
         let detail = withDetail ? ReplyDetail(markdown: "Record the window before moving its left edge.") : nil
 
         _ = panel.deliver(hint, detail: detail)
@@ -19,8 +19,8 @@ import Testing
 
     @MainActor @Test(arguments: [false, true], [false, true])
     func streamingHintStaysFullyVisibleAsItWraps(withDetail: Bool, scrolledUp: Bool) throws {
-        let (panel, text) = try makeBoxWithHistory(scrolledUp: scrolledUp)
-        defer { panel.setSessionLive(false) }
+        let (panel, text, closePanel) = try makeBoxWithHistory(scrolledUp: scrolledUp)
+        defer { closePanel() }
         let detail = withDetail ? "Record the window before moving its left edge." : nil
 
         for count in [8, 80, hint.count] {
@@ -35,8 +35,8 @@ import Testing
 
     @MainActor @Test(arguments: [false, true])
     func updatesBeforeADrawStillRevealTheNewestHint(streamed: Bool) throws {
-        let (panel, text) = try makeBoxWithHistory(scrolledUp: false, layoutBetweenHints: false)
-        defer { panel.setSessionLive(false) }
+        let (panel, text, closePanel) = try makeBoxWithHistory(scrolledUp: false, layoutBetweenHints: false)
+        defer { closePanel() }
 
         if streamed {
             panel.showReplyProgress(BrainReplyProgress(hint: hint, hintComplete: true, detailMarkdown: nil))
@@ -48,8 +48,8 @@ import Testing
 
     @MainActor @Test
     func aHintTallerThanTheViewportKeepsItsEndingVisibleOnDelivery() throws {
-        let (panel, text) = try makeBoxWithHistory(scrolledUp: false)
-        defer { panel.setSessionLive(false) }
+        let (panel, text, closePanel) = try makeBoxWithHistory(scrolledUp: false)
+        defer { closePanel() }
         panel.setContentSize(NSSize(width: 400, height: 220))
         let markdown = "Record the window before moving its left edge."
         panel.showReplyProgress(BrainReplyProgress(
@@ -64,9 +64,11 @@ import Testing
     }
 
     @MainActor private func makeBoxWithHistory(scrolledUp: Bool, layoutBetweenHints: Bool = true)
-        throws -> (OverlayBoxPanel, NSTextView) {
+        throws -> (OverlayBoxPanel, NSTextView, @MainActor () -> Void) {
         let existing = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 400, height: 360))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 400, height: 360))
+        var transferred = false
+        defer { if !transferred { closePanel() } }
         let window = try #require(NSApp.windows.first { !existing.contains(ObjectIdentifier($0)) })
         panel.setSessionLive(true)
         let scroll = try #require(window.contentView?.subviews.compactMap { $0 as? NSScrollView }.first)
@@ -81,7 +83,8 @@ import Testing
             text.scroll(.zero)
             #expect(text.visibleRect.minY == 0)
         }
-        return (panel, text)
+        transferred = true
+        return (panel, text, closePanel)
     }
 
     @MainActor private func expectVisible(_ hint: String, in text: NSTextView,

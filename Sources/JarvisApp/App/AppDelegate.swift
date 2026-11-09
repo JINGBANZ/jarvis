@@ -108,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                                     preferredCLI: cli, launcher: self.launcher)
         }
 
-        overlayBox = OverlayBoxPanel(contentSize: NSSize(
+        overlayBox = OverlayComposition.makeBox(contentSize: NSSize(
             width: appearance.boxWidth, height: appearance.boxHeight))
         overlayBox.setFontSize(appearance.boxFontSize)
         overlayBox.setOpacity(appearance.boxOpacity)
