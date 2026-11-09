@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import http.client
 import io
 import json
 import math
@@ -11,11 +12,13 @@ from pathlib import Path
 import platform
 import plistlib
 import pwd
+import ssl
 import stat
 import struct
 import subprocess
 import tarfile
 import time
+import urllib.error
 import urllib.request
 import wave
 
@@ -121,12 +124,40 @@ def remove_owned_receiver():
     return device is not None
 
 
+def transient_download_error(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in {408, 429} or 500 <= error.code <= 599
+    if isinstance(error, urllib.error.URLError):
+        error = error.reason
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return False
+    return isinstance(error, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+                              TimeoutError, http.client.IncompleteRead,
+                              http.client.RemoteDisconnected, ssl.SSLEOFError))
+
+
 def download(url, expected):
-    with urllib.request.urlopen(url, timeout=60) as source:
-        data = source.read(30_000_001)
-    if len(data) > 30_000_000 or hashlib.sha256(data).hexdigest() != expected:
-        raise ValueError("Pinned fixture archive checksum mismatch")
-    return data
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as source:
+                length = source.getheader("Content-Length")
+                if length is not None:
+                    if not length.isdecimal() or int(length) > 30_000_000:
+                        raise ValueError("Pinned fixture archive has invalid size metadata")
+                    length = int(length)
+                data = source.read(30_000_001)
+                if length is not None and len(data) < length:
+                    raise http.client.IncompleteRead(b"", length - len(data))
+        except (OSError, http.client.HTTPException) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+            if attempt == 2 or not transient_download_error(error):
+                raise RuntimeError("Pinned fixture dependency download failed") from None
+            time.sleep(attempt + 1)
+            continue
+        if len(data) > 30_000_000 or hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError("Pinned fixture archive checksum mismatch")
+        return data
 
 
 def install_roc():

@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-26, macos-15, macos-26-intel]
+        os: [macos-26, macos-15, macos-26-intel, macos-15-intel]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 18
     steps:
@@ -52,12 +52,14 @@ jobs:
           ditto "$fixture_mount/Jarvis.app" "$HOME/Applications/Jarvis.app"
           codesign --verify --strict --deep "$HOME/Applications/Jarvis.app"
           python3 - <<'PY'
-          import json, platform
+          import json, os, platform
           from pathlib import Path
           Path('.jarvis/release-ui-probe/fixture.json').write_text(json.dumps({
               'phase': 'setup-feasibility', 'version': '0.5.14',
               'sha256': 'eb2f8ebc0f78ff4d6b09773e9052652eae74ffcc9d4bebf885a8c62b9b38416c',
               'architecture': platform.machine(), 'macOS': platform.mac_ver()[0],
+              'runnerImage': os.environ.get('ImageOS'),
+              'runnerImageVersion': os.environ.get('ImageVersion'),
               'releaseCandidateProven': False,
           }, indent=2) + '\n')
           PY
@@ -123,6 +125,7 @@ jobs:
             .jarvis/release-ui-probe/*/ui-command.json
             .jarvis/release-ui-probe/*/ui-progress.json
             .jarvis/release-ui-probe/*/permission-state.json
+            .jarvis/release-ui-probe/*/permission-completion.json
             .jarvis/release-ui-probe/*/permission-initial.json
             .jarvis/release-ui-probe/*/permission-discovery.json
             .jarvis/release-ui-probe/*/permission-owner.json

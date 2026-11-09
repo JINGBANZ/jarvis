@@ -52,8 +52,8 @@ final class ReleaseReadinessTests: XCTestCase {
 
     func testPermissionOnboarding() throws {
         try prepareProfile(completed: false, placeholderCredential: true)
-        let app = try launchInstalledApp()
-        let welcome = app.windows["Welcome to Jarvis"]
+        var app = try launchInstalledApp()
+        var welcome = app.windows["Welcome to Jarvis"]
         let grant = welcome.buttons["Grant Access"]
         XCTAssertTrue(grant.waitForExistence(timeout: 20), "Stored-key precondition must expose ordinary permission onboarding")
         attachEvidence(app, name: "permissions-before-grants")
@@ -61,14 +61,25 @@ final class ReleaseReadinessTests: XCTestCase {
         var grantProcesses: Set<pid_t> = []
         var acceptedConsents: Set<String> = []
         var reachedReady = false
+        var replacementPID: pid_t?
+        var completionPath = ""
         for step in 1...12 {
-            switch try nextPermissionAction(onboarding: welcome, acceptedConsents: acceptedConsents) {
+            switch try nextPermissionAction(app: app, onboarding: welcome, acceptedConsents: acceptedConsents,
+                                            replacementPID: replacementPID) {
+            case .completedAfterRelaunch:
+                XCTAssertEqual(try candidateProcessID(), try XCTUnwrap(replacementPID))
+                reachedReady = true
+                completionPath = "relaunch-automatic"
             case .consent(let permissions, let dialog):
                 acceptedConsents.formUnion(permissions)
                 if permissions.contains("screen"), dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
                     let previousPID = try candidateProcessID()
                     dialog.buttons["Open System Settings"].click()
-                    if try grantScreenRecordingInSettings() { waitForReplacement(of: previousPID) }
+                    if try grantScreenRecordingInSettings() {
+                        app = try waitForReplacement(of: previousPID)
+                        welcome = app.windows["Welcome to Jarvis"]
+                        replacementPID = try candidateProcessID()
+                    }
                     app.activate()
                 } else {
                     let allow = consentButtons(in: dialog)
@@ -91,7 +102,11 @@ final class ReleaseReadinessTests: XCTestCase {
                     XCTAssertTrue(welcome.staticTexts["Screen Recording"].exists)
                     let previousPID = try candidateProcessID()
                     welcome.buttons[title].click()
-                    if try grantScreenRecordingInSettings() { waitForReplacement(of: previousPID) }
+                    if try grantScreenRecordingInSettings() {
+                        app = try waitForReplacement(of: previousPID)
+                        welcome = app.windows["Welcome to Jarvis"]
+                        replacementPID = try candidateProcessID()
+                    }
                     acceptedConsents.insert("screen")
                     app.activate()
                 case "Quit & Reopen":
@@ -101,7 +116,9 @@ final class ReleaseReadinessTests: XCTestCase {
                                    "The ordinary relaunch must be offered for the pending screen grant")
                     let previousPID = try candidateProcessID()
                     welcome.buttons[title].click()
-                    waitForReplacement(of: previousPID)
+                    app = try waitForReplacement(of: previousPID)
+                    welcome = app.windows["Welcome to Jarvis"]
+                    replacementPID = try candidateProcessID()
                     app.activate()
                 case "I’m Ready":
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 3, "Every permission must be positively granted")
@@ -110,42 +127,58 @@ final class ReleaseReadinessTests: XCTestCase {
                     XCTAssertTrue(acceptedConsents.contains("screen"), "Fresh acceptance must observe native screen-recording consent")
                     welcome.buttons[title].click()
                     reachedReady = true
+                    completionPath = "ready-button"
                 default:
                     throw ReadinessFailure("Unexpected permission action: \(title)")
                 }
             }
             if reachedReady { break }
         }
-        XCTAssertTrue(reachedReady, "The bounded permission journey must reach and use the ordinary I’m Ready action")
+        XCTAssertTrue(reachedReady, "The bounded permission journey must complete through the ordinary app flow")
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: welcome)
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 15), .completed,
                        "Permission onboarding must actually close")
-        let preferencesURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Preferences/\(bundleID).plist")
         let persisted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard let data = try? Data(contentsOf: preferencesURL),
-                  let values = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-            else { return false }
-            return values["onboarding.completed"] as? Bool == true
+            self.persistedOnboardingCompleted()
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [persisted], timeout: 15), .completed,
                        "Normal onboarding must persist completion; read the actual preference file afresh")
         XCTAssertTrue(app.statusItems["Jarvis is stopped"].waitForExistence(timeout: 30),
                       "Normal onboarding must prove every grant before entering the stopped app")
+        let evidence = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+        let completion: [String: Any] = ["path": completionPath, "nativeConsentsObserved": acceptedConsents == ["microphone", "audio", "screen"],
+                                          "persistedCompletion": persistedOnboardingCompleted(), "welcomeAbsent": !welcome.exists,
+                                          "stoppedStatusPresent": app.statusItems["Jarvis is stopped"].exists,
+                                          "replacementVerified": replacementPID != nil,
+                                          "nativeInstalledProcessVerified": try candidateProcessID() > 0]
+        try JSONSerialization.data(withJSONObject: completion).write(
+            to: URL(fileURLWithPath: evidence).appendingPathComponent("permission-completion.json"), options: .atomic)
     }
 
     private enum PermissionAction {
         case consent(Set<String>, XCUIElement)
         case onboarding(String)
+        case completedAfterRelaunch
     }
 
-    private func nextPermissionAction(onboarding: XCUIElement, acceptedConsents: Set<String>) throws -> PermissionAction {
+    private func nextPermissionAction(app: XCUIApplication, onboarding: XCUIElement, acceptedConsents: Set<String>,
+                                      replacementPID: pid_t?) throws -> PermissionAction {
         let owners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent",
                       "com.apple.accessibility.universalAccessAuthWarn", "com.apple.AccessibilityUIServer"]
         var captured: Set<String> = []
         var action: PermissionAction?
         var consentOwner: String?
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            if let replacementPID, acceptedConsents == ["microphone", "audio", "screen"] {
+                let running = NSRunningApplication.runningApplications(withBundleIdentifier: self.bundleID)
+                if running.count == 1, running[0].processIdentifier == replacementPID,
+                   running[0].bundleURL?.resolvingSymlinksInPath() == self.installedURL,
+                   running[0].executableArchitecture == NSRunningApplication.current.executableArchitecture,
+                   !onboarding.exists, self.persistedOnboardingCompleted(), app.statusItems["Jarvis is stopped"].exists {
+                    action = .completedAfterRelaunch
+                    return true
+                }
+            }
             if acceptedConsents.isEmpty, onboarding.staticTexts.matching(identifier: "Needed").count == 3 {
                 let grants = onboarding.buttons.matching(identifier: "Grant Access")
                 if grants.count == 1, grants.element.isEnabled, grants.element.isHittable {
@@ -305,6 +338,15 @@ final class ReleaseReadinessTests: XCTestCase {
         }
     }
 
+    private func persistedOnboardingCompleted() -> Bool {
+        let preferencesURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Preferences/\(bundleID).plist")
+        guard let data = try? Data(contentsOf: preferencesURL),
+              let values = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return false }
+        return values["onboarding.completed"] as? Bool == true
+    }
+
     private func grantedPermissionCount(in onboarding: XCUIElement) -> Int {
         onboarding.staticTexts.matching(NSPredicate(format: "value == 'Granted' OR label == 'Granted'")).count
     }
@@ -318,7 +360,7 @@ final class ReleaseReadinessTests: XCTestCase {
         return candidate.processIdentifier
     }
 
-    private func waitForReplacement(of previousPID: pid_t) {
+    private func waitForReplacement(of previousPID: pid_t) throws -> XCUIApplication {
         let reopened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             let running = NSRunningApplication.runningApplications(withBundleIdentifier: self.bundleID)
             return running.count == 1 && running[0].processIdentifier != previousPID
@@ -327,6 +369,9 @@ final class ReleaseReadinessTests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 15), .completed,
                        "Normal Quit & Reopen must replace the installed candidate process")
+        let app = XCUIApplication(url: try XCTUnwrap(installedURL))
+        application = app
+        return app
     }
 
     private func consentButtons(in dialog: XCUIElement) -> XCUIElementQuery {

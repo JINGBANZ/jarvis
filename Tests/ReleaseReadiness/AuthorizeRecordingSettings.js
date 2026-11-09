@@ -302,31 +302,39 @@ function run() {
         publish();
         const dismissalDeadline = Date.now() + 15000;
         while (Date.now() < dismissalDeadline) {
-            const value = Ref();
-            const error = Number($.AXUIElementCopyAttributeValue(form.secure, $("AXParent"), value));
-            if (error === -25202 || error === -25212) {
-                stage = "complete";
-                publish(true);
-                return receipt(true);
-            }
-            check(error);
-            let inspected;
             try {
-                inspected = inspect(form.root, form.secure, budget());
+                const value = Ref();
+                const error = Number($.AXUIElementCopyAttributeValue(form.secure, $("AXParent"), value));
+                if (error === -25202 || error === -25212) {
+                    stage = "complete";
+                    diagnostics.focusError = 0;
+                    publish(true);
+                    return receipt(true);
+                }
+                check(error);
+                let inspected;
+                try {
+                    inspected = inspect(form.root, form.secure, budget());
+                } catch (error) {
+                    if (error.axError !== -25202) { throw error; }
+                    const rootRole = Ref();
+                    const rootError = Number($.AXUIElementCopyAttributeValue(form.root, $("AXRole"), rootRole));
+                    if (rootError === -25204) { check(rootError); }
+                    if (rootError !== -25202) { throw error; }
+                    stage = "complete";
+                    diagnostics.focusError = 0;
+                    publish(true);
+                    return receipt(true);
+                }
+                if (inspected.complete && !inspected.secrets.some(element => same(element, form.secure))) {
+                    stage = "complete";
+                    diagnostics.focusError = 0;
+                    publish(true);
+                    return receipt(true);
+                }
             } catch (error) {
-                if (error.axError !== -25202) { throw error; }
-                const rootRole = Ref();
-                const rootError = Number($.AXUIElementCopyAttributeValue(form.root, $("AXRole"), rootRole));
-                if (rootError !== -25202) { throw error; }
-                stage = "complete";
-                diagnostics.focusError = 0;
-                publish(true);
-                return receipt(true);
-            }
-            if (inspected.complete && !inspected.secrets.some(element => same(element, form.secure))) {
-                stage = "complete";
-                publish(true);
-                return receipt(true);
+                if (error.axError !== -25204) { throw error; }
+                publish();
             }
             $.NSThread.sleepForTimeInterval(0.1);
         }

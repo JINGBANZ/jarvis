@@ -4,14 +4,18 @@
 from pathlib import Path
 import contextlib
 import io
+import hashlib
+import http.client
 import json
 import os
 import plistlib
 import runpy
 import subprocess
+import ssl
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 
@@ -366,6 +370,65 @@ class TemporaryAccountSafetyTests(unittest.TestCase):
             with self.assertRaises(ValueError) as error:
                 ACCOUNT["command"](["tool"], stage="account-creation", input_text=secret)
             self.assertEqual(str(error.exception), "account-creation")
+
+
+class InputFixtureDownloadTests(unittest.TestCase):
+    payload = b"pinned public dependency"
+
+    def response(self, data=None, length=None):
+        value = mock.MagicMock()
+        value.__enter__.return_value = value
+        value.read.return_value = self.payload if data is None else data
+        value.getheader.return_value = str(len(value.read.return_value)) if length is None else length
+        return value
+
+    def fetch(self):
+        return INPUT["download"]("https://example.invalid/pinned", hashlib.sha256(self.payload).hexdigest())
+
+    def test_known_transient_transport_failures_retry_then_verify(self):
+        errors = [urllib.error.URLError(ConnectionResetError(54, "reset")), TimeoutError(),
+                  http.client.IncompleteRead(b""), http.client.RemoteDisconnected(),
+                  ssl.SSLEOFError(), *[urllib.error.HTTPError("url", code, "transient", None, None)
+                                     for code in (408, 429, 503)]]
+        for error in errors:
+            with self.subTest(error=type(error).__name__), \
+                 mock.patch.object(INPUT["urllib"].request, "urlopen", side_effect=[error, self.response()]) as opened, \
+                 mock.patch.object(INPUT["time"], "sleep") as delay:
+                self.assertEqual(self.fetch(), self.payload)
+                self.assertEqual(opened.call_count, 2)
+                delay.assert_called_once_with(1)
+
+    def test_three_failed_attempts_exhaust_fixed_bound_without_raw_error(self):
+        with mock.patch.object(INPUT["urllib"].request, "urlopen", side_effect=ConnectionResetError("private detail")) as opened, \
+             mock.patch.object(INPUT["time"], "sleep") as delay:
+            with self.assertRaisesRegex(RuntimeError, "^Pinned fixture dependency download failed$"):
+                self.fetch()
+            self.assertEqual(opened.call_count, 3)
+            self.assertEqual(delay.call_args_list, [mock.call(1), mock.call(2)])
+
+    def test_certificate_and_not_found_never_retry(self):
+        for error in (urllib.error.HTTPError("url", 404, "missing", None, None),
+                      urllib.error.URLError(ssl.SSLCertVerificationError("untrusted"))):
+            with mock.patch.object(INPUT["urllib"].request, "urlopen", side_effect=error) as opened, \
+                 mock.patch.object(INPUT["time"], "sleep") as delay:
+                with self.assertRaises(RuntimeError):
+                    self.fetch()
+                self.assertEqual(opened.call_count, 1)
+                delay.assert_not_called()
+
+    def test_short_transport_retries_but_checksum_or_size_failure_does_not(self):
+        with mock.patch.object(INPUT["urllib"].request, "urlopen",
+                               side_effect=[self.response(b"short", str(len(self.payload))), self.response()]) as opened, \
+             mock.patch.object(INPUT["time"], "sleep"):
+            self.assertEqual(self.fetch(), self.payload)
+            self.assertEqual(opened.call_count, 2)
+        for response in (self.response(b"wrong bytes"), self.response(length="30000001"), self.response(length="invalid")):
+            with mock.patch.object(INPUT["urllib"].request, "urlopen", return_value=response) as opened, \
+                 mock.patch.object(INPUT["time"], "sleep") as delay:
+                with self.assertRaises(ValueError):
+                    self.fetch()
+                self.assertEqual(opened.call_count, 1)
+                delay.assert_not_called()
 
 
 class InputFixtureOwnershipTests(unittest.TestCase):
