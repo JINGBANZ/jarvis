@@ -114,6 +114,7 @@ jobs:
             .jarvis/release-ui-probe/*/ui-progress.json
             .jarvis/release-ui-probe/*/permission-state.json
             .jarvis/release-ui-probe/*/permission-initial.json
+            .jarvis/release-ui-probe/*/relaunch-control.json
             .jarvis/release-ui-probe/*/authorization.json
             .jarvis/release-ui-probe/*/authorization-process.json
             .jarvis/release-ui-probe/*/authorization-owner.json

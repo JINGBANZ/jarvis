@@ -302,10 +302,26 @@ final class ReleaseReadinessTests: XCTestCase {
         let authorizationResult = XCTWaiter.wait(for: [authorized], timeout: 45)
         attachEvidence(settings, name: "system-screen-recording-authorization-outcome")
         XCTAssertEqual(authorizationResult, .completed, "Native Settings authorization must enable recording or offer relaunch")
-        let confirm = settings.buttons["Quit & Reopen"]
-        let relaunches = confirm.waitForExistence(timeout: 5)
+        let confirmations = settings.buttons.matching(identifier: "Quit & Reopen")
+        let relaunches = confirmations.firstMatch.waitForExistence(timeout: 5)
         if relaunches {
             attachEvidence(settings, name: "recording-relaunch-offered")
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                confirmations.count == 1 && confirmations.element.isEnabled && confirmations.element.isHittable
+            }, object: nil)
+            let readyResult = XCTWaiter.wait(for: [ready], timeout: 5)
+            let count = confirmations.count
+            let state: [String: Any] = ["matchingButtons": count,
+                "enabled": count == 1 && confirmations.element.isEnabled,
+                "hittable": count == 1 && confirmations.element.isHittable,
+                "matchingDialogs": settings.dialogs.containing(.button, identifier: "Quit & Reopen").count,
+                "matchingSheets": settings.sheets.containing(.button, identifier: "Quit & Reopen").count,
+                "matchingAlerts": settings.alerts.containing(.button, identifier: "Quit & Reopen").count]
+            let evidence = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+            try JSONSerialization.data(withJSONObject: state).write(
+                to: URL(fileURLWithPath: evidence).appendingPathComponent("relaunch-control.json"), options: .atomic)
+            XCTAssertEqual(readyResult, .completed, "The unique native relaunch control must become enabled and hittable")
+            let confirm = confirmations.element
             confirm.click()
             attachEvidence(settings, name: "recording-relaunch-clicked")
         }
