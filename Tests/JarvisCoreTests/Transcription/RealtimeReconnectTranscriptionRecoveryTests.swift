@@ -39,6 +39,37 @@ import Testing
         #expect(!recovery.blocksCoaching)
     }
 
+    @Test func replacementCompletionWaitsForTimingBeforeConsumingFallback() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        ledger.recordSpeechStarted(itemID: "interrupted", audioStartMilliseconds: 1_000,
+                                   timelineOrigin: 0)
+        ledger.recordSpeechStopped(itemID: "interrupted", audioEndMilliseconds: 2_000)
+        ledger.recordDelta(itemID: "interrupted", delta: "retained partial")
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        recovery.begin(interruptedItems: ledger.resolveAllInterruptedItems(speaker: .me),
+                       duplicateRiskItemCount: 0, replayAvailable: true)
+        _ = recovery.markReplacementReady()
+        ledger.clear()
+
+        ledger.recordSpeechStarted(itemID: "replacement", audioStartMilliseconds: 1_000,
+                                   timelineOrigin: 0)
+        #expect(ledger.recordCompleted(itemID: "replacement", transcript: "actual final",
+                                       speaker: .me) == nil)
+        #expect(ledger.isPending(itemID: "replacement"))
+        #expect(!ledger.isPending(itemID: "interrupted"))
+        #expect(recovery.unresolvedItemCount == 1)
+        #expect(recovery.blocksCoaching)
+
+        ledger.recordSpeechStopped(itemID: "replacement", audioEndMilliseconds: 2_000)
+        let final = try #require(ledger.takeCompletedItem(itemID: "replacement"))
+        #expect(!ledger.isPending(itemID: "replacement"))
+        #expect(final.text == "actual final")
+        #expect(recovery.resolveReplacement(hasUsableText: final.text != nil) == .appendReplacement)
+        #expect(!recovery.blocksCoaching)
+        #expect(recovery.timeout().isEmpty)
+        #expect(ledger.takeCompletedItem(itemID: "replacement") == nil)
+    }
+
     @Test func coverageLossOrNoReplayImmediatelySalvagesInterruptedItems() {
         var beforeReady = RealtimeReconnectTranscriptionRecovery()
         let partial = fallback("partial")

@@ -107,7 +107,7 @@ public struct CoachingReplayExecutor {
         let speaker: Speaker = event.speaker == "them" ? .them : .me
         switch event.kind {
         case .transcript:
-            transcript.append(.init(speaker: speaker, text: event.text ?? "", at: event.spokenAt ?? event.at, endedAt: event.spokenAt ?? event.at))
+            transcript.append(.init(speaker: speaker, text: event.text ?? "", at: event.spokenAt ?? event.at, endedAt: event.spokenEndAt ?? event.at))
         case .speechPending: driver.updateTranscriptionWork(.pending(since: event.spokenAt), for: speaker)
         case .speechSettled: driver.updateTranscriptionWork(.settled, for: speaker)
         case .screen: screen.update(event.text ?? "")

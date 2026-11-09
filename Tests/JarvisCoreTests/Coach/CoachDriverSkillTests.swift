@@ -75,7 +75,7 @@ import Testing
         let result = try #require(brain.calls[1].first { $0.toolCallId == "k1" })
         #expect(result.text?.contains("Organize the answer as STAR.") == true)
         #expect(result.text?.hasPrefix("Loaded skill: behavioral.") == true)
-        #expect(result.text?.contains("extension of your action policy") == true)
+        #expect(result.text?.contains("within your response policy") == true)
         // load_skill stays offered only because system-design is still unloaded.
         #expect(brain.offeredTools[0].map(\.name) == brain.offeredTools[1].map(\.name))
         #expect(!brain.offeredTools[1].map(\.name).contains("behavioral"))

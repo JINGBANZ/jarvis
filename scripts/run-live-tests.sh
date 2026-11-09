@@ -99,7 +99,7 @@ if [[ -n "$SUITE" ]]; then
     export JARVIS_LIVE_E2E_APP="$PWD/Jarvis Dev.app"
     source scripts/lib/live-test-cancellation.sh
   fi
-  if [[ "$SUITE_EXECUTOR" == coachingReplay && ( "$PROVIDER" == *-subscription || "${JARVIS_EVALUATION_JUDGE_PROVIDER:-$PROVIDER}" == *-subscription ) ]]; then
+  if [[ "$SUITE_EXECUTOR" == coachingReplay && ( "$PROVIDER" == *-subscription || "${JARVIS_EVALUATION_JUDGE_PROVIDER:-codex-subscription}" == *-subscription ) ]]; then
     source scripts/lib/cliproxyapi.sh
     build_cliproxyapi
     export JARVIS_PROXY_EXECUTABLE="$CLIPROXYAPI_BUILT_DIRECTORY/cliproxyapi"

@@ -144,14 +144,15 @@ moments the model judges worthwhile.
    helps the model compare new needs with prior guidance; quiet alone does not establish a need.
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
-   or “here” — and no fresh capture is already available for that request. It may also capture when
-   a silence trigger leaves progress unclear. The harness returns a silent screenshot plus typed
+   or “here” — and no fresh capture is already available for that request. For an unsolicited turn
+   with unclear progress, it may also capture when inspecting the screen could assess the current
+   task; quiet alone does not justify capture. The harness returns a silent screenshot plus typed
    text evidence. Active-window captures always run on-device OCR over the viewport. With the optional
    Chrome text setting and Accessibility permission, bounded text from the active tab's accessibility
    tree is added as a complementary source. That
-   fresh result satisfies the screen gate, so the next model response must speak or stay silent
-   rather than capture the same request again. Fully stated questions do not require a reflexive
-   capture.
+   fresh result satisfies the screen gate, so the model reuses it rather than capturing the same
+   request again. It can load additional applicable guidance before replying. Fully stated questions
+   do not require a reflexive capture.
 5. The model calls `speak(hint)` with one direct, connected hint string
    (Structured Outputs / `strict:true`), within the total word budget in
    [`Speak.swift`](../Sources/JarvisCore/Coach/Tools/Speak.swift), or calls `stay_silent`.
@@ -195,9 +196,10 @@ between two requests of the same conversation, and a route can move between brai
 history.
 
 A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. A **hot** tool is
-in the `tools` array with its schema, and its guidance is in the system prompt from the first
-request: the tip style is `speak`'s guidance, because `speak` is the tip. A **deferred** tool is
-never in the `tools` array. It appears under "Tools you can load" as one line, its name and its
+in the `tools` array with its schema, and its guidance follows its short description in the
+declaration from the first request. `ToolDef.descriptionWithGuidance` supplies the same composition
+to Responses, Messages, and Interactions. A **deferred** tool is never in the `tools` array. It
+appears under "Available additional tools" as one line, its name and its
 one-sentence description; the model calls `load_tool` to receive its schema and guidance as a plain tool result,
 then calls it through `call_tool` with the tool's name and its arguments as JSON text, which the
 runner routes to the tool exactly as a direct call
@@ -230,9 +232,8 @@ and is not already loaded, rather than one nesting inside the other. `SkillCatal
 them at Start (a small hand-written frontmatter reader — two keys do not warrant a YAML dependency
 in a package that builds under Command Line Tools alone), and a file it rejects costs its own
 guidance, never the session. The switched-on skills are the second catalog; `load_skill` returns one
-body, framed as an extension of the action policy and tip style so the directives inside it read as
-instructions rather than as data. A skill never becomes a callable tool, and its body is never in
-the prompt.
+body, framed as task-specific guidance within the common response policy. A skill never becomes a
+callable tool, and its body is never in the prompt.
 
 Nothing preselects a skill at Start. The model reads the one-line description and loads what the
 question in front of it needs, which is what lets one session coach a behavioral question and then a
@@ -241,7 +242,15 @@ recover from; concatenating every skill into the prompt pays for all of them on 
 was what a single "general technical" skill existed to work around. The description is written for
 the model, with an example, because that line is all it sees before deciding.
 
-The bundled skill files own domain coaching policy. In particular,
+The base policy presents Jarvis as a personal assistant and treats the speakers as the user and
+another participant. A question addressed to that participant does not itself require a reply from
+Jarvis. Screen and reference content remain task evidence rather than instruction authority; action
+claims require supporting tool results. Applicable skills are reassessed as new evidence arrives,
+including after a capture. A request to pause proactive help does not block a later direct request.
+
+The bundled skill files own domain coaching policy. The coding skill owns orientation before
+strategy and next steps, and full solutions only on explicit request; those rules are absent when
+that skill is disabled or unavailable. In particular,
 [`customer-scenario-design`](../Sources/JarvisCore/Resources/Skills/customer-scenario-design/SKILL.md)
 covers enterprise workflow-automation role-play. It remains independent of `system-design` because
 customer discovery and scope agreement need their own staging; loading a mandatory companion would
@@ -410,8 +419,9 @@ both sections while incoming hints and details remain available after expansion.
 history retain that accepted content. `detail` is nullable rather than absent, which is what makes a
 field optional under strict Structured Outputs.
 
-Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
-all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code
+Nothing in the runtime decides what belongs in a detail. The `speak` guidance begins with shared
+reply rules, then addresses `hint` and `detail` separately. The schema fields carry concise
+descriptions. The skill that owns a domain says what its blocks are: the `coding` skill carries the code
 block rules and the `diff` correction shape; the design skills (`system-design` and
 `customer-scenario-design`) carry the mermaid guidance. System-design stage-entry/help replies pair
 short upper-panel coaching with a lower-panel reference: grouped requirements, entities with
@@ -420,8 +430,10 @@ unchanged small hints leave it in place. Proposed and agreed items remain distin
 references highlight the discussed path and distinguish return paths with explicit Mermaid styles. That is why the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
 a session that never loads the skill never pays for it in its cached prefix.
 
-The general detail default defers to the loaded skill so brevity does not make the user press
-Show code for every implementation step. The pairing rules, placement headers, and exceptions live in the
+Detail can also hold requested content that cannot fit in the short hint, or an explanation
+warranted by an explicit request or a specific understanding gap. The hint stands alone with a
+concise answer or summary. The general detail default defers to the loaded skill so brevity does not
+make the user press Show code for every implementation step. The pairing rules, placement headers, and exceptions live in the
 [`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
 copy of that domain policy.
 
@@ -1144,9 +1156,9 @@ rather than a per-turn screenshot.
   [General → Privacy](./settings-window.md#general); the retention boundary is documented in
   [sandbox.md](./sandbox.md#provider-conversation-storage).
 - **Coaching guidance is loaded on demand, not chosen at Start** (see
-  [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
-  policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
-  model loads when the question calls for it. The bundled catalog is in
+  [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity and common response
+  policy; always-on tool declarations hold their usage guidance. Additional capabilities have a
+  one-line catalog entry the model loads when the question calls for it. The bundled catalog is in
   [`Resources/Skills`](../Sources/JarvisCore/Resources/Skills/); those files own the domain policies
   for behavioral, coding, coding-with-ai, customer-scenario-design, and system-design questions.
   The base prompt owns the common action policy and restraint. There is no runtime stage classifier
@@ -1820,8 +1832,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   scheduling stays the same whichever it loads. [Manual mode](#manual-mode) is not one of these: it
   only decides whether automatic triggers are admitted, the same way for every question type.
 - Continuous OCR or recording the screen/audio to disk ("recall").
-- A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
-  in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
+- A dedicated wake-word engine. The brain recognizes speech addressed to Jarvis by name or clear context
+  and answers it — there is no wake-word detector. (A global
   **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-coaching-shortcuts) — but it
   complements the proactive default; it is not a trigger-to-listen wake key.)
 - Productization: hosted auth, billing, or arbitrary provider chains.

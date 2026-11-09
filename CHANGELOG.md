@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.14](https://github.com/JINGBANZ/jarvis/compare/v0.5.13...v0.5.14) (2026-11-08)
+
+
+### Bug Fixes
+
+* **resources:** load model and skills from installed SwiftPM bundles ([#502](https://github.com/JINGBANZ/jarvis/issues/502)) ([dac27b1](https://github.com/JINGBANZ/jarvis/commit/dac27b17145b130c28e4eeadf494409fcbffae87))
+
 ## [0.5.13](https://github.com/JINGBANZ/jarvis/compare/v0.5.12...v0.5.13) (2026-11-07)
 
 

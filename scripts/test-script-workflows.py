@@ -337,6 +337,7 @@ print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
                 self.assertFalse((self.root / 'admission.jsonl').exists())
 
     def test_replay_suite_keeps_admission_without_building_app(self):
+        self.environment['JARVIS_EVALUATION_JUDGE_PROVIDER'] = 'openai'
         self.executable(self.bin / 'swift', f'''#!{sys.executable}
 import json, os
 from pathlib import Path
@@ -358,6 +359,36 @@ print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
         self.assertEqual(len(list(base.iterdir())), 10)
         self.assertFalse((base / '2000-01-01').exists())
         self.assertFalse((base / '2000-01-02').exists())
+
+    def test_replay_suite_provisions_helper_for_effective_subscription_targets(self):
+        self.environment.pop('JARVIS_PROXY_EXECUTABLE', None)
+        (self.root / 'scripts/lib/cliproxyapi.sh').write_text('''build_cliproxyapi() {
+  echo helper > helper-built
+  CLIPROXYAPI_BUILT_DIRECTORY="$PWD/fixture-proxy"
+}
+''')
+        self.executable(self.bin / 'swift', f'''#!{sys.executable}
+import json, os
+from pathlib import Path
+Path('suite-proxy.json').write_text(json.dumps(os.environ.get('JARVIS_PROXY_EXECUTABLE')))
+print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
+''')
+        for coach, judge, needs_helper in (('openai', None, True), ('gemini', None, True),
+                                            ('openai', 'gemini', False),
+                                            ('codex-subscription', 'openai', True)):
+            with self.subTest(coach=coach, judge=judge):
+                self.environment.pop('JARVIS_EVALUATION_JUDGE_PROVIDER', None)
+                if judge is not None:
+                    self.environment['JARVIS_EVALUATION_JUDGE_PROVIDER'] = judge
+                marker = self.root / 'helper-built'
+                marker.unlink(missing_ok=True)
+                result = self.run_script('run-live-tests.sh', '--suite', 'coaching/intervention',
+                                         '--provider', coach)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(marker.exists(), needs_helper)
+                executable = json.loads((self.root / 'suite-proxy.json').read_text())
+                self.assertEqual(executable, str(self.root / 'fixture-proxy/cliproxyapi')
+                                 if needs_helper else None)
 
     def test_valid_arguments_survive_reentry_and_reference_transition(self):
         cases = (

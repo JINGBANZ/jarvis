@@ -16,8 +16,8 @@ import Testing
         let catalog = try JSONDecoder().decode(CoachingReplayCatalog.self, from: Data("""
         {"version":"intervention-v1","rubricVersion":"intervention-v1","episodes":[{"id":"episode","decisions":[
           {"id":"first","expectation":"helpRequired","gradingGoal":"SECRET_RUBRIC_reconstruction","triggerAt":2,
-           "events":[{"kind":"transcript","at":0,"spokenAt":0,"spokenEndAt":0,"speaker":"them","text":"Find largest divisible subset."},
-                     {"kind":"transcript","at":1,"spokenAt":1,"spokenEndAt":1,"speaker":"me","text":"I know lengths but cannot reconstruct the chain."},
+           "events":[{"kind":"transcript","at":1,"spokenAt":0,"spokenEndAt":1,"speaker":"them","text":"Find largest divisible subset."},
+                     {"kind":"transcript","at":2,"spokenAt":1,"spokenEndAt":2,"speaker":"me","text":"I know lengths but cannot reconstruct the chain."},
                      {"kind":"transcript","at":3,"spokenAt":0.5,"spokenEndAt":0.75,"speaker":"me","text":"I am still thinking about reconstruction.","milestone":"attemptStarted"}],
            "automaticFollowups":[{"id":"queued","expectation":"silenceRequired","gradingGoal":"SECRET_RUBRIC_late_fragment"}]},
           {"id":"progress","expectation":"silenceRequired","gradingGoal":"SECRET_RUBRIC_progress","triggerAt":9,
@@ -34,6 +34,8 @@ import Testing
         #expect(report.results[1].evidence.attempts[1].transcript.contains { $0.contains("spoken=0.5") })
         let messages = await brain.messages
         #expect(messages.count == 3)
+        #expect(messages[0].contains { $0.text?.contains("[00:00-00:01] them: Find largest divisible subset.") == true })
+        #expect(messages[0].contains { $0.text?.contains("[00:01-00:02] me: I know lengths but cannot reconstruct the chain.") == true })
         #expect(messages[1].contains { message in message.toolCalls?.contains { $0.argumentsJSON.contains("Use predecessor indices for reconstruction.") } == true })
         #expect(messages.flatMap { $0 }.allSatisfy { !($0.text ?? "").contains("SECRET_RUBRIC") })
         let judged = await judge.messages

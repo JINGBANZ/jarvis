@@ -204,6 +204,11 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         return !items.isEmpty
     }
 
+    public func isPending(itemID: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return items[itemID] != nil
+    }
+
     public var hasActiveSpeech: Bool {
         lock.lock(); defer { lock.unlock() }
         return items.values.contains { !$0.speechStopped }

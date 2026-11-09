@@ -9,8 +9,8 @@ extension CoachCapabilities {
     static func callTool(catalogNames: [String]) -> ToolDef {
         ToolDef(
             name: callToolName,
-            description: "Call a tool you loaded with load_tool. Pass its name and, as arguments, "
-                + "the JSON object text that matches the schema its load result gave you.",
+            description: "Invoke an additional tool previously loaded with load_tool. Pass its name and, "
+                + "as arguments, the JSON object text matching the schema in its load result.",
             parametersJSON: callToolParametersJSON(catalogNames: catalogNames))
     }
 

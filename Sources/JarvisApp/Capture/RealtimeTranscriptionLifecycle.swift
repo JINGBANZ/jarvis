@@ -174,6 +174,12 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         lock.lock()
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return }
         let item = ledger.recordCompleted(itemID: itemID, transcript: text, speaker: speaker)
+        if ledger.isPending(itemID: itemID) {
+            updateCoachingActivityLocked()
+            lock.unlock()
+            scheduleActiveDeadline(itemID: itemID, socketGeneration: socketGeneration)
+            return
+        }
         locallyCommittedItemIDs.remove(itemID)
         discardServerConfirmedAudioLocked()
         let handled = reconcileReplacementItemLocked(
@@ -184,7 +190,6 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         }
         updateCoachingActivityLocked()
         lock.unlock()
-        if item == nil { scheduleActiveDeadline(itemID: itemID, socketGeneration: socketGeneration) }
     }
 
     func recordFailed(itemID: String, error: String, socketGeneration: Int) {

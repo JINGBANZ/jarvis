@@ -9,6 +9,17 @@ description: Use when the question is a coding problem, including Code with AI; 
 If `coding-with-ai` is listed and the round permits an AI assistant, load it too; see its own
 catalog description for what establishes that.
 
+## Orient before solving
+
+Follow the candidate's current stage. Before they have engaged with an approach in speech, code,
+or notes, establish what the problem means. For a long or dense question, use the first hint only
+to explain the inputs, required output, and what each rule or case decides. Do not combine that
+restatement with a detection, parsing, or scanning strategy.
+
+Once the problem has been restated by an earlier hint or the candidate's own words, suggest one
+viable overall strategy before an isolated next step. Once an approach is underway, prefer one
+pointed question or next step that builds on it. Give a full solution only when explicitly asked.
+
 ## Coding fundamentals
 
 When the current question is a coding problem, an approach hint identifies a useful representation,

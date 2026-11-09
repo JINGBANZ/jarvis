@@ -13,7 +13,7 @@ import JarvisCore
         {"model":"gpt-5.5","reasoning":{"effort":"low"},"max_output_tokens":2048,
          "tool_choice":{"type":"allowed_tools","mode":"required","tools":[{"type":"function","name":"speak"}]},
          "instructions":"You are Jarvis.",
-         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"hint":{},"detail":{}}}}],
+         "tools":[{"type":"function","name":"speak","description":"Display a reply","parameters":{"type":"object","properties":{"hint":{},"detail":{"description":"Optional Markdown displayed below the hint"}}}}],
          "input":[{"role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_image","image_url":"[base64 image omitted]"}]},
                   {"type":"reasoning","id":"rs_1"},
                   {"type":"function_call","call_id":"c1","name":"capture_screen","arguments":"{}"},
@@ -33,6 +33,7 @@ import JarvisCore
         #expect(exchange.toolNames == ["speak"])
         #expect(exchange.toolCount == 1)
         #expect(exchange.speakParameters == ["detail", "hint"])
+        #expect(exchange.speakDescription == "Display a reply")
         #expect(exchange.toolChoiceType == "allowed_tools")
         #expect(exchange.input == [
             .message(role: "user", parts: ["hi", "[base64 image omitted]"]),

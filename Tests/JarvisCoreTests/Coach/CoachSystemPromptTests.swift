@@ -11,19 +11,18 @@ import Testing
             guidance: searchReferencesTool.guidance,
             deferLoading: true)])
 
-    @Test func bareBuilderIsTheBasePromptPlusCoreToolGuidance() {
-        #expect(JarvisPrompts.Coach.system(capabilities: .default)
-            == [JarvisPrompts.Coach.system, captureScreenTool.guidance,
-                speakTool.guidance]
-                .joined(separator: "\n\n"))
+    @Test func bareBuilderContainsOnlyGeneralPolicy() {
+        #expect(JarvisPrompts.Coach.system(capabilities: .default) == JarvisPrompts.Coach.system)
+        #expect(!JarvisPrompts.Coach.system.contains(captureScreenTool.guidance))
+        #expect(!JarvisPrompts.Coach.system.contains(speakTool.guidance))
     }
 
-    @Test func theDetailSectionIsAlwaysPresent() {
-        let with = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], referencesAdmitted: false))
-        #expect(with.contains("# Detail"))
-        #expect(with.contains("The hint is the coaching."))
-        #expect(with.contains("# Tip style"))
+    @Test func toolGuidanceLivesInDeclarations() {
+        let capabilities = CoachCapabilities.compose(disabledTools: [], referencesAdmitted: false)
+        let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
+        #expect(!prompt.contains("Optional Markdown displayed below the hint"))
+        #expect(capabilities.tool(named: "speak")?.descriptionWithGuidance.contains("# Detail") == true)
+        #expect(capabilities.tool(named: "capture_screen")?.descriptionWithGuidance.contains("# When to capture") == true)
     }
 
     @Test func theCoreCarriesNoCodeOrDiagramRules() {
@@ -40,14 +39,14 @@ import Testing
     @Test func theLoadingSectionAndCatalogAppearOnlyWithADeferredTool() {
         let bare = JarvisPrompts.Coach.system(capabilities: .default)
         #expect(!bare.contains("load_tool"))
-        #expect(!bare.contains("# Loading"))
-        #expect(!bare.contains("# Tools you can load"))
-        #expect(bare.contains("1. An explicit request addressed to Jarvis"))
+        #expect(!bare.contains("# Skills and tool discovery"))
+        #expect(!bare.contains("# Available additional tools"))
+        #expect(bare.contains("1. When \"me\" addresses Jarvis"))
         #expect(bare.contains("6. When help is warranted"))
 
         let offered = JarvisPrompts.Coach.system(capabilities: withCatalog)
-        #expect(offered.contains("# Loading"))
-        #expect(offered.contains("1. An explicit request addressed to Jarvis"))
+        #expect(offered.contains("# Skills and tool discovery"))
+        #expect(offered.contains("1. When \"me\" addresses Jarvis"))
         #expect(offered.contains("6. When help is warranted"))
     }
 
@@ -58,17 +57,15 @@ import Testing
         #expect(!offered.contains("# Prep material"))
     }
 
-    @Test func theCatalogsFollowTheToolGuidanceInOrder() throws {
+    @Test func theCatalogsFollowGeneralPolicyInOrder() throws {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], referencesAdmitted: true, skills: skills))
-        let loading = try #require(prompt.range(of: "# Loading"))
-        let policy = try #require(prompt.range(of: "# Action policy"))
-        let tipStyle = try #require(prompt.range(of: "# Tip style"))
-        let tools = try #require(prompt.range(of: "# Tools you can load"))
-        let skillsBlock = try #require(prompt.range(of: "# Skills you can load"))
-        #expect(loading.lowerBound < policy.lowerBound)
-        #expect(policy.lowerBound < tipStyle.lowerBound)
-        #expect(tipStyle.lowerBound < tools.lowerBound)
+        let discovery = try #require(prompt.range(of: "# Skills and tool discovery"))
+        let policy = try #require(prompt.range(of: "# Response policy"))
+        let tools = try #require(prompt.range(of: "# Available additional tools"))
+        let skillsBlock = try #require(prompt.range(of: "# Available skills"))
+        #expect(discovery.lowerBound < policy.lowerBound)
+        #expect(policy.lowerBound < tools.lowerBound)
         #expect(tools.lowerBound < skillsBlock.lowerBound)
     }
 
@@ -82,40 +79,35 @@ import Testing
             capabilities: CoachCapabilities.compose(
                 disabledTools: [], referencesAdmitted: false, skills: skills))
 
-        #expect(prompt.contains("# Skills you can load"))
+        #expect(prompt.contains("# Available skills"))
         #expect(prompt.contains("- behavioral: Use when the question is behavioral."))
         #expect(prompt.contains("- system-design: Use when the question is a system design."))
         #expect(!prompt.contains("STAR."))
     }
 
-    @Test func theLoadingSectionNamesOnlyTheLoadersPresent() {
+    @Test func discoveryNamesOnlyTheCatalogsPresent() {
         let both = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], referencesAdmitted: true, skills: skills))
-        #expect(both.contains("a skill listed under \"Skills you can load\" with load_skill"))
-        #expect(both.contains("a tool listed under \"Tools you can load\" with load_tool"))
-
+        #expect(both.contains("use load_skill"))
+        #expect(both.contains("Its loader and invocation tools"))
+        #expect(both.contains("including after a capture"))
         let skillsOnly = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], referencesAdmitted: false, skills: skills))
-        #expect(skillsOnly.contains("# Loading"))
-        #expect(skillsOnly.contains("with load_skill"))
-        #expect(!skillsOnly.contains("load_tool"))
-        #expect(!skillsOnly.contains("# Tools you can load"))
-
+        #expect(skillsOnly.contains("use load_skill"))
+        #expect(!skillsOnly.contains("# Available additional tools"))
+        #expect(!skillsOnly.contains("Its loader and invocation tools"))
         let toolsOnly = JarvisPrompts.Coach.system(capabilities: withCatalog)
         #expect(!toolsOnly.contains("load_skill"))
-        #expect(!toolsOnly.contains("# Skills you can load"))
-        #expect(toolsOnly.contains("with load_tool"))
-        // Speak's own guidance legitimately says "skill" elsewhere, so check the leaking
-        // skill-reassessment sentences specifically rather than the word "skill" anywhere.
-        #expect(!toolsOnly.contains("finish skill selection"))
-        #expect(!toolsOnly.contains("Load each additional applicable skill"))
+        #expect(!toolsOnly.contains("# Available skills"))
+        #expect(toolsOnly.contains("Its loader and invocation tools"))
+        #expect(!toolsOnly.contains("load any additional applicable skill"))
     }
 
     @Test func theLoadingSectionStillDefersToAForcedSpeak() {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], referencesAdmitted: true, skills: skills))
         #expect(prompt.contains(
-            "Only when speak is the sole permitted tool, speak with what you have."))
+            "When only speak and/or stay_silent are permitted, finish using the evidence and guidance already"))
     }
 
     @Test func everythingSwitchedOffIsTheBarePrompt() {
