@@ -164,9 +164,16 @@ classification does not create or require a test display, signed app, TCC grants
 Subscription targets provision the same pinned, privacy-patched helper used by app builds and use
 saved sign-ins. API targets use the owner-only secret store with the normal environment fallback.
 Replay uses `LiveE2EScenario.target(for:modelID:)`, the same default as signed scenarios and CACHE.
+Provider and model defaults live in the shared
+[`test-providers.json`](../Tests/Support/ScenarioHarness/Resources/test-providers.json) resource.
+Scenario target selection, replay judge selection, and the shell runner read that configuration.
+The runner provisions the subscription helper when either effective provider needs it, including
+an API coach paired with a subscription judge.
 `JARVIS_EVALUATION_MODEL` and `JARVIS_EVALUATION_EFFORT` override the replay coach;
 `JARVIS_EVALUATION_JUDGE_PROVIDER`, `JARVIS_EVALUATION_JUDGE_MODEL`, and
-`JARVIS_EVALUATION_JUDGE_EFFORT` select the independent judge. The default judge uses Terra (`gpt-5.6-terra`) at low effort in a separate invocation with no coaching
+`JARVIS_EVALUATION_JUDGE_EFFORT` select the independent judge. A provider override without a model
+uses that provider's configured judge model, falling back to its configured coaching model.
+The judge runs at low effort by default in a separate invocation with no coaching
 conversation state. Its model ID must differ from the coach's. Unknown
 provider/effort values fail before calls. Provider-native effort floors still apply.
 
@@ -349,7 +356,8 @@ and the Gate checks it with synthetic credentials for every selectable provider.
 - **Isolated preferences.** Brain route and capability switches go to the private defaults suite
   `com.jarvis.coach.dev.live-e2e`, cleared per scenario, so a run never reads or changes the
   developer's own settings. [`LiveE2EScenario.target(for:modelID:)`](../Tests/Support/ScenarioHarness/Scenarios/LiveE2EScenario+Target.swift)
-  owns the default model for each coaching provider, shared by scenario preferences, brain switches,
+  resolves each provider's model from the shared test configuration described under
+  [Evaluation suites](#evaluation-suites), shared by scenario preferences, brain switches,
   and CACHE validation. Ordinary scenarios can select explicit model IDs; CACHE uses that provider's
   shared default. Transcription provider, model or locale, and expected languages come from the
   scenario. Existing scenarios default to OpenAI; Scenario L enumerates the shared remote target

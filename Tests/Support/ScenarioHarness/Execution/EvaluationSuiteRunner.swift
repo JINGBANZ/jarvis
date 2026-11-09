@@ -6,7 +6,18 @@ import JarvisBrainProviders
 import JarvisProcess
 
 public struct EvaluationSuiteRunner {
-    public enum Failure: Error { case invalidConfiguration, missingValue(String) }
+    public enum Failure: LocalizedError {
+        case invalidConfiguration, missingValue(String), sameCoachAndJudgeModel
+
+        public var errorDescription: String? {
+            switch self {
+            case .invalidConfiguration: "Invalid evaluation suite configuration"
+            case .missingValue(let message): message
+            case .sameCoachAndJudgeModel:
+                "Coach and judge must use different model IDs. Set JARVIS_EVALUATION_MODEL or JARVIS_EVALUATION_JUDGE_MODEL."
+            }
+        }
+    }
     let environment: [String: String]
     let repository: URL
     let scenariosDirectory: URL
@@ -76,9 +87,9 @@ public struct EvaluationSuiteRunner {
         let catalogData = try Data(contentsOf: catalogURL)
         let catalog = try CoachingReplayCatalog.load(from: catalogURL)
         let target = LiveE2EScenario.target(for: provider, modelID: environment["JARVIS_EVALUATION_MODEL"])
-        let judgeProvider = try require(BrainProvider(rawValue: environment["JARVIS_EVALUATION_JUDGE_PROVIDER"] ?? BrainProvider.codexSubscription.rawValue), "Invalid judge provider")
-        let judgeTarget = BrainTarget(provider: judgeProvider, modelID: environment["JARVIS_EVALUATION_JUDGE_MODEL"] ?? "gpt-5.6-terra")
-        guard judgeTarget.modelID != target.modelID else { throw Failure.invalidConfiguration }
+        let judgeProvider = try require(BrainProvider(rawValue: environment["JARVIS_EVALUATION_JUDGE_PROVIDER"] ?? TestProviderConfiguration.shared.defaultJudgeProvider.rawValue), "Invalid judge provider")
+        let judgeTarget = Self.judgeTarget(for: judgeProvider, modelID: environment["JARVIS_EVALUATION_JUDGE_MODEL"])
+        guard judgeTarget.modelID != target.modelID else { throw Failure.sameCoachAndJudgeModel }
         let effort = try require(ReasoningEffort(rawValue: environment["JARVIS_EVALUATION_EFFORT"] ?? Defaults.Brain.effort.rawValue), "Invalid coach reasoning effort")
         let judgeEffort = try require(ReasoningEffort(rawValue: environment["JARVIS_EVALUATION_JUDGE_EFFORT"] ?? ReasoningEffort.low.rawValue), "Invalid judge reasoning effort")
         let needsProxy = provider.servedByLocalProxy || judgeProvider.servedByLocalProxy
@@ -163,6 +174,11 @@ public struct EvaluationSuiteRunner {
         await proxy.stop()
         return reports
     }
+    static func judgeTarget(for provider: BrainProvider, modelID: String? = nil) -> BrainTarget {
+        LiveE2EScenario.target(for: provider,
+            modelID: modelID ?? TestProviderConfiguration.shared.modelID(for: provider, judge: true))
+    }
+
     private func sourceFingerprint() throws -> String {
         let base = repository
         var hash = SHA256()
