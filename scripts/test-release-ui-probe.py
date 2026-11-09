@@ -23,16 +23,33 @@ ACCOUNT_GLOBALS = ACCOUNT["prepare"].__globals__
 
 
 class ProbeResultsTests(unittest.TestCase):
-    def test_playback_setup_keeps_timeout_private_and_cannot_claim_success(self):
+    def test_requested_playback_cannot_complete_after_timeout_or_failed_player(self):
+        for failure in (subprocess.TimeoutExpired('private command', 30),
+                        subprocess.CalledProcessError(1, 'private command')):
+            with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                (directory / 'play-question').touch()
+                with mock.patch.object(PROBE['subprocess'], 'run', side_effect=failure) as player:
+                    with self.assertRaisesRegex(ValueError, '^Private subprocess failed: private-playback.log$'):
+                        PROBE['play_requested_question'](directory, directory / 'question.aiff', directory / 'player')
+                self.assertEqual(player.call_args.kwargs['timeout'], 30)
+                self.assertFalse((directory / 'question-played').exists())
+
+    def test_playback_requires_a_fresh_request_and_completes_only_once(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            with mock.patch.object(PROBE['subprocess'], 'run', side_effect=subprocess.TimeoutExpired('private', 30)):
-                with self.assertRaisesRegex(ValueError, '^System playback failed before UI-test startup$'):
-                    PROBE['check_system_playback'](directory / 'question.aiff', directory)
-            receipt = json.loads((directory / 'stage.json').read_text())
-            self.assertFalse(receipt['passed'])
-            self.assertTrue(receipt['timedOut'])
-            self.assertNotIn('private', json.dumps(receipt))
+            with mock.patch.object(PROBE['subprocess'], 'run') as player:
+                play = lambda: PROBE['play_requested_question'](directory, directory / 'question.aiff', directory / 'player')
+                play()
+                player.assert_not_called()
+                for count in (1, 2):
+                    (directory / 'play-question').touch()
+                    play()
+                    self.assertTrue((directory / 'question-played').exists())
+                    self.assertFalse((directory / 'play-question').exists())
+                    play()
+                    self.assertEqual(player.call_count, count)
+                    (directory / 'question-played').unlink()
 
     def test_inventory_uses_kernel_names_and_verifies_exact_executable_and_birth(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -77,7 +94,8 @@ class ProbeResultsTests(unittest.TestCase):
                            str(helper), str(directory / 'child.pid')]
                 with self.assertRaisesRegex(ValueError, 'cleanup did not finish normally'):
                     PROBE['run_ui'](command, timeout=1, log=directory / 'test.log',
-                                    roots=[directory], evidence=directory)
+                                    roots=[directory], evidence=directory,
+                                    speech=directory / 'question.aiff', player=directory / 'player')
                 receipt = json.loads((directory / 'cleanup.json').read_text())
                 self.assertGreaterEqual(receipt['observedCount'], 2)
                 self.assertIs(receipt['forcedCleanup'], True)
@@ -115,7 +133,8 @@ class ProbeResultsTests(unittest.TestCase):
                     mock.patch.object(PROBE['time'], 'monotonic', side_effect=lambda: next(ticks)), \
                     mock.patch.object(PROBE['time'], 'sleep'):
                 with self.assertRaisesRegex(ValueError, 'cleanup did not finish normally'):
-                    PROBE['run_ui'](['private-command'], timeout=100, log=directory / 'test.log', roots=[directory], evidence=directory)
+                    PROBE['run_ui'](['private-command'], timeout=100, log=directory / 'test.log', roots=[directory], evidence=directory,
+                                    speech=directory / 'question.aiff', player=directory / 'player')
             receipt = json.loads((directory / 'ui-command.json').read_text())
             self.assertEqual(receipt['failurePhase'], 'process-monitor')
             self.assertEqual(receipt['failureKind'], 'ownership-refused')
@@ -145,7 +164,8 @@ class ProbeResultsTests(unittest.TestCase):
                     mock.patch.object(PROBE['time'], 'monotonic', side_effect=lambda: next(ticks)), \
                     mock.patch.object(PROBE['time'], 'sleep'):
                 with self.assertRaisesRegex(ValueError, 'cleanup did not finish normally'):
-                    PROBE['run_ui'](['private-command'], timeout=100, log=directory / 'test.log', roots=[directory], evidence=directory)
+                    PROBE['run_ui'](['private-command'], timeout=100, log=directory / 'test.log', roots=[directory], evidence=directory,
+                                    speech=directory / 'question.aiff', player=directory / 'player')
             receipt = json.loads((directory / 'ui-command.json').read_text())
             self.assertEqual(receipt['failurePhase'], 'process-monitor')
             self.assertEqual(receipt['failureKind'], 'ownership-refused')
@@ -355,7 +375,7 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
                 mock.patch.dict(globals_, ROOT=root, Path=path, run=command,
                                 verify_app=lambda app, _: "0.5.15" if app == candidate else predecessor_version,
                                 build_ui=lambda evidence, _: (evidence / "derived", evidence / "manifest"),
-                                run_phase=phase, owned_processes=lambda *_: [], check_system_playback=lambda *_: None):
+                                run_phase=phase, owned_processes=lambda *_: []):
             PROBE["main"]()
         evidence = next((root / ".jarvis/release-ui-probe").iterdir())
         self.assertFalse((home / "Library/Application Support/Jarvis/openai-api-key").exists())

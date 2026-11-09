@@ -4,12 +4,7 @@ import XCTest
 extension ReleaseReadinessTests {
     func testInstalledJourney() throws {
         try prepareRun()
-        let outputKind = try XCTUnwrap(audioDevices).outputKind.rawValue
-        attachEvidence(name: "fixture-playback-default-route-\(outputKind)")
-        try playQuestion()
         try audioDevices?.select()
-        attachEvidence(name: "fixture-playback-selected-route")
-        try playQuestion()
         let environment = ProcessInfo.processInfo.environment
         let phase = try XCTUnwrap(environment["JARVIS_READINESS_PHASE"])
         XCTAssertTrue(["fresh", "predecessor", "upgrade"].contains(phase))
@@ -165,18 +160,15 @@ extension ReleaseReadinessTests {
     }
 
     private func playQuestion() throws {
-        let environment = ProcessInfo.processInfo.environment
-        let player = Process()
-        player.executableURL = URL(fileURLWithPath: try XCTUnwrap(environment["JARVIS_READINESS_PLAYER"]))
-        player.arguments = [try XCTUnwrap(environment["JARVIS_READINESS_SPEECH_FILE"])]
-        player.environment = [:]
-        player.standardOutput = FileHandle.nullDevice
-        player.standardError = FileHandle.nullDevice
-        defer { if player.isRunning { player.terminate() } }
-        try player.run() // ghost-mode-allowed: external runner plays the fixed fixture through the hosted system output
-        try waitUntil("The fixed question must finish playback", timeout: 30) { !player.isRunning }
-        XCTAssertEqual(player.terminationReason, .exit)
-        XCTAssertEqual(player.terminationStatus, 0, "The system player must finish successfully")
+        let path = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+        let directory = URL(fileURLWithPath: path)
+        let completed = directory.appendingPathComponent("question-played")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: completed.path), "Playback completion must be fresh")
+        try Data().write(to: directory.appendingPathComponent("play-question"), options: .withoutOverwriting)
+        try waitUntil("The fixed question must finish playback", timeout: 40) {
+            FileManager.default.fileExists(atPath: completed.path)
+        }
+        try FileManager.default.removeItem(at: completed)
     }
 
     private struct Row: Decodable {

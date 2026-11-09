@@ -141,8 +141,9 @@ command above.
 [`ReleaseAudioDevices`](../Tests/ReleaseReadiness/ReleaseAudioDevices.swift) selects BlackHole 16-channel
 input for silent microphone frames, preserves the hosted Mac's existing output, verifies those
 defaults, and restores them at teardown. The existing output keeps system playback working under
-hosted UI automation. The external runner plays a fixed synthetic question generated with the
-built-in speech tool. Audio stays owner-only under the run's workspace-local `.jarvis/` directory.
+hosted UI automation. The Python driver plays a fixed synthetic question generated with the
+built-in speech tool when XCTest requests it; playback does not run inside the UI-test process.
+Audio stays owner-only under the run's workspace-local `.jarvis/` directory.
 The app receives it through its ordinary system-audio capture path.
 
 [`ReleaseReadinessTests+Journey.swift`](../Tests/ReleaseReadiness/ReleaseReadinessTests+Journey.swift)

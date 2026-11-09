@@ -188,20 +188,13 @@ def run(arguments, *, timeout, log=None):
         raise ValueError("Private subprocess failed: " + log.name) from None
 
 
-def check_system_playback(speech, evidence):
-    started = time.monotonic()
-    receipt = {"stage": "system-player-before-xctest", "passed": False, "timedOut": False}
-    try:
-        with (evidence / "private-playback.log").open("w") as output:
-            subprocess.run([str(evidence / "derived/readiness-afplay"), str(speech)], check=True, timeout=30,
-                           stdout=output, stderr=subprocess.STDOUT)
-        receipt["passed"] = True
-    except subprocess.TimeoutExpired:
-        receipt["timedOut"] = True
-        raise ValueError("System playback failed before UI-test startup") from None
-    finally:
-        receipt["elapsedSeconds"] = round(time.monotonic() - started, 3)
-        (evidence / "stage.json").write_text(json.dumps(receipt) + "\n")
+def play_requested_question(evidence, speech, player):
+    request = evidence / "play-question"
+    if not request.exists():
+        return
+    request.unlink()
+    run([str(player), str(speech)], timeout=30, log=evidence / "private-playback.log")  # ghost-mode-allowed: fixed system-speech fixture on the hosted test Mac
+    (evidence / "question-played").touch(mode=0o600, exist_ok=False)
 
 
 def owned_processes(roots, ownership):
@@ -227,7 +220,7 @@ def owned_processes(roots, ownership):
     return found
 
 
-def run_ui(arguments, *, timeout, log, roots, evidence):
+def run_ui(arguments, *, timeout, log, roots, evidence, speech, player):
     ownership = runpy.run_path(str(ROOT / "scripts/test-display/supervisor.py"))
     if owned_processes(roots, ownership):
         raise ValueError("Refusing pre-existing installed-app or UI-runner processes")
@@ -249,6 +242,8 @@ def run_ui(arguments, *, timeout, log, roots, evidence):
                 phase = "process-monitor"
                 for identity in owned_processes(roots, ownership):
                     observed[identity["pid"]] = identity
+                phase = "fixture-playback"
+                play_requested_question(evidence, speech, player)
                 phase = "command-deadline"
                 if time.monotonic() >= deadline:
                     timed_out = True
@@ -478,8 +473,7 @@ def run_phase(name, version, app, evidence, derived, template, speech, architect
     phase = evidence / name
     phase.mkdir(mode=0o700)
     environment = {"JARVIS_READINESS_APP_PATH": str(app), "JARVIS_READINESS_EXPECTED_VERSION": version,
-                   "JARVIS_READINESS_PHASE": name, "JARVIS_READINESS_SPEECH_FILE": str(speech),
-                   "JARVIS_READINESS_PLAYER": str(derived / "readiness-afplay")}
+                   "JARVIS_READINESS_PHASE": name}
     if upgrade_profile is not None:
         environment["JARVIS_READINESS_UPGRADE_PROFILE"] = str(upgrade_profile)
     configured = configure_manifest(template, phase, environment)
@@ -491,7 +485,8 @@ def run_phase(name, version, app, evidence, derived, template, speech, architect
                     "-destination", f"platform=macOS,arch={architecture}", "-resultBundlePath", str(result),
                     "-only-testing:ReleaseReadiness/ReleaseReadinessTests/testInstalledJourney",
                     "-parallel-testing-enabled", "NO", "-maximum-test-execution-time-allowance", "1200"],
-                   timeout=1320, log=phase / "test.log", roots=[app, derived], evidence=phase)
+                   timeout=1320, log=phase / "test.log", roots=[app, derived], evidence=phase,
+                   speech=speech, player=derived / "readiness-afplay")
         finally:
             collect_authorization(authorization, phase, required=False)
     finally:
@@ -544,7 +539,6 @@ def main():
     run(["/usr/bin/say", "-v", "Samantha", "-r", "135", "-o", str(speech),
          "How does binary search find a number in a sorted list?"], timeout=60, log=evidence / "speech.log")
     speech.chmod(0o600)
-    check_system_playback(speech, evidence)
     app.parent.mkdir(exist_ok=True)
     keyfile = profile / "openai-api-key"
     ownership = runpy.run_path(str(ROOT / "scripts/test-display/supervisor.py"))

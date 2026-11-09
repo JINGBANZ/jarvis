@@ -120,8 +120,6 @@ final class ReleaseReadinessTests: XCTestCase {
                     welcome = app.windows["Welcome to Jarvis"]
                     let currentPID = try candidateProcessID()
                     replacementPID = currentPID
-                    pendingRelaunch.withLock { $0?.operation = "activation" }
-                    if NSRunningApplication(processIdentifier: currentPID)?.isActive != true { app.activate() }
                     pendingRelaunch.withLock { $0 = nil }
                 case "I’m Ready":
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 3, "Every permission must be positively granted")
@@ -285,6 +283,7 @@ final class ReleaseReadinessTests: XCTestCase {
             recordDiscovery()
             if matches.count == 1 {
                 let (owner, permissions, dialog) = matches[0]
+                self.attachEvidence(name: "permission-consent-matched")
                 action = .consent(permissions, dialog)
                 consentOwner = owner
                 return true
