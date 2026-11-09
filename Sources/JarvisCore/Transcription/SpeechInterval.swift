@@ -1,6 +1,5 @@
 import Foundation
 
-/// Measured speech boundaries on the session clock, independent of transcript delivery.
 public struct SpeechInterval: Equatable, Sendable {
     public let startedAt: TimeInterval
     public let endedAt: TimeInterval

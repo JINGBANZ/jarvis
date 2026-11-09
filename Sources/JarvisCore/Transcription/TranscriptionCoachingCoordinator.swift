@@ -117,7 +117,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         pendingLatestSpeechTime = max(pendingLatestSpeechTime ?? at, at)
         pendingTranscriptBoundary = max(pendingTranscriptBoundary ?? 0, transcriptBoundary)
         let generation = generation
-        // Unknown speech timing uses receipt time for Activity ordering, as in the transcript chronology.
+        // Receipt-based estimates use the same chronology in Activity and model context.
         activity?.record(
             .heard(speaker: speaker, text: text),
             at: Date(timeIntervalSince1970: sessionStart + at))

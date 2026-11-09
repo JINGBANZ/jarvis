@@ -58,7 +58,9 @@ import JarvisBrainProviders
             if index != 2 && index != 6 {
                 transcript.append(.init(speaker: .them,
                 text: "Ledger question \(index + 1): explain checkpoint ownership when a duplicate arrives after a worker transfer.",
-                at: Double(100 + index), endedAt: Double(100 + index)))
+                observedAt: Double(100 + index),
+                speechInterval: index == 1 ? nil : SpeechInterval(
+                    startedAt: Double(100 + index), endedAt: Double(100 + index))))
             }
             outcomes.append(await driver.handleTrigger(trigger))
         }
@@ -85,6 +87,8 @@ import JarvisBrainProviders
         let initialIndices = captured.indices.filter { captured[$0].phase == .initial }
         #expect(initialIndices.count == 8)
         let initialRequests = initialIndices.map { requests[$0] }
+        let estimatedRequest = try canonical(items(initialRequests[1], provider: provider))
+        #expect(String(decoding: estimatedRequest, as: UTF8.self).contains("estimated from transcript receipt"))
         #expect(try prefixResults(initialRequests, provider: provider) == Array(repeating: true, count: 7))
         let instructionsKey = switch provider {
         case .claudeSubscription: "system"

@@ -8,10 +8,10 @@ public enum Speaker: String, Sendable, Hashable {
 public struct TranscriptLine: Sendable {
     public let speaker: Speaker
     public let text: String
-    /// Chronology key: measured speech start when known, otherwise transcript receipt time.
-    public let at: TimeInterval
-    public let speechInterval: SpeechInterval?
-    public var endedAt: TimeInterval? { speechInterval?.endedAt }
+    public let interval: SpeechInterval
+    public let timingIsEstimated: Bool
+    public var at: TimeInterval { interval.startedAt }
+    public var endedAt: TimeInterval { interval.endedAt }
 
     public init(speaker: Speaker, text: String, at: TimeInterval, endedAt: TimeInterval) {
         self.init(speaker: speaker, text: text, observedAt: at,
@@ -19,10 +19,12 @@ public struct TranscriptLine: Sendable {
     }
 
     public init(speaker: Speaker, text: String, observedAt: TimeInterval, speechInterval: SpeechInterval?) {
+        precondition(observedAt.isFinite && observedAt >= 0)
         self.speaker = speaker
         self.text = text
-        self.speechInterval = speechInterval
-        self.at = speechInterval?.startedAt ?? observedAt
+        // Receipt supplies a labelled point estimate, never a claimed speech duration.
+        self.interval = speechInterval ?? SpeechInterval(startedAt: observedAt, endedAt: observedAt)!
+        self.timingIsEstimated = speechInterval == nil
     }
 }
 
@@ -41,7 +43,7 @@ public final class RollingTranscript: @unchecked Sendable {
     public func append(_ line: TranscriptLine) -> Int {
         lock.lock(); defer { lock.unlock() }
         chronology.append(line, occurredAt: line.at)
-        let end = line.endedAt ?? line.at
+        let end = line.endedAt
         latestSpeechEnd = max(latestSpeechEnd ?? end, end)
         return chronology.count
     }
@@ -84,18 +86,16 @@ public final class RollingTranscript: @unchecked Sendable {
     where S.Element == TranscriptLine {
         lines
             .map { line in
-                let timing = line.speechInterval.flatMap { interval -> String? in
-                    guard Int(exactly: interval.startedAt.rounded(.down)) != nil,
-                          Int(exactly: interval.endedAt.rounded(.down)) != nil else { return nil }
-                    return "[\(stamp(interval.startedAt))-\(stamp(interval.endedAt))]"
-                } ?? "[speech time unknown]"
+                let timing = line.timingIsEstimated
+                    ? "[\(stamp(line.at)); estimated from transcript receipt]"
+                    : "[\(stamp(line.at))-\(stamp(line.endedAt))]"
                 return "\(timing) \(line.speaker.rawValue): \(line.text)"
             }
             .joined(separator: "\n")
     }
 
     static func stamp(_ t: TimeInterval) -> String {
-        let total = Int(t.rounded(.down))
-        return String(format: "%02d:%02d", total / 60, total % 60)
+        guard let total = Int(exactly: t.rounded(.down)) else { return "\(t)s" }
+        return String(format: "%02lld:%02lld", total / 60, total % 60)
     }
 }

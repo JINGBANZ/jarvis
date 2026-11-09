@@ -92,10 +92,10 @@ extension TranscriptTests {
 
 
 extension TranscriptTests {
-    @Test func unformattableEndpointPreservesTextWithUnknownTiming() {
+    @Test func unformattableEndpointPreservesTextAndItsNumericTime() {
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "retained words", at: 1, endedAt: 1e20))
-        #expect(transcript.renderFrom(index: 0).text == "[speech time unknown] me: retained words")
+        #expect(transcript.renderFrom(index: 0).text == "[00:01-1e+20s] me: retained words")
     }
 
     @Test func representableFractionalEndpointsKeepMeasuredTiming() {
@@ -108,9 +108,20 @@ extension TranscriptTests {
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "retained words", observedAt: 42, speechInterval: nil))
         let snapshot = transcript.renderFrom(index: 0)
-        #expect(snapshot.text == "[speech time unknown] me: retained words")
+        #expect(snapshot.text == "[00:42; estimated from transcript receipt] me: retained words")
         #expect(snapshot.lines.first?.at == 42)
-        #expect(snapshot.lines.first?.speechInterval == nil)
-        #expect(!snapshot.text.contains("00:42"))
+        #expect(snapshot.lines.first?.timingIsEstimated == true)
+        #expect(snapshot.lines.first?.interval == SpeechInterval(startedAt: 42, endedAt: 42))
+        #expect(snapshot.lines.first?.endedAt == 42)
+    }
+
+    @Test func measuredAndEstimatedLinesKeepTheirTimingSourceWhenOrdered() {
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .me, text: "estimated words", observedAt: 42, speechInterval: nil))
+        transcript.append(.init(speaker: .them, text: "measured words", at: 10, endedAt: 12))
+        let snapshot = transcript.renderFrom(index: 0)
+        #expect(snapshot.text == "[00:10-00:12] them: measured words\n[00:42; estimated from transcript receipt] me: estimated words")
+        #expect(snapshot.lines.map(\.timingIsEstimated) == [true, false])
+        #expect(transcript.silenceDuration(now: 45) == 3)
     }
 }

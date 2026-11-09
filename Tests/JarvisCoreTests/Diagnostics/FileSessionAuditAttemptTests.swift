@@ -43,6 +43,9 @@ import Testing
         #expect(lines[0]["classification"] as? String == "composite_filler")
         #expect(lines[0]["brain_facing"] as? Bool == false)
         #expect(lines[1]["brain_facing"] as? Bool == true)
+        #expect(lines[1]["at_source"] as? String == "speech")
+        #expect(lines[1]["speech_started_at"] as? Double == 2)
+        #expect(lines[1]["speech_ended_at"] as? Double == 2)
         #expect(events[1]["terminal"] as? String == "stay_silent")
         #expect(events[1]["outcome"] as? String == "silent_by_model")
     }
@@ -71,7 +74,7 @@ import Testing
         #expect(recorded["classification"] as? String == "composite_filler")
         #expect(recorded["brain_facing"] as? Bool == true)
         #expect(recorded["at"] as? Double == 12)
-        #expect(recorded["at_source"] as? String == "transcript_receipt")
+        #expect(recorded["at_source"] as? String == "transcript_receipt_estimate")
         #expect(recorded["speech_started_at"] is NSNull)
         #expect(recorded["speech_ended_at"] is NSNull)
     }

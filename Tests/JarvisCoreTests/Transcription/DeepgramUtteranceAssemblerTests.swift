@@ -211,7 +211,7 @@ extension DeepgramUtteranceAssemblerTests {
         #expect(clock.sessionInterval(SpeechInterval(startedAt: 0.75, endedAt: 1.25)) == nil)
     }
 
-    @Test func finalCrossingCaptureRestartRetainsTextWithUnknownTiming() throws {
+    @Test func finalCrossingCaptureRestartRetainsTextWithEstimatedTiming() throws {
         var sequence = AudioCaptureSequence()
         var clock = DeepgramLiveSession.AudioClock()
         clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 10, duration: 1)
@@ -236,7 +236,8 @@ extension DeepgramUtteranceAssemblerTests {
         coordinator.stop()
         #expect(transcript.count == 1)
         #expect(transcript.renderFrom(index: 0).text.contains("Keep these words"))
-        #expect(transcript.renderFrom(index: 0).text.contains("unknown"))
+        #expect(transcript.renderFrom(index: 0).text.contains("estimated from transcript receipt"))
+        #expect(transcript.renderFrom(index: 0).lines.first?.timingIsEstimated == true)
     }
 
     @Test func sentAudioGapRejectsCrossingFinalsButLaterMeasuredSpeechRecovers() {

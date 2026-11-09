@@ -258,7 +258,7 @@ extension TranscriptionCoachingCoordinatorTests {
         }
         await waitForMainQueue(after: 0.02)
         #expect(transcript.count == 3)
-        #expect(transcript.renderFrom(index: 0).text.components(separatedBy: "[speech time unknown]").count == 4)
+        #expect(transcript.renderFrom(index: 0).text.components(separatedBy: "[00:50; estimated from transcript receipt]").count == 4)
         #expect(events.turnCount > 0)
         coordinator.stop()
     }

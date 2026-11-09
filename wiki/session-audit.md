@@ -56,8 +56,10 @@ and [`CoachingRequestContext`](../Sources/JarvisCore/Diagnostics/CoachingRequest
 recording it shares the same optional evidence contract as the raw traffic.
 
 Attempt transcript records distinguish their chronology key from measured speech timing.
-`SessionAuditWorker` records whether the key came from speech or transcript receipt and keeps
-measured boundaries nullable; receipt time is never evidence of when unknown-timing words were spoken.
+`SessionAuditWorker` labels a receipt-based estimate with `at_source: transcript_receipt_estimate`;
+measured speech keeps `at_source: speech`. Every line has a chronology timestamp, while measured
+speech boundaries remain nullable. An estimated receipt timestamp neither claims a speech duration
+nor establishes whether the words preceded or followed a reply.
 
 ## Contract
 
