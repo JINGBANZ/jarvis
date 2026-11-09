@@ -389,12 +389,27 @@ class AudioRouteTests(unittest.TestCase):
         for key in ("micUID", "systemUID", "micChannels", "sampleRate"):
             del receipt[key]
         receipt.update(check="fixture-capture-consent-bootstrap", mode="authorize", phase="consent",
-                       microphoneAuthorized=True, tapCreated=True, nativeConsentAcknowledged=True, captureGrantProven=False)
+                       microphoneAuthorized=True, tapCreated=True, nativeConsentAcknowledged=True, captureGrantProven=False,
+                       microphoneRequestUptime=100.0, microphoneFinishedUptime=110.0, microphoneCompletionUptime=109.0,
+                       microphoneCallbackReceived=True, microphoneAuthorizationStatus=3)
         PROBE["validate_audio_receipt"](receipt, "authorize", "consent")
         for key, value in (("nativeConsentAcknowledged", False), ("microphoneAuthorized", False),
                            ("captureGrantProven", True), ("tapCreated", 1)):
             with self.assertRaises(ValueError):
                 PROBE["validate_audio_receipt"]({**receipt, key: value}, "authorize", "consent")
+
+    def test_microphone_diagnostics_reject_malformed_status_or_clock(self):
+        receipt = self.receipt()
+        for key in ("micUID", "systemUID", "micChannels", "sampleRate"):
+            del receipt[key]
+        receipt.update(check="fixture-capture-consent-bootstrap", mode="authorize", phase="consent", passed=False,
+                       microphoneRequestUptime=100.0, microphoneFinishedUptime=130.0,
+                       microphoneCallbackReceived=False, microphoneAuthorizationStatus=0)
+        PROBE["validate_audio_receipt"](receipt, "authorize", "consent", require_pass=False)
+        for key, value in (("microphoneFinishedUptime", 99), ("microphoneRequestUptime", float("nan")),
+                           ("microphoneAuthorizationStatus", 4), ("microphoneCallbackReceived", True)):
+            with self.assertRaises(ValueError):
+                PROBE["validate_audio_receipt"]({**receipt, key: value}, "authorize", "consent", require_pass=False)
 
     def test_emitter_requires_matching_device_complete_tone_and_cleanup(self):
         receipt = self.receipt()

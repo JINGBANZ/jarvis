@@ -217,6 +217,8 @@ final class ReleaseReadinessTests: XCTestCase {
         }, object: nil)
         let result = XCTWaiter.wait(for: [visible], timeout: 20)
         guard result == .completed, let action else {
+            let path = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+            try PermissionOwnerEvidence.record(directory: URL(fileURLWithPath: path), filename: "permission-owner.json")
             recordPermissionState(onboarding: onboarding, acceptedConsents: acceptedConsents, reason: .noAction)
             throw ReadinessFailure("No unique validated system consent or ordinary permission action became available")
         }
@@ -350,8 +352,38 @@ final class ReleaseReadinessTests: XCTestCase {
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '1'"), object: toggle)
         let enabledResult = XCTWaiter.wait(for: [enabled], timeout: 5)
         attachEvidence(settings, name: "system-screen-recording-settings-final")
+        let currentPanes = settings.scrollViews.containing(.staticText, identifier: "Screen & System Audio Recording")
+        var finalState: [String: Any] = ["paneCount": currentPanes.count,
+                                        "originalToggle": recordingToggleValue(toggle.value)]
+        if currentPanes.count == 1 {
+            let currentPane = currentPanes.element
+            let heading = currentPane.staticTexts["Screen & System Audio Recording"]
+            let audioHeading = currentPane.staticTexts["System Audio Recording Only"]
+            let currentSections = currentPane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex.filter {
+                $0.frame.height > 0 && $0.frame.minY >= heading.frame.maxY && $0.frame.maxY <= audioHeading.frame.minY
+            }
+            finalState["screenSectionCount"] = currentSections.count
+            if currentSections.count == 1, let section = currentSections.first {
+                let toggles = section.switches.matching(identifier: "Jarvis_Toggle")
+                finalState["toggleCount"] = toggles.count
+                if toggles.count == 1 { finalState["freshToggle"] = recordingToggleValue(toggles.element.value) }
+            }
+        }
+        let evidence = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+        try JSONSerialization.data(withJSONObject: finalState).write(
+            to: URL(fileURLWithPath: evidence).appendingPathComponent("recording-final.json"), options: .atomic)
         XCTAssertEqual(enabledResult, .completed, "Screen-recording grant must be enabled")
         return relaunches
+    }
+
+    private func recordingToggleValue(_ value: Any?) -> [String: Any] {
+        if let value = value as? String {
+            return ["kind": "string", "knownBoolean": ["0", "1"].contains(value), "enabled": value == "1"]
+        }
+        if let value = value as? NSNumber {
+            return ["kind": "number", "knownBoolean": value == 0 || value == 1, "enabled": value == 1]
+        }
+        return ["kind": value == nil ? "absent" : "other", "knownBoolean": false, "enabled": false]
     }
 
     private func prepareProfile(completed: Bool, placeholderCredential: Bool = false) throws {

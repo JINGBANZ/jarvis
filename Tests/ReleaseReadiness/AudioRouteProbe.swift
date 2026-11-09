@@ -99,6 +99,11 @@ struct AudioRouteProbe {
         var defaultsRestored = true
         var resourcesReleased = true
         var microphoneAuthorized: Bool?
+        var microphoneRequestUptime: Double?
+        var microphoneCompletionUptime: Double?
+        var microphoneFinishedUptime: Double?
+        var microphoneAuthorizationStatus: Int?
+        var microphoneCallbackReceived: Bool?
         var tapCreated: Bool?
         var nativeConsentAcknowledged: Bool?
         var captureGrantProven: Bool?
@@ -107,6 +112,7 @@ struct AudioRouteProbe {
 
     private struct ConsentState: Sendable {
         var microphoneResult: Bool?
+        var microphoneCompletionUptime: Double?
         var interrupted = false
     }
 
@@ -314,18 +320,32 @@ struct AudioRouteProbe {
         let state = OSAllocatedUnfairLock(initialState: ConsentState())
         let sources = signalSources { state.withLock { $0.interrupted = true } }
         defer { for source in sources { source.cancel() } }
+        receipt.microphoneRequestUptime = ProcessInfo.processInfo.systemUptime
         AVCaptureDevice.requestAccess(for: .audio) { granted in
-            state.withLock { $0.microphoneResult = granted }
+            let completed = ProcessInfo.processInfo.systemUptime
+            state.withLock {
+                $0.microphoneCompletionUptime = completed
+                $0.microphoneResult = granted
+            }
         }
         let deadline = ProcessInfo.processInfo.systemUptime + 30
-        while ProcessInfo.processInfo.systemUptime < deadline {
-            let current = state.withLock { $0 }
-            if current.interrupted { throw Failure("interrupted") }
-            if let granted = current.microphoneResult {
-                receipt.microphoneAuthorized = granted && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-                break
+        do {
+            defer {
+                let current = state.withLock { $0 }
+                receipt.microphoneCompletionUptime = current.microphoneCompletionUptime
+                receipt.microphoneFinishedUptime = ProcessInfo.processInfo.systemUptime
+                receipt.microphoneAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio).rawValue
+                receipt.microphoneCallbackReceived = current.microphoneResult != nil
             }
-            Thread.sleep(forTimeInterval: 0.02)
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                let current = state.withLock { $0 }
+                if current.interrupted { throw Failure("interrupted") }
+                if let granted = current.microphoneResult {
+                    receipt.microphoneAuthorized = granted && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+                    break
+                }
+                Thread.sleep(forTimeInterval: 0.02)
+            }
         }
         guard state.withLock({ $0.microphoneResult }) != nil else { throw Failure("microphone authorization request timed out") }
         guard receipt.microphoneAuthorized == true else { throw Failure("microphone authorization was not granted") }

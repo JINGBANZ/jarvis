@@ -126,7 +126,9 @@ jobs:
             .jarvis/release-ui-probe/*/permission-state.json
             .jarvis/release-ui-probe/*/permission-initial.json
             .jarvis/release-ui-probe/*/permission-discovery.json
+            .jarvis/release-ui-probe/*/permission-owner.json
             .jarvis/release-ui-probe/*/relaunch-control.json
+            .jarvis/release-ui-probe/*/recording-final.json
             .jarvis/release-ui-probe/*/authorization.json
             .jarvis/release-ui-probe/*/authorization-process.json
             .jarvis/release-ui-probe/*/authorization-owner.json
@@ -136,6 +138,8 @@ jobs:
             .jarvis/release-ui-probe/*/probe.json
             .jarvis/release-ui-probe/*/audio-stage.json
             .jarvis/release-ui-probe/*/audio-issue.json
+            .jarvis/release-ui-probe/*/audio-consent-timing.json
+            .jarvis/release-ui-probe/*/audio-permission-owner.json
             .jarvis/release-ui-probe/*/fixture-consents.json
             .jarvis/release-ui-probe/*/route-authorize.json
             .jarvis/release-ui-probe/*/route-mic-capture.json

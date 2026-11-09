@@ -41,12 +41,22 @@ final class AudioFixtureTests: XCTestCase {
 
         try stage("fixture-consents")
         let acknowledgement = directory.appendingPathComponent("fixture-consents.ack")
+        var consentTiming: [String: Any] = ["launchRequestedUptime": ProcessInfo.processInfo.systemUptime]
+        try writeConsentTiming(consentTiming)
         let authorization = try await launch(["--authorize", "--acknowledgement", acknowledgement.path,
                                         "--receipt", directory.appendingPathComponent("private-authorize.json").path])
+        consentTiming["launchReturnedUptime"] = ProcessInfo.processInfo.systemUptime
+        consentTiming["launchReturnedFinishedLaunching"] = authorization.isFinishedLaunching
+        consentTiming["launchReturnedTerminated"] = authorization.isTerminated
+        try writeConsentTiming(consentTiming)
         var grants: Set<String> = []
         for _ in 0..<2 {
             let (permission, button) = try nextConsent(excluding: grants)
+            consentTiming[permission + "AllowStartedUptime"] = ProcessInfo.processInfo.systemUptime
+            try writeConsentTiming(consentTiming)
             button.click()
+            consentTiming[permission + "AllowCompletedUptime"] = ProcessInfo.processInfo.systemUptime
+            try writeConsentTiming(consentTiming)
             XCTAssertTrue(grants.insert(permission).inserted)
             try stage("fixture-\(permission)-allowed")
         }
@@ -105,7 +115,11 @@ final class AudioFixtureTests: XCTestCase {
             found = matches[0]
             return true
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 25), .completed,
+        let outcome = XCTWaiter.wait(for: [ready], timeout: 25)
+        if outcome != .completed {
+            try PermissionOwnerEvidence.record(directory: XCTUnwrap(evidence), filename: "audio-permission-owner.json")
+        }
+        XCTAssertEqual(outcome, .completed,
                        "The fixture requires its own unique native Allow action")
         return try XCTUnwrap(found)
     }
@@ -160,6 +174,11 @@ final class AudioFixtureTests: XCTestCase {
         let record: [String: Any] = ["stage": value, "uptime": ProcessInfo.processInfo.systemUptime]
         try JSONSerialization.data(withJSONObject: record).write(
             to: try XCTUnwrap(evidence).appendingPathComponent("audio-stage.json"), options: .atomic)
+    }
+
+    private func writeConsentTiming(_ values: [String: Any]) throws {
+        try JSONSerialization.data(withJSONObject: values).write(
+            to: try XCTUnwrap(evidence).appendingPathComponent("audio-consent-timing.json"), options: .atomic)
     }
 
     private func cleanUp() throws {
