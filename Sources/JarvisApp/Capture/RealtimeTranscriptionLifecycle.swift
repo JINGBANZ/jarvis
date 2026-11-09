@@ -86,7 +86,6 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let didStart = ledger.recordSpeechStarted(
             itemID: itemID, audioStartMilliseconds: audioStartMilliseconds,
             timelineOrigin: timelineOrigin)
-        reconcileCompletedItemLocked(itemID: itemID)
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
         lock.unlock()
@@ -114,8 +113,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
 
     func recordCommittedLocalTurn(
         itemID: String,
-        startedAt: TimeInterval,
-        endedAt: TimeInterval,
+        startedAt: TimeInterval?,
+        endedAt: TimeInterval?,
         consumesUnboundTurn: Bool,
         socketGeneration: Int
     ) -> Bool {
@@ -123,17 +122,15 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         guard !stopped, isCurrentGeneration(socketGeneration) else {
             lock.unlock(); return false
         }
-        let startMilliseconds = max(0, Int((startedAt * 1_000).rounded()))
-        let endMilliseconds = max(startMilliseconds, Int((endedAt * 1_000).rounded()))
-        let didStart = ledger.recordSpeechStarted(
-            itemID: itemID,
-            audioStartMilliseconds: startMilliseconds,
-            timelineOrigin: 0)
+        let startMilliseconds = startedAt.flatMap(Self.milliseconds)
+        let endMilliseconds = endedAt.flatMap(Self.milliseconds)
+        let didStart = startMilliseconds.map {
+            ledger.recordSpeechStarted(itemID: itemID, audioStartMilliseconds: $0, timelineOrigin: 0)
+        } ?? false
         let didStop = ledger.recordSpeechStopped(
             itemID: itemID,
             audioEndMilliseconds: endMilliseconds)
         if didStart || didStop { locallyCommittedItemIDs.insert(itemID) }
-        reconcileCompletedItemLocked(itemID: itemID)
         if consumesUnboundTurn, unboundLocalTurnCount > 0 { unboundLocalTurnCount -= 1 }
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
@@ -143,6 +140,12 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         }
         if didStop { scheduleTerminalDeadline(itemID: itemID, socketGeneration: socketGeneration) }
         return didStart || didStop
+    }
+
+    private static func milliseconds(_ seconds: TimeInterval) -> Int? {
+        let value = (seconds * 1_000).rounded()
+        guard value.isFinite, value >= 0, value < Double(Int.max) else { return nil }
+        return Int(value)
     }
 
     func discardUnboundLocalTurns(_ count: Int) {
@@ -168,12 +171,6 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         lock.lock()
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return }
         let item = ledger.recordCompleted(itemID: itemID, transcript: text, speaker: speaker)
-        if ledger.isPending(itemID: itemID) {
-            updateCoachingActivityLocked()
-            lock.unlock()
-            scheduleActiveDeadline(itemID: itemID, socketGeneration: socketGeneration)
-            return
-        }
         locallyCommittedItemIDs.remove(itemID)
         discardServerConfirmedAudioLocked()
         let handled = reconcileReplacementItemLocked(
@@ -213,7 +210,6 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return false }
         let didStop = ledger.recordSpeechStopped(
             itemID: itemID, audioEndMilliseconds: audioEndMilliseconds)
-        reconcileCompletedItemLocked(itemID: itemID)
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
         lock.unlock()
@@ -298,14 +294,6 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         updateCoachingActivityLocked()
         lock.unlock()
         cancelReplayRecoveryDeadline()
-    }
-
-    private func reconcileCompletedItemLocked(itemID: String) {
-        let wasPending = ledger.isPending(itemID: itemID)
-        let item = ledger.takeCompletedItem(itemID: itemID)
-        guard wasPending, !ledger.isPending(itemID: itemID) else { return }
-        locallyCommittedItemIDs.remove(itemID)
-        _ = reconcileReplacementItemLocked(item, reason: nil)
     }
 
     private func scheduleTerminalDeadline(itemID: String, socketGeneration: Int) {

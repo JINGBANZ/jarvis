@@ -8,15 +8,21 @@ public enum Speaker: String, Sendable, Hashable {
 public struct TranscriptLine: Sendable {
     public let speaker: Speaker
     public let text: String
-    /// Seconds since session start.
+    /// Chronology key: measured speech start when known, otherwise transcript receipt time.
     public let at: TimeInterval
-    public let endedAt: TimeInterval
+    public let speechInterval: SpeechInterval?
+    public var endedAt: TimeInterval? { speechInterval?.endedAt }
+
     public init(speaker: Speaker, text: String, at: TimeInterval, endedAt: TimeInterval) {
+        self.init(speaker: speaker, text: text, observedAt: at,
+                  speechInterval: SpeechInterval(startedAt: at, endedAt: endedAt))
+    }
+
+    public init(speaker: Speaker, text: String, observedAt: TimeInterval, speechInterval: SpeechInterval?) {
         self.speaker = speaker
         self.text = text
-        precondition(SpeechInterval(startedAt: at, endedAt: endedAt) != nil)
-        self.at = at
-        self.endedAt = endedAt
+        self.speechInterval = speechInterval
+        self.at = speechInterval?.startedAt ?? observedAt
     }
 }
 
@@ -35,7 +41,8 @@ public final class RollingTranscript: @unchecked Sendable {
     public func append(_ line: TranscriptLine) -> Int {
         lock.lock(); defer { lock.unlock() }
         chronology.append(line, occurredAt: line.at)
-        latestSpeechEnd = max(latestSpeechEnd ?? line.endedAt, line.endedAt)
+        let end = line.endedAt ?? line.at
+        latestSpeechEnd = max(latestSpeechEnd ?? end, end)
         return chronology.count
     }
 
@@ -68,8 +75,7 @@ public final class RollingTranscript: @unchecked Sendable {
             insertionOrderedLines)
     }
 
-    /// Sorts by `.at` (stable on ties): the two speakers append independently, so insertion order
-    /// isn't spoken order.
+    /// Sorts by measured start or receipt time (stable on ties) across both speaker streams.
     static func render<S: Sequence>(_ lines: S) -> String where S.Element == TranscriptLine {
         renderChronological(ConversationChronology<TranscriptLine>.ordered(lines, occurredAt: \.at))
     }
@@ -77,7 +83,12 @@ public final class RollingTranscript: @unchecked Sendable {
     private static func renderChronological<S: Sequence>(_ lines: S) -> String
     where S.Element == TranscriptLine {
         lines
-            .map { "[\(stamp($0.at))-\(stamp($0.endedAt))] \($0.speaker.rawValue): \($0.text)" }
+            .map { line in
+                let timing = line.speechInterval.map {
+                    "[\(stamp($0.startedAt))-\(stamp($0.endedAt))]"
+                } ?? "[speech time unknown]"
+                return "\(timing) \(line.speaker.rawValue): \(line.text)"
+            }
             .joined(separator: "\n")
     }
 

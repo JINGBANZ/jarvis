@@ -55,6 +55,10 @@ lives in [`BrainCacheObservation`](../Sources/JarvisCore/Diagnostics/BrainCacheO
 and [`CoachingRequestContext`](../Sources/JarvisCore/Diagnostics/CoachingRequestAttribution.swift);
 recording it shares the same optional evidence contract as the raw traffic.
 
+Attempt transcript records distinguish their chronology key from measured speech timing.
+`SessionAuditWorker` records whether the key came from speech or transcript receipt and keeps
+measured boundaries nullable; receipt time is never evidence of when unknown-timing words were spoken.
+
 ## Contract
 
 - Producers submit typed values to one process-level bounded worker. Timestamp rendering, JSON

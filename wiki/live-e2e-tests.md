@@ -407,8 +407,10 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   the newer decision in recall input. The summary size target is soft, with no acceptance ceiling.
   Factual meaning and verification attribution require the separate content review below.
 - **Stored order is not spoken order.** Activity rows and attempt transcripts keep insertion order,
-  and `ConversationChronology` orders them by speech time for the viewer and the model, so a
-  chronology case compares speech times rather than positions in a file.
+  and `ConversationChronology` uses measured speech time when available and receipt time otherwise.
+  The model sees explicit unknown speech timing rather than a fabricated measured range. A chronology
+  case compares measured speech times rather than positions in a file. Missing timing must preserve
+  finalized words; deterministic regressions cover unknown-timing admission separately from real-provider accuracy.
 - **Activity rows belong to attempts by time and file order.** An Activity row carries no attempt id,
   and attempt records stamp whole seconds. The checker assigns a row to the attempt whose start and
   finish bracket its second and breaks ties by file order, which is safe because attempts are strictly

@@ -486,14 +486,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let timelineOffset = analyzerTimelineOffset ?? 0
         let resultStart = CMTimeGetSeconds(result.range.start)
         let resultEnd = CMTimeGetSeconds(CMTimeRangeGetEnd(result.range))
-        guard let speech = SpeechInterval(startedAt: timelineOffset + resultStart,
-                                          endedAt: timelineOffset + resultEnd) else {
-            lock.unlock()
-            jlog("⚠️ Apple Speech final omitted: invalid analyzer speech range")
-            return
-        }
-        let spokenAt = speech.startedAt
-        let spokenEnd = speech.endedAt
+        let speech = SpeechInterval(startedAt: timelineOffset + resultStart,
+                                    endedAt: timelineOffset + resultEnd)
+        let spokenAt = speech?.startedAt
+        let spokenEnd = speech?.endedAt
         let benchmarkItemID: String?
         if benchmark == nil {
             benchmarkItemID = nil
@@ -518,8 +514,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
                 generation: generation,
                 itemID: benchmarkItemID,
                 text: raw,
-                spokenAt: sessionStart + spokenAt,
-                spokenEndAt: sessionStart + spokenEnd,
+                spokenAt: spokenAt.map { sessionStart + $0 },
+                spokenEndAt: spokenEnd.map { sessionStart + $0 },
                 observedAt: clock.now(),
                 transcriptUnavailable: true))
             benchmark?.observer.record(.init(
@@ -529,8 +525,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
                 speaker: speaker.rawValue,
                 generation: generation,
                 itemID: benchmarkItemID,
-                spokenAt: sessionStart + spokenAt,
-                spokenEndAt: sessionStart + spokenEnd,
+                spokenAt: spokenAt.map { sessionStart + $0 },
+                spokenEndAt: spokenEnd.map { sessionStart + $0 },
                 observedAt: clock.now(),
                 transcriptUnavailable: true))
             return
@@ -543,18 +539,18 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             generation: generation,
             itemID: benchmarkItemID,
             text: raw,
-            spokenAt: sessionStart + spokenAt,
-            spokenEndAt: sessionStart + spokenEnd,
+            spokenAt: spokenAt.map { sessionStart + $0 },
+            spokenEndAt: spokenEnd.map { sessionStart + $0 },
             observedAt: clock.now(),
             transcriptUnavailable: false))
         continuityReporter.recordServerSpeech(
             .speechStarted,
-            audioTimeMilliseconds: Int(max(0, spokenAt) * 1_000),
+            audioTimeMilliseconds: spokenAt.flatMap { Int(exactly: ($0 * 1_000).rounded()) },
             sessionAudioTime: spokenAt,
             socketGeneration: generation)
         continuityReporter.recordServerSpeech(
             .speechStopped,
-            audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),
+            audioTimeMilliseconds: spokenEnd.flatMap { Int(exactly: ($0 * 1_000).rounded()) },
             sessionAudioTime: spokenEnd,
             socketGeneration: generation)
         benchmark?.observer.record(.init(
@@ -565,13 +561,13 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             generation: generation,
             itemID: benchmarkItemID,
             text: raw,
-            spokenAt: sessionStart + spokenAt,
-            spokenEndAt: sessionStart + spokenEnd,
+            spokenAt: spokenAt.map { sessionStart + $0 },
+            spokenEndAt: spokenEnd.map { sessionStart + $0 },
             observedAt: clock.now(),
             transcriptUnavailable: false))
         continuityReporter.recordServerSpeech(
             .transcriptionCompleted,
-            audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),
+            audioTimeMilliseconds: spokenEnd.flatMap { Int(exactly: ($0 * 1_000).rounded()) },
             sessionAudioTime: spokenEnd,
             socketGeneration: generation)
     }

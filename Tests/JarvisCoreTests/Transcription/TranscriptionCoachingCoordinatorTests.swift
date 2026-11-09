@@ -247,18 +247,19 @@ private func recordAndStopBeforeQueuedBatchRuns(
 
 
 extension TranscriptionCoachingCoordinatorTests {
-    @Test func missingOrInvalidEndNeverEntersTheTranscriptOrQueuesATurn() async {
+    @Test func missingOrInvalidTimingPreservesWordsAndQueuesATurn() async {
         let transcript = RollingTranscript()
         let events = CoachingEvents()
         let coordinator = makeCoordinator(transcript: transcript, clock: ManualClock(now: 50),
             sessionStart: 0, transcriptBatchingWindow: 0, events: events)
         coordinator.start()
         for end: Double? in [nil, .nan, 1] {
-            #expect(!coordinator.recordFinalizedTranscript("untimed words", spokenAt: 2, spokenEndAt: end, source: "test"))
+            #expect(coordinator.recordFinalizedTranscript("untimed words", spokenAt: 2, spokenEndAt: end, source: "test"))
         }
         await waitForMainQueue(after: 0.02)
-        #expect(transcript.count == 0)
-        #expect(events.turnCount == 0)
+        #expect(transcript.count == 3)
+        #expect(transcript.renderFrom(index: 0).text.components(separatedBy: "[speech time unknown]").count == 4)
+        #expect(events.turnCount > 0)
         coordinator.stop()
     }
 }

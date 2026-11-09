@@ -197,6 +197,48 @@ extension DeepgramUtteranceAssemblerTests {
         #expect(assembler.publishedSpeechInterval == nil)
     }
 
+    @Test func captureRestartPreservesMeasuredSpeechOnBothSidesOfTheBreak() {
+        var sequence = AudioCaptureSequence()
+        var clock = DeepgramLiveSession.AudioClock()
+        clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 10, duration: 1)
+        sequence.markDiscontinuity()
+        clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 20, duration: 1)
+
+        #expect(clock.sessionInterval(SpeechInterval(startedAt: 0.25, endedAt: 0.75))
+            == SpeechInterval(startedAt: 10.25, endedAt: 10.75))
+        #expect(clock.sessionInterval(SpeechInterval(startedAt: 1.25, endedAt: 1.75))
+            == SpeechInterval(startedAt: 20.25, endedAt: 20.75))
+        #expect(clock.sessionInterval(SpeechInterval(startedAt: 0.75, endedAt: 1.25)) == nil)
+    }
+
+    @Test func finalCrossingCaptureRestartRetainsTextWithUnknownTiming() throws {
+        var sequence = AudioCaptureSequence()
+        var clock = DeepgramLiveSession.AudioClock()
+        clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 10, duration: 1)
+        sequence.markDiscontinuity()
+        clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 20, duration: 1)
+        var assembler = Self.liveAssembler()
+        let segments = assembler.receive(.results(.init(
+            transcript: "Keep these words", isFinal: true, speechFinal: true,
+            start: 0.75, end: 1.25, lastWordEnd: 1.25, firstWordStart: 0.75)), socket: 1)
+        let interval = clock.sessionInterval(assembler.publishedSpeechInterval)
+        #expect(interval == nil)
+        let text = try #require(DeepgramLiveSession.joinedTranscript(segments, speaker: .me))
+        let transcript = RollingTranscript()
+        let coordinator = TranscriptionCoachingCoordinator(
+            speaker: .me, transcript: transcript, clock: ManualClock(now: 30), sessionStart: 0,
+            transcriptBatchingWindow: 0, silenceTimeout: 60, silenceMaxInterval: 60,
+            silenceEnabled: false, onTurnEnd: { _ in }, onSilence: { _ in },
+            onTranscriptionWorkChanged: { _ in })
+        coordinator.start()
+        #expect(coordinator.recordFinalizedTranscript(
+            text, spokenAt: interval?.startedAt, spokenEndAt: interval?.endedAt, source: "deepgram-live"))
+        coordinator.stop()
+        #expect(transcript.count == 1)
+        #expect(transcript.renderFrom(index: 0).text.contains("Keep these words"))
+        #expect(transcript.renderFrom(index: 0).text.contains("unknown"))
+    }
+
     @Test func sentAudioGapRejectsCrossingFinalsButLaterMeasuredSpeechRecovers() {
         var clock = DeepgramLiveSession.AudioClock()
         let words = SpeechInterval(startedAt: 0.1, endedAt: 0.2)

@@ -60,9 +60,9 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
     private var routeListener: AudioObjectPropertyListenerBlock?
     private var pendingRebuild: DispatchWorkItem?
     private var stopped = false
-    /// IOProc-only, and kept across route rebuilds so a gap stays diagnosable.
-    private var micSequence: UInt64 = 0
-    private var systemSequence: UInt64 = 0
+    /// The IOProc advances these while running; rebuild changes them only after teardown drains it.
+    private var micSequence = AudioCaptureSequence()
+    private var systemSequence = AudioCaptureSequence()
 
     init(audioFormat: TranscriptionAudioFormat,
          localTurnDetectionSilenceDuration: TimeInterval?,
@@ -261,6 +261,8 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         lock.lock()
         if !stopped {
             teardownAudioLocked()
+            micSequence.markDiscontinuity()
+            systemSequence.markDiscontinuity()
             // Reset detector stream state across the route splice. Teardown drained the IOProc, so
             // the serial delivery queue runs this after every pre-rebuild chunk.
             deliveryQueue.async { [micTurnDetector, systemTurnDetector] in
@@ -329,16 +331,14 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         guard micData != nil || systemData != nil else { return }
         let capturedAt = Date().timeIntervalSince1970
         let micChunk: SequencedAudioChunk? = micData.map { data in
-            micSequence &+= 1
             return SequencedAudioChunk(
-                data: data, sequence: micSequence,
+                data: data, sequence: micSequence.next(),
                 sampleCount: data.count / MemoryLayout<Int16>.size,
                 capturedAt: capturedAt)
         }
         let systemChunk: SequencedAudioChunk? = systemData.map { data in
-            systemSequence &+= 1
             return SequencedAudioChunk(
-                data: data, sequence: systemSequence,
+                data: data, sequence: systemSequence.next(),
                 sampleCount: data.count / MemoryLayout<Int16>.size,
                 capturedAt: capturedAt)
         }

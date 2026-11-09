@@ -89,3 +89,16 @@ extension TranscriptTests {
         #expect(SpeechInterval(startedAt: -1, endedAt: 4) == nil)
     }
 }
+
+
+extension TranscriptTests {
+    @Test func receiptChronologyDoesNotMasqueradeAsMeasuredSpeech() {
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .me, text: "retained words", observedAt: 42, speechInterval: nil))
+        let snapshot = transcript.renderFrom(index: 0)
+        #expect(snapshot.text == "[speech time unknown] me: retained words")
+        #expect(snapshot.lines.first?.at == 42)
+        #expect(snapshot.lines.first?.speechInterval == nil)
+        #expect(!snapshot.text.contains("00:42"))
+    }
+}

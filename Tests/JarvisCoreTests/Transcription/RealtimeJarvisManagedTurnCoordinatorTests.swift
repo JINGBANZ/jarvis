@@ -3,19 +3,30 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct RealtimeJarvisManagedTurnCoordinatorTests {
-    @Test func rejectedTimingDoesNotQueueATurnOrBlockTheNextCommit() throws {
+    @Test(arguments: [1.5, .nan, .infinity])
+    func unavailableTimingStillCommitsItsOwnAudioBeforeTheNextTurn(commitAt: Double) throws {
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
-        let invalidTurnAccepted = coordinator.recordTurn(startedAt: 1, endedAt: 2,
-                                                         committedThroughAt: 1.5, throughSequenceNumber: 4)
-        #expect(!invalidTurnAccepted)
-        #expect(coordinator.unresolvedTurnCount == 0)
+        coordinator.recordTurn(startedAt: 1, endedAt: 2,
+                               committedThroughAt: commitAt, throughSequenceNumber: 4)
+        coordinator.recordTurn(startedAt: 3, endedAt: 4,
+                               committedThroughAt: 4.5, throughSequenceNumber: 9)
+        #expect(coordinator.unresolvedTurnCount == 2)
+        #expect(!coordinator.allowsSendingAudio(sequenceNumber: 5))
+        coordinator.recordAudioSent(sequenceNumber: 4)
+        let firstReady = coordinator.takeReadyCommit()
+        let first = try #require(firstReady)
+        #expect(first.throughSequenceNumber == 4)
+        #expect(first.startedAt == nil)
+        #expect(first.endedAt == nil)
+        #expect(!coordinator.allowsSendingAudio(sequenceNumber: 5))
+        coordinator.recordCommitSendCompleted(turnID: first.id)
         #expect(coordinator.allowsSendingAudio(sequenceNumber: 5))
-        let validTurnAccepted = coordinator.recordTurn(startedAt: 3, endedAt: 4,
-                                                       committedThroughAt: 4.5, throughSequenceNumber: 9)
-        #expect(validTurnAccepted)
         coordinator.recordAudioSent(sequenceNumber: 9)
-        let commit = coordinator.takeReadyCommit()
-        #expect(try #require(commit).startedAt == 3)
+        let secondReady = coordinator.takeReadyCommit()
+        let second = try #require(secondReady)
+        #expect(second.startedAt == 3)
+        #expect(second.endedAt == 4)
+        #expect(second.throughSequenceNumber == 9)
     }
 
     @Test func commitWaitsUntilAudioThroughBoundaryWasSent() throws {

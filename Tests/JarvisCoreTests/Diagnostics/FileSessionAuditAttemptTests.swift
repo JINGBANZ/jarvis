@@ -50,7 +50,7 @@ import Testing
     @Test func recordsActualRequestInclusionIndependentlyFromClassification() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = await FileSessionAudit.readyForTesting(directory: dir)
-        let line = TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1, endedAt: 1)
+        let line = TranscriptLine(speaker: .them, text: "Uh. Hmm.", observedAt: 12, speechInterval: nil)
         log.recordStarted(
             attemptID: 1,
             wake: .trigger,
@@ -70,5 +70,9 @@ import Testing
         let recorded = try #require((event["transcript"] as? [[String: Any]])?.first)
         #expect(recorded["classification"] as? String == "composite_filler")
         #expect(recorded["brain_facing"] as? Bool == true)
+        #expect(recorded["at"] as? Double == 12)
+        #expect(recorded["at_source"] as? String == "transcript_receipt")
+        #expect(recorded["speech_started_at"] is NSNull)
+        #expect(recorded["speech_ended_at"] is NSNull)
     }
 }

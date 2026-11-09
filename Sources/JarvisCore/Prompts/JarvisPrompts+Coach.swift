@@ -25,9 +25,11 @@ extension JarvisPrompts {
             # Conversation context
             - "me:" is the user; "them:" is another participant. Speak only to "me"; never answer "them"
               directly or speak as either participant.
-            - Lines formatted [start-end] speaker: words are completed speech segments. Both times are known,
+            - Lines formatted [start-end] speaker: words are completed speech segments. Both times are measured,
               in minutes and seconds since session start. They describe speech, not when transcription
-              arrived. Transcripts may arrive late or overlap reply display. You receive transcripts, not vocal tone.
+              arrived. A line marked [speech time unknown] has no measured range; do not infer whether it
+              preceded or followed a reply from its position in history. Transcripts may arrive late or
+              overlap reply display. You receive transcripts, not vocal tone.
             - Reply receipts say when text was shown to the user. Streaming receipts distinguish first visible
               text from the completed reply. Display does not establish that the user read or understood it.
             - Earlier stay_silent calls and their receipts record past choices. Reassess when new evidence

@@ -39,58 +39,36 @@ import Testing
         #expect(!recovery.blocksCoaching)
     }
 
-    @Test func replacementCompletionWaitsForTimingBeforeConsumingFallback() throws {
+    @Test func replacementCompletionWithoutEndTimingConsumesFallbackOnce() throws {
         let ledger = RealtimeTranscriptionLedger()
-        ledger.recordSpeechStarted(itemID: "interrupted", audioStartMilliseconds: 1_000,
-                                   timelineOrigin: 0)
-        ledger.recordSpeechStopped(itemID: "interrupted", audioEndMilliseconds: 2_000)
-        ledger.recordDelta(itemID: "interrupted", delta: "retained partial")
         var recovery = RealtimeReconnectTranscriptionRecovery()
-        recovery.begin(interruptedItems: ledger.resolveAllInterruptedItems(speaker: .me),
+        recovery.begin(interruptedItems: [fallback("retained partial")],
                        duplicateRiskItemCount: 0, replayAvailable: true)
         _ = recovery.markReplacementReady()
-        ledger.clear()
-
         ledger.recordSpeechStarted(itemID: "replacement", audioStartMilliseconds: 1_000,
                                    timelineOrigin: 0)
-        #expect(ledger.recordCompleted(itemID: "replacement", transcript: "actual final",
-                                       speaker: .me) == nil)
-        #expect(ledger.isPending(itemID: "replacement"))
-        #expect(!ledger.isPending(itemID: "interrupted"))
-        #expect(recovery.unresolvedItemCount == 1)
-        #expect(recovery.blocksCoaching)
-
-        ledger.recordSpeechStopped(itemID: "replacement", audioEndMilliseconds: 2_000)
-        let final = try #require(ledger.takeCompletedItem(itemID: "replacement"))
-        #expect(!ledger.isPending(itemID: "replacement"))
+        let final = try #require(ledger.recordCompleted(itemID: "replacement", transcript: "actual final", speaker: .me))
         #expect(final.text == "actual final")
+        #expect(final.spokenEndAt == nil)
+        #expect(!ledger.hasPendingItems)
         #expect(recovery.resolveReplacement(hasUsableText: final.text != nil) == .appendReplacement)
         #expect(!recovery.blocksCoaching)
         #expect(recovery.timeout().isEmpty)
-        #expect(ledger.takeCompletedItem(itemID: "replacement") == nil)
+        #expect(ledger.recordCompleted(itemID: "replacement", transcript: "duplicate", speaker: .me) == nil)
     }
 
-    @Test func filteredReplacementConsumedAfterTimingSettlesExactlyOneFallback() {
+    @Test func filteredReplacementWithoutTimingConsumesExactlyOneFallback() {
         let ledger = RealtimeTranscriptionLedger()
         var recovery = RealtimeReconnectTranscriptionRecovery()
         let first = fallback("first partial"), second = fallback("second partial")
         recovery.begin(interruptedItems: [first, second], duplicateRiskItemCount: 0, replayAvailable: true)
         _ = recovery.markReplacementReady()
-        ledger.recordSpeechStarted(itemID: "filtered", audioStartMilliseconds: 1_000, timelineOrigin: 0)
-        #expect(ledger.recordCompleted(itemID: "filtered", transcript: "Thank you.", speaker: .me) == nil)
-        #expect(ledger.isPending(itemID: "filtered"))
-        #expect(recovery.unresolvedItemCount == 2)
-
-        ledger.recordSpeechStopped(itemID: "filtered", audioEndMilliseconds: 1_100)
-        let wasPending = ledger.isPending(itemID: "filtered")
-        let item = ledger.takeCompletedItem(itemID: "filtered")
-        #expect(wasPending)
-        #expect(!ledger.isPending(itemID: "filtered"))
+        let item = ledger.recordCompleted(itemID: "filtered", transcript: "Thank you.", speaker: .me)
         #expect(item == nil)
+        #expect(!ledger.hasPendingItems)
         #expect(recovery.resolveReplacement(hasUsableText: item?.text != nil) == .useFallback(first))
         #expect(recovery.unresolvedItemCount == 1)
         #expect(ledger.resolveStoppedItemTimeout(itemID: "filtered", speaker: .me) == nil)
-        #expect(!ledger.isPending(itemID: "filtered"))
         #expect(recovery.resolveReplacement(hasUsableText: true) == .appendReplacement)
         #expect(recovery.timeout().isEmpty)
     }

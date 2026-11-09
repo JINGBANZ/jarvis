@@ -586,6 +586,9 @@ final class SessionAuditWorker: @unchecked Sendable {
                         "speaker": line.speaker.rawValue,
                         "text": line.text,
                         "at": line.at,
+                        "at_source": line.speechInterval == nil ? "transcript_receipt" : "speech",
+                        "speech_started_at": line.speechInterval.map { $0.startedAt as Any } ?? NSNull(),
+                        "speech_ended_at": line.speechInterval.map { $0.endedAt as Any } ?? NSNull(),
                         "classification": classification.rawValue,
                         "brain_facing": event.brainFacingTranscriptIndices.contains(index),
                     ]

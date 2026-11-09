@@ -103,22 +103,21 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     ) -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.contains(where: { $0.isLetter || $0.isNumber }) else { return false }
-        guard let spokenAt, let spokenEndAt,
-              let speech = SpeechInterval(startedAt: spokenAt, endedAt: spokenEndAt) else {
-            jlog("⚠️ transcription omitted: measured speech timing unavailable (\(speaker.rawValue), \(source))")
-            return false
+        let speech = spokenAt.flatMap { start in
+            spokenEndAt.flatMap { SpeechInterval(startedAt: start, endedAt: $0) }
         }
-        let at = speech.startedAt
+        let observedAt = clock.now() - sessionStart
+        let at = speech?.startedAt ?? observedAt
 
         lock.lock()
         guard !stopped else { lock.unlock(); return false }
         let transcriptBoundary = transcript.append(
-            .init(speaker: speaker, text: text, at: at, endedAt: speech.endedAt))
+            .init(speaker: speaker, text: text, observedAt: observedAt, speechInterval: speech))
         pending.append(text)
         pendingLatestSpeechTime = max(pendingLatestSpeechTime ?? at, at)
         pendingTranscriptBoundary = max(pendingTranscriptBoundary ?? 0, transcriptBoundary)
         let generation = generation
-        // Stamped with speech time, not completion time, so Activity matches the model's order.
+        // Unknown speech timing uses receipt time for Activity ordering, as in the transcript chronology.
         activity?.record(
             .heard(speaker: speaker, text: text),
             at: Date(timeIntervalSince1970: sessionStart + at))
