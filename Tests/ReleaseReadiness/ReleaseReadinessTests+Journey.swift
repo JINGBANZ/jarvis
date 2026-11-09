@@ -31,13 +31,6 @@ extension ReleaseReadinessTests {
         }
         try checkSkills(app)
         try selectOpenAIBrain(app)
-        attachEvidence(app, name: "journey-manual")
-        if try preferences()["coaching.mode"] as? String != "manual" {
-            app.typeKey(".", modifierFlags: [.command, .option])
-        }
-        try waitUntil("Normal shortcut must select Manual coaching", timeout: 10) {
-            (try? self.preferences()["coaching.mode"] as? String) == "manual"
-        }
         let models = phase == "predecessor" ? ["GPT Transcribe"] : ["GPT Transcribe", "GPT-4o Transcribe"]
         var results: [[String: Any]] = []
         for model in models {
@@ -123,6 +116,13 @@ extension ReleaseReadinessTests {
         XCTAssertTrue(app.statusItems["Jarvis is active"].waitForExistence(timeout: 60),
                       "Both endpoints and capture must reach full active readiness")
         attachEvidence(app, name: "journey-active")
+        attachEvidence(app, name: "journey-manual")
+        if try preferences()["coaching.mode"] as? String != "manual" {
+            app.typeKey(".", modifierFlags: [.command, .option])
+        }
+        try waitUntil("Normal shortcut must select Manual coaching", timeout: 10) {
+            (try? self.preferences()["coaching.mode"] as? String) == "manual"
+        }
         try audioDevices?.verify()
         let fresh = try sessionDirectories().subtracting(previous)
         XCTAssertEqual(fresh.count, 1, "Start must create one fresh production session")
