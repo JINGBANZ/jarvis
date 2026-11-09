@@ -411,7 +411,7 @@ tags created with `GITHUB_TOKEN` never trigger other workflows.
 `package-app.sh` also runs locally for packaging without CI. Create a virtual environment, install
 `scripts/requirements-release.txt` with `--require-hashes`, and pass its interpreter through
 `DMGBUILD_PYTHON`; notarization also needs the one-time
-`xcrun notarytool store-credentials jarvis-notary …` setup. Distributed builds require macOS 14.2 or
+`xcrun notarytool store-credentials jarvis-notary …` setup. Distributed builds require macOS 15 or
 later and run natively on Apple silicon and Intel. Packaging resolves the pinned universal AEC
 dependency, compiles both app architectures, then validates the assembled bundle before signing. The README owns the user
 installation steps; provider credentials remain user-supplied in Settings.

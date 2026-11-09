@@ -13,7 +13,7 @@ let jarvisAppSwiftSettings: [SwiftSetting] = liveE2ESettings + (forceAppleSpeech
 
 let package = Package(
     name: "Jarvis",
-    platforms: [.macOS("14.2")],
+    platforms: [.macOS("15.0")],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),

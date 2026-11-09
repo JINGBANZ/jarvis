@@ -223,7 +223,7 @@ publishing a success marker.
 
 The command exits nonzero when a platform-supported arm is unavailable or incomplete, capture
 continuity fails, a turn goes unrecognized, or the strict reconnect acceptance criteria fail. On
-macOS 14.2–25, Apple Speech arms remain visible in `summary.json` as unavailable because that
+macOS 15–25, Apple Speech arms remain visible in `summary.json` as unavailable because that
 provider requires macOS 26, but they do not fail the runnable matrix unless a filter selected nothing
 else. Inspect the summary to distinguish provider recognition/finalization
 behavior from capture or replay failure. A run's results belong in the pull request that ran it, not

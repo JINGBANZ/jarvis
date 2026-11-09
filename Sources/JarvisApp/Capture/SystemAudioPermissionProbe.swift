@@ -11,7 +11,6 @@ enum SystemAudioPermissionProbe {
     /// Blocks until the user answers the first-run prompt. `nil` means the probe could not run,
     /// which is not a refusal and must not be recorded as one.
     static func requestAccess() -> Bool? {
-        guard #available(macOS 14.2, *) else { return nil }
         guard let processObject = ownProcessObject() else {
             jlog("Jarvis: system-audio probe — Core Audio doesn't know this process")
             return nil

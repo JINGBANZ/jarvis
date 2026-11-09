@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+import xml.etree.ElementTree as ET
 
 
 REPOSITORY = Path(__file__).resolve().parent.parent
@@ -429,6 +430,7 @@ class AppBundleTests(ScriptTests):
         self.assertEqual(info["CFBundleIdentifier"], "com.jarvis.coach.dev")
         self.assertEqual(info["CFBundleName"], "Jarvis Dev")
         self.assertEqual(info["CFBundleDisplayName"], "Jarvis Dev")
+        self.assertEqual(info["LSMinimumSystemVersion"], "15.0")
         self.assertTrue(info["JarvisDevelopmentBuild"])
         self.assertNotIn("SUFeedURL", info)
         with (self.root / "Resources/Info.plist").open("rb") as stream: production = plistlib.load(stream)
@@ -442,6 +444,32 @@ class AppBundleTests(ScriptTests):
         for name in ("XPCServices", "Versions/Current/XPCServices"):
             self.assertFalse(os.path.lexists(bundle / "Contents/Frameworks/Sparkle.framework" / name))
 
+    def test_appcast_uses_the_bundled_minimum_system_version(self):
+        shutil.copytree(REPOSITORY / "Resources", self.root / "Resources")
+        plist = self.root / "Resources/Info.plist"
+        with plist.open("rb") as stream: info = plistlib.load(stream)
+        self.assertEqual(info["LSMinimumSystemVersion"], "15.0")
+        self.environment["SYNTHETIC_PUBLIC_KEY"] = info["SUPublicEDKey"]
+        self.environment["SPARKLE_ED_PRIVATE_KEY"] = "synthetic signing input"
+        # This fixture tests feed metadata; neither signing tool handles a real key.
+        self.executable(self.bin / "swift", '#!/bin/bash\ncat >/dev/null\nprintf "%s\\n" "$SYNTHETIC_PUBLIC_KEY"\n')
+        sign_update = self.root / ".build/artifacts/sparkle/Sparkle/bin/sign_update"
+        sign_update.parent.mkdir(parents=True)
+        self.executable(sign_update, '#!/bin/bash\ncat >/dev/null\necho synthetic-signature\n')
+        script = self.root / "scripts/generate-appcast.sh"
+        script.write_text(script.read_text().replace("/usr/bin/swift -e", "swift -e"))
+        (self.root / "Jarvis.dmg").write_bytes(b"synthetic disk image")
+        for minimum in ("15.0", "15.1"):
+            with self.subTest(minimum=minimum):
+                info["LSMinimumSystemVersion"] = minimum
+                with plist.open("wb") as stream: plistlib.dump(info, stream)
+                result = self.run_script("generate-appcast.sh", "Jarvis.dmg",
+                                         "v" + info["CFBundleShortVersionString"])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                item = ET.parse(self.root / "appcast.xml").find("channel/item")
+                self.assertEqual(item.findtext(
+                    "{http://www.andymatuschak.org/xml-namespaces/sparkle}minimumSystemVersion"), minimum)
+
 
 class UniversalAppTests(ScriptTests):
     def setUp(self):
@@ -452,7 +480,7 @@ class UniversalAppTests(ScriptTests):
         for architecture in ("arm64", "x86_64"):
             binary = self.root / architecture
             subprocess.run(["xcrun", "clang", "-arch", architecture,
-                            "-mmacosx-version-min=14.2", str(source), "-o", str(binary)],
+                            "-mmacosx-version-min=15.0", str(source), "-o", str(binary)],
                            check=True, capture_output=True)
             self.slices[architecture] = binary
         self.universal = self.root / "universal"
@@ -485,7 +513,7 @@ class UniversalAppTests(ScriptTests):
 
     def test_sdk_guard_checks_both_slices_and_rejects_non_binaries(self):
         for architecture in self.slices:
-            subprocess.run(["xcrun", "vtool", "-set-build-version", "macos", "14.2", "26.0",
+            subprocess.run(["xcrun", "vtool", "-set-build-version", "macos", "15.0", "26.0",
                             "-replace", "-output", str(self.slices[architecture]),
                             str(self.slices[architecture])], check=True, capture_output=True)
         subprocess.run(["lipo", "-create", *map(str, self.slices.values()),
@@ -494,7 +522,7 @@ class UniversalAppTests(ScriptTests):
         self.assertEqual(passed.returncode, 0, passed.stderr)
         for architecture in self.slices:
             old = self.root / "old"
-            subprocess.run(["xcrun", "vtool", "-set-build-version", "macos", "14.2", "25.0",
+            subprocess.run(["xcrun", "vtool", "-set-build-version", "macos", "15.0", "25.0",
                             "-replace", "-output", str(old), str(self.slices[architecture])],
                            check=True, capture_output=True)
             other = next(path for arch, path in self.slices.items() if arch != architecture)
