@@ -137,6 +137,7 @@ def transient_download_error(error):
 
 
 def download(url, expected):
+    dependency = {FFMPEG_URL: "ffmpeg", ROC_URL: "roc"}[url]
     for attempt in range(3):
         try:
             with urllib.request.urlopen(url, timeout=60) as source:
@@ -152,6 +153,21 @@ def download(url, expected):
             if isinstance(error, urllib.error.HTTPError):
                 error.close()
             if attempt == 2 or not transient_download_error(error):
+                failure = {"schemaVersion": 1, "dependency": dependency, "attemptCount": attempt + 1}
+                if isinstance(error, urllib.error.HTTPError):
+                    failure["category"] = "http"
+                    if type(error.code) is int and 100 <= error.code <= 599:
+                        failure["httpStatus"] = error.code
+                else:
+                    cause = error.reason if isinstance(error, urllib.error.URLError) else error
+                    categories = ((ssl.SSLCertVerificationError, "certificate"), (TimeoutError, "timeout"),
+                                  (ConnectionResetError, "connection-reset"), (http.client.IncompleteRead, "incomplete-body"),
+                                  (ssl.SSLEOFError, "tls-eof"), (OSError, "transport"))
+                    failure["category"] = next((name for kind, name in categories if isinstance(cause, kind)), "other")
+                    number = getattr(cause, "errno", None)
+                    if type(number) is int and -(2 ** 31) <= number < 2 ** 31:
+                        failure["errno"] = number
+                receipt(BASE / "download-failure.json", failure)
                 raise RuntimeError("Pinned fixture dependency download failed") from None
             time.sleep(attempt + 1)
             continue

@@ -75,11 +75,27 @@ struct AudioRouteProbe {
 
     private struct InvalidBuffer: Sendable {
         let reason: InvalidBufferReason
+        let uptime: Double
         let count: Int
         let index: Int?
         let channels: Int?
         let byteSize: Int?
         let hasData: Bool?
+    }
+
+    private struct DeviceState: Encodable {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        var queryFailed = false
+        var queryOSStatus: OSStatus?
+        var micEnumerated: Bool?
+        var micAlive: Bool?
+        var micObjectMatchesRequested: Bool?
+        var aggregateActiveSubdeviceCount: Int?
+        var aggregateMicActive: Bool?
+        var aggregateActiveTapCount: Int?
+        var aggregateTapMatchesRequested: Bool?
+        var defaultInputMatchesRequested: Bool?
+        var defaultInputMatchesAggregate: Bool?
     }
 
     private struct Options {
@@ -209,11 +225,14 @@ struct AudioRouteProbe {
         var finalDefaultInputMatchesRequested: Bool?
         var finalDefaultOutputMatchesRequested: Bool?
         var invalidBufferReason: InvalidBufferReason?
+        var invalidBufferUptime: Double?
         var invalidBufferCount: Int?
         var invalidBufferIndex: Int?
         var invalidBufferChannels: Int?
         var invalidBufferByteSize: Int?
         var invalidBufferHasData: Bool?
+        var beforeIOState: DeviceState?
+        var failureState: DeviceState?
         var error: String?
     }
 
@@ -328,7 +347,8 @@ struct AudioRouteProbe {
         mutating func invalidate(_ reason: InvalidBufferReason, count: Int, index: Int? = nil, buffer: AudioBuffer? = nil) {
             invalid = true
             if invalidBuffer == nil {
-                invalidBuffer = InvalidBuffer(reason: reason, count: count, index: index,
+                invalidBuffer = InvalidBuffer(reason: reason, uptime: ProcessInfo.processInfo.systemUptime,
+                                              count: count, index: index,
                                               channels: buffer.map { Int($0.mNumberChannels) },
                                               byteSize: buffer.map { Int($0.mDataByteSize) },
                                               hasData: buffer.map { $0.mData != nil })
@@ -363,7 +383,10 @@ struct AudioRouteProbe {
                     current.lastFrameUptime = now
                 }
                 let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
-                guard buffers.count == 2 else { current.invalidate(.count, count: buffers.count); return }
+                guard buffers.count == 2 else {
+                    current.invalidate(.count, count: buffers.count, index: buffers.isEmpty ? nil : 0, buffer: buffers.first)
+                    return
+                }
                 for index in 0..<2 {
                     let buffer = buffers[index]
                     let expectedChannels = index == 0 ? channels : 1
@@ -738,6 +761,7 @@ struct AudioRouteProbe {
         var outputChanged = false
         var tap = AudioObjectID(kAudioObjectUnknown)
         var aggregate = AudioObjectID(kAudioObjectUnknown)
+        var requestedTapUID: String?
         var proc: AudioDeviceIOProcID?
         var started = false
         var failure: Error?
@@ -752,6 +776,7 @@ struct AudioRouteProbe {
             guard selectedUID == options.micUID else { throw Failure("default input UID changed", reason: .defaultsChanged) }
             operation = .tap
             let tapDescription = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+            requestedTapUID = tapDescription.uuid.uuidString
             tapDescription.isPrivate = true
             tapDescription.muteBehavior = .unmuted
             try check(AudioHardwareCreateProcessTap(tapDescription, &tap), "create global process tap")
@@ -781,6 +806,7 @@ struct AudioRouteProbe {
                 stream.capture(input, output: output)
             }, "create aggregate IOProc")
             guard let proc else { throw Failure("missing aggregate IOProc") }
+            receipt.beforeIOState = deviceState(mic: mic, aggregate: aggregate, tapUID: tapDescription.uuid.uuidString)
             operation = .phaseStart
             try ready(options)
             try awaitStart(options, interrupted: { stream.state.withLock { $0.interrupted } })
@@ -820,7 +846,13 @@ struct AudioRouteProbe {
             }
             operation = .score
             try score(options.phase, mic: receipt.rawMic, tap: receipt.globalTap)
-        } catch { failure = error; receipt.failureStage = operation }
+        } catch {
+            failure = error
+            receipt.failureStage = operation
+            if aggregate != kAudioObjectUnknown, let requestedTapUID {
+                receipt.failureState = deviceState(mic: mic, aggregate: aggregate, tapUID: requestedTapUID)
+            }
+        }
         operation = .cleanup
         var cleanup: [String] = []
         var cleanupStatus: OSStatus?
@@ -841,6 +873,7 @@ struct AudioRouteProbe {
         receipt.measurementStartUptime = observed.firstFrameUptime
         receipt.measurementEndUptime = observed.lastFrameUptime
         receipt.invalidBufferReason = observed.invalidBuffer?.reason
+        receipt.invalidBufferUptime = observed.invalidBuffer?.uptime
         receipt.invalidBufferCount = observed.invalidBuffer?.count
         receipt.invalidBufferIndex = observed.invalidBuffer?.index
         receipt.invalidBufferChannels = observed.invalidBuffer?.channels
@@ -862,6 +895,79 @@ struct AudioRouteProbe {
                           status: (failure as? Failure)?.status ?? cleanupStatus)
         }
         completed = true
+    }
+
+    private static func deviceState(mic: AudioObjectID, aggregate: AudioObjectID, tapUID: String) -> DeviceState {
+        var result = DeviceState()
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        func observe(_ query: () throws -> Void) {
+            do { try query() }
+            catch {
+                result.queryFailed = true
+                if result.queryOSStatus == nil { result.queryOSStatus = (error as? Failure)?.status }
+            }
+        }
+        observe {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+                                                    mScope: kAudioObjectPropertyScopeGlobal,
+                                                    mElement: kAudioObjectPropertyElementMain)
+            var uid = inputUID as CFString
+            var current = AudioObjectID(kAudioObjectUnknown)
+            var size = UInt32(MemoryLayout<AudioObjectID>.size)
+            try withUnsafePointer(to: &uid) { qualifier in
+                try check(AudioObjectGetPropertyData(system, &address, UInt32(MemoryLayout<CFString>.size),
+                                                     qualifier, &size, &current), "translate requested microphone UID")
+            }
+            guard size == MemoryLayout<AudioObjectID>.size else { throw Failure("invalid microphone identity size") }
+            result.micObjectMatchesRequested = current == mic
+            let devices = try objectList(system, kAudioHardwarePropertyDevices)
+            result.micEnumerated = current != kAudioObjectUnknown && devices.contains(current)
+            if current == kAudioObjectUnknown { result.micAlive = false }
+            else {
+                let alive: UInt32 = try property(current, kAudioDevicePropertyDeviceIsAlive, initial: 0)
+                result.micAlive = alive != 0
+            }
+        }
+        observe {
+            let active = try objectList(aggregate, kAudioAggregateDevicePropertyActiveSubDeviceList)
+            result.aggregateActiveSubdeviceCount = active.count
+            result.aggregateMicActive = try active.contains { try stringProperty($0, kAudioDevicePropertyDeviceUID) == inputUID }
+        }
+        observe {
+            let active = try objectList(aggregate, kAudioAggregateDevicePropertySubTapList)
+            result.aggregateActiveTapCount = active.count
+            let value: Unmanaged<CFArray>? = try property(aggregate, kAudioAggregateDevicePropertyTapList, initial: nil)
+            guard let value, let taps = value.takeRetainedValue() as? [String], taps.count <= 4096 else {
+                throw Failure("invalid aggregate tap identities")
+            }
+            result.aggregateTapMatchesRequested = taps == [tapUID]
+        }
+        observe {
+            let selected: AudioObjectID = try property(system, kAudioHardwarePropertyDefaultInputDevice, initial: 0)
+            result.defaultInputMatchesAggregate = selected == aggregate
+            result.defaultInputMatchesRequested = try selected != kAudioObjectUnknown
+                && stringProperty(selected, kAudioDevicePropertyDeviceUID) == inputUID
+        }
+        return result
+    }
+
+    private static func objectList(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) throws -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                                mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        try check(AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size), "read diagnostic object list size")
+        guard size % UInt32(MemoryLayout<AudioObjectID>.size) == 0,
+              size <= 4096 * MemoryLayout<AudioObjectID>.size else { throw Failure("invalid diagnostic object list size") }
+        if size == 0 { return [] }
+        var values = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        let capacity = size
+        try values.withUnsafeMutableBytes { bytes in
+            try check(AudioObjectGetPropertyData(object, &address, 0, nil, &size, bytes.baseAddress!), "read diagnostic object list")
+        }
+        guard size <= capacity, size % UInt32(MemoryLayout<AudioObjectID>.size) == 0 else {
+            throw Failure("invalid diagnostic object list result")
+        }
+        return Array(values.prefix(Int(size) / MemoryLayout<AudioObjectID>.size))
     }
 
     private static func score(_ phase: String, mic: Metric, tap: Metric) throws {

@@ -326,7 +326,8 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
     failures = {"failureStage", "failureReason", "failureOSStatus"}
     capture_diagnostics = {"finalDefaultInputMatchesRequested", "finalDefaultOutputMatchesRequested",
                            "invalidBufferReason", "invalidBufferCount", "invalidBufferIndex",
-                           "invalidBufferChannels", "invalidBufferByteSize", "invalidBufferHasData"} if mode == "capture" else set()
+                           "invalidBufferChannels", "invalidBufferByteSize", "invalidBufferHasData",
+                           "invalidBufferUptime", "beforeIOState", "failureState"} if mode == "capture" else set()
     checks = {"authorize": "fixture-capture-consent-bootstrap", "capture": "production-aggregate-route-isolation",
               "emit": "synthetic-microphone-rtp" if rtp else "virtual-device-tone-emission"}
     if (not isinstance(receipt, dict) or not common <= receipt.keys()
@@ -405,11 +406,34 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
         maximum = 1 if key == "invalidBufferIndex" else 2 ** 32 - 1
         if type(receipt[key]) is not int or not 0 <= receipt[key] <= maximum:
             raise ValueError("Invalid capture buffer metadata")
+    if "invalidBufferUptime" in receipt and (type(receipt["invalidBufferUptime"]) not in (int, float)
+            or not math.isfinite(receipt["invalidBufferUptime"]) or not 0 < receipt["invalidBufferUptime"] < 10_000_000_000):
+        raise ValueError("Invalid buffer observation time")
     layout = {key for key in capture_diagnostics if key.startswith("invalidBuffer")}
     if layout & receipt.keys() and (not {"invalidBufferReason", "invalidBufferCount"} <= receipt.keys()
             or receipt["passed"] is not False
             or receipt["invalidBufferReason"] != "count" and not layout <= receipt.keys()):
         raise ValueError("Incomplete failed capture layout")
+    snapshot_flags = {"micEnumerated", "micAlive", "micObjectMatchesRequested", "aggregateMicActive",
+                      "aggregateTapMatchesRequested", "defaultInputMatchesRequested", "defaultInputMatchesAggregate"}
+    snapshot_counts = {"aggregateActiveSubdeviceCount", "aggregateActiveTapCount"}
+    for key in {"beforeIOState", "failureState"} & receipt.keys():
+        state = receipt[key]
+        if (not isinstance(state, dict) or not {"uptime", "queryFailed"} <= state.keys()
+                or state.keys() - snapshot_flags - snapshot_counts - {"uptime", "queryFailed", "queryOSStatus"}
+                or type(state["queryFailed"]) is not bool
+                or type(state["uptime"]) not in (int, float) or not math.isfinite(state["uptime"])
+                or not 0 < state["uptime"] < 10_000_000_000
+                or key == "failureState" and receipt["passed"] is not False):
+            raise ValueError("Invalid capture device snapshot")
+        if not state["queryFailed"] and (not (snapshot_flags | snapshot_counts) <= state.keys() or "queryOSStatus" in state):
+            raise ValueError("Incomplete successful device query")
+        if any(type(state[name]) is not bool for name in snapshot_flags & state.keys()):
+            raise ValueError("Invalid capture device flag")
+        if any(type(state[name]) is not int or not 0 <= state[name] <= 4096 for name in snapshot_counts & state.keys()):
+            raise ValueError("Invalid capture device count")
+        if "queryOSStatus" in state and (type(state["queryOSStatus"]) is not int or not -(2 ** 31) <= state["queryOSStatus"] < 2 ** 31):
+            raise ValueError("Invalid capture device query status")
     if timing & receipt.keys():
         if not timing - {"microphoneCompletionUptime"} <= receipt.keys():
             raise ValueError("Incomplete microphone timing")

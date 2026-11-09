@@ -154,6 +154,7 @@ jobs:
             .jarvis/release-ui-probe/*/route-mic-quiet-emit.json
             .jarvis/release-ui-probe/*/input-fixture.json
             .jarvis/release-input-fixture/setup.json
+            .jarvis/release-input-fixture/download-failure.json
             .jarvis/release-input-fixture/ownership.json
             .jarvis/release-input-fixture/teardown.json
             .jarvis/release-ui-probe/*/route-system-capture.json

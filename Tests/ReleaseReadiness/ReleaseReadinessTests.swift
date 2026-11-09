@@ -183,7 +183,17 @@ final class ReleaseReadinessTests: XCTestCase {
                 let permitted: Bool
                 switch title {
                 case "Grant Access":
-                    permitted = acceptedConsents.isEmpty && onboarding.staticTexts.matching(identifier: "Needed").count == 3
+                    let fresh = acceptedConsents.isEmpty && onboarding.staticTexts.matching(identifier: "Needed").count == 3
+                    var replacementNeedsWalk = false
+                    if let replacementPID, acceptedConsents == ["microphone", "audio"],
+                       self.grantedPermissionCount(in: onboarding) == 1,
+                       onboarding.staticTexts.matching(identifier: "Needed").count == 2 {
+                        let running = NSRunningApplication.runningApplications(withBundleIdentifier: self.bundleID)
+                        replacementNeedsWalk = running.count == 1 && running[0].processIdentifier == replacementPID
+                            && running[0].bundleURL?.resolvingSymlinksInPath() == self.installedURL
+                            && running[0].executableArchitecture == NSRunningApplication.current.executableArchitecture
+                    }
+                    permitted = fresh || replacementNeedsWalk
                 case "Open System Settings":
                     permitted = acceptedConsents.isSuperset(of: ["microphone", "audio"])
                         && self.grantedPermissionCount(in: onboarding) == 2

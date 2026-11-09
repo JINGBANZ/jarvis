@@ -407,6 +407,12 @@ class TemporaryAccountSafetyTests(unittest.TestCase):
 class InputFixtureDownloadTests(unittest.TestCase):
     payload = b"pinned public dependency"
 
+    def setUp(self):
+        self.exporter = mock.Mock()
+        patch = mock.patch.dict(INPUT_GLOBALS, receipt=self.exporter)
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def response(self, data=None, length=None):
         value = mock.MagicMock()
         value.__enter__.return_value = value
@@ -415,7 +421,7 @@ class InputFixtureDownloadTests(unittest.TestCase):
         return value
 
     def fetch(self):
-        return INPUT["download"]("https://example.invalid/pinned", hashlib.sha256(self.payload).hexdigest())
+        return INPUT["download"](INPUT["FFMPEG_URL"], hashlib.sha256(self.payload).hexdigest())
 
     def test_known_transient_transport_failures_retry_then_verify(self):
         errors = [urllib.error.URLError(ConnectionResetError(54, "reset")), TimeoutError(),
@@ -437,6 +443,24 @@ class InputFixtureDownloadTests(unittest.TestCase):
                 self.fetch()
             self.assertEqual(opened.call_count, 3)
             self.assertEqual(delay.call_args_list, [mock.call(1), mock.call(2)])
+            self.assertEqual(self.exporter.call_args.args[1], {
+                "schemaVersion": 1, "dependency": "ffmpeg", "attemptCount": 3, "category": "connection-reset"})
+            self.assertNotIn("private", json.dumps(self.exporter.call_args.args[1]))
+
+    def test_download_failure_exports_only_closed_transport_metadata(self):
+        cases = [(urllib.error.HTTPError("private-url", 403, "private message", None, None),
+                  {"category": "http", "httpStatus": 403}),
+                 (urllib.error.URLError(ConnectionResetError(54, "private detail")),
+                  {"category": "connection-reset", "errno": 54})]
+        for error, fields in cases:
+            with mock.patch.object(INPUT["urllib"].request, "urlopen", side_effect=error), \
+                    mock.patch.object(INPUT["time"], "sleep"):
+                with self.assertRaises(RuntimeError):
+                    self.fetch()
+            result = self.exporter.call_args.args[1]
+            self.assertEqual(result, {"schemaVersion": 1, "dependency": "ffmpeg",
+                                      "attemptCount": 1 if fields["category"] == "http" else 3, **fields})
+            self.assertNotIn("private", json.dumps(result))
 
     def test_certificate_and_not_found_never_retry(self):
         for error in (urllib.error.HTTPError("url", 404, "missing", None, None),
@@ -461,6 +485,7 @@ class InputFixtureDownloadTests(unittest.TestCase):
                     self.fetch()
                 self.assertEqual(opened.call_count, 1)
                 delay.assert_not_called()
+        self.exporter.assert_not_called()
 
 
 class InputFixtureOwnershipTests(unittest.TestCase):
@@ -652,7 +677,8 @@ class AudioRouteTests(unittest.TestCase):
         receipt = {**self.receipt(), "passed": False, "error": "private native diagnostic",
                    "failureStage": "capture", "failureReason": "invalid-buffers",
                    "invalidBufferReason": "bytes", "invalidBufferCount": 2, "invalidBufferIndex": 0,
-                   "invalidBufferChannels": 2, "invalidBufferByteSize": 0, "invalidBufferHasData": False}
+                   "invalidBufferChannels": 2, "invalidBufferByteSize": 0, "invalidBufferHasData": False,
+                   "invalidBufferUptime": 103.5}
         safe = PROBE["validate_audio_receipt"](receipt, "capture", "mic-only", require_pass=False)
         self.assertIs(safe["errorPresent"], True)
         self.assertEqual(safe["failureStage"], "capture")
@@ -662,6 +688,25 @@ class AudioRouteTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(safe))
         with self.assertRaises(ValueError):
             PROBE["validate_audio_receipt"]({**receipt, "rawAudio": "untrusted"}, "capture", "mic-only", require_pass=False)
+
+    def test_device_snapshot_retains_only_typed_route_facts(self):
+        state = {"uptime": 101.0, "queryFailed": False, "micEnumerated": True, "micAlive": True,
+                 "micObjectMatchesRequested": True, "aggregateActiveSubdeviceCount": 1, "aggregateMicActive": True,
+                 "aggregateActiveTapCount": 1, "aggregateTapMatchesRequested": True,
+                 "defaultInputMatchesRequested": True, "defaultInputMatchesAggregate": False}
+        receipt = {**self.receipt(), "beforeIOState": state}
+        PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")
+        for key, value in (("deviceName", "private"), ("micAlive", 1), ("uptime", float("nan")),
+                           ("aggregateActiveTapCount", 4097), ("queryOSStatus", -50)):
+            with self.assertRaises(ValueError):
+                PROBE["validate_audio_receipt"]({**receipt, "beforeIOState": {**state, key: value}}, "capture", "mic-only")
+        failure = {**receipt, "passed": False, "error": "private diagnostic",
+                   "failureState": {"uptime": 105.0, "queryFailed": True, "queryOSStatus": -50, "micEnumerated": False}}
+        safe = PROBE["validate_audio_receipt"](failure, "capture", "mic-only", require_pass=False)
+        self.assertEqual(safe["failureState"]["queryOSStatus"], -50)
+        self.assertNotIn("private", json.dumps(safe))
+        with self.assertRaises(ValueError):
+            PROBE["validate_audio_receipt"]({**receipt, "failureState": failure["failureState"]}, "capture", "mic-only")
 
     def test_closed_failure_metadata_refuses_unknown_text_types_and_false_success(self):
         receipt = {**self.receipt(), "passed": False, "error": "private native diagnostic",
