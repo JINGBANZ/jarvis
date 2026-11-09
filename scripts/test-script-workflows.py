@@ -234,7 +234,7 @@ class GuardTests(ScriptTests):
 
     def test_missing_source_cannot_pass_audio_guard(self):
         for name in ("Sources", "Resources", "Tests/Support"):
-            shutil.copytree(REPOSITORY / name, self.root / name)
+            shutil.copytree(REPOSITORY / name, self.root / name, dirs_exist_ok=True)
         shutil.copy2(REPOSITORY / "Package.swift", self.root / "Package.swift")
         baseline = self.run_script("check-audio-capture-config.sh")
         self.assertEqual(baseline.returncode, 0, baseline.stderr)
