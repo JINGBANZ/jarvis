@@ -227,6 +227,26 @@ class GuardTests(ScriptTests):
             self.assertIn('current build', result.stderr)
             self.assertFalse(marker.exists())
 
+    def test_every_test_product_retains_ownership_before_discovery(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in (*guard['PRODUCTION_TARGETS'], 'JarvisTestHost')]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        target = {'name': 'SeparateTests', 'type': 'test', 'dependencies': []}
+        package['targets'].append(target)
+        with self.assertRaisesRegex(ValueError, 'SeparateTests.*does not link'):
+            guard['check_boundary'](self.root, package)
+        target['dependencies'] = [{'byName': ['JarvisTestHost', None]}]
+        with self.assertRaisesRegex(ValueError, 'SeparateTests.*does not retain'):
+            guard['check_boundary'](self.root, package)
+        target['settings'] = [{'tool': 'linker', 'kind': {'unsafeFlags': {
+            '_0': ['-Xlinker', '-u', '-Xlinker', '_jarvis_test_host_link']}}}]
+        guard['check_boundary'](self.root, package)
+        target['settings'][0]['condition'] = {'config': 'debug'}
+        with self.assertRaisesRegex(ValueError, 'SeparateTests.*does not retain'):
+            guard['check_boundary'](self.root, package)
+
     def test_non_debug_tests_refused_before_admission_in_both_entrypoints(self):
         # Admission and every Python command must remain untouched, even under a foreign owner.
         marker = self.root / 'admission-touched'

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """DISPLAY-FREE fixtures in copied checkouts; never runs the native display worker."""
 import importlib.util
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -735,7 +736,8 @@ wait $!
         self.assertFalse(marker.exists())
         self.assertNotEqual(self.state()['phase'], 'completed')
 
-    def test_swift_test_cancellation_reaps_detached_test_host(self):
+    @contextmanager
+    def detached_test_host(self):
         self.prepare()
         self.compile_test_host()
         self.source.write_text(self.source.read_text().replace('CANCEL_GRACE_SECONDS = 10', 'CANCEL_GRACE_SECONDS = 0.1'))
@@ -757,32 +759,70 @@ source scripts/lib/swift-test-flags.sh
 run_swift_tests "$PWD/test.log"
 ''')
         owner = self.start()
-        marker = self.repo / 'fixture-test-host'
-        deadline = time.monotonic() + 3
+        try:
+            yield owner, self.repo / 'fixture-test-host'
+        finally:
+            try:
+                if owner.poll() is None:
+                    owner.send_signal(signal.SIGTERM)
+                owner.communicate(timeout=8)
+            finally:
+                hosts = [x for x in self.state()['owned_processes'] if x.get('role') == 'test-host']
+                for host in hosts:
+                    self.module.signal_owned(host, signal.SIGKILL)
+                deadline = time.monotonic() + 2
+                while any(self.module.same(host) for host in hosts) and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertFalse(any(self.module.same(host) for host in hosts),
+                                 'fixture cleanup left an exact registered test host alive')
+
+    def wait_for_test_host(self, owner, marker, timeout=3):
+        deadline = time.monotonic() + timeout
         while not marker.exists():
             if owner.poll() is not None:
                 self.fail(f'command exited before the test host started: {self.result(owner)}')
             self.assertLess(time.monotonic(), deadline)
             time.sleep(.01)
-        host = self.module.birth(int(marker.read_text()))
-        unrelated = subprocess.Popen(['/bin/sleep', '30'])
-        try:
-            owner.send_signal(signal.SIGTERM)
-            result = self.result(owner)
-            self.assertEqual(result[0], 128 + signal.SIGTERM, result)
-            deadline = time.monotonic() + 2
-            while self.module.same(host) and time.monotonic() < deadline:
-                time.sleep(.01)
-            self.assertFalse(self.module.same(host), 'detached SwiftPM test host survived command cancellation')
-            self.assertNotEqual(self.state()['phase'], 'completed')
-            registered = self.state()['owned_processes']
-            self.assertEqual([(x['pid'], x['start'], x.get('role')) for x in registered],
-                             [(host['pid'], host['start'], 'test-host')])
-            self.assertIsNone(unrelated.poll(), 'cancellation signalled an unrelated process')
-        finally:
-            self.module.signal_owned(host, signal.SIGKILL)
-            unrelated.terminate()
-            unrelated.wait(timeout=3)
+        return self.module.birth(int(marker.read_text()))
+
+    def test_swift_test_cancellation_reaps_detached_test_host(self):
+        with self.detached_test_host() as (owner, marker):
+            host = self.wait_for_test_host(owner, marker)
+            unrelated = subprocess.Popen(['/bin/sleep', '30'])
+            try:
+                owner.send_signal(signal.SIGTERM)
+                result = self.result(owner)
+                self.assertEqual(result[0], 128 + signal.SIGTERM, result)
+                deadline = time.monotonic() + 2
+                while self.module.same(host) and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertFalse(self.module.same(host), 'detached SwiftPM test host survived command cancellation')
+                self.assertNotEqual(self.state()['phase'], 'completed')
+                registered = self.state()['owned_processes']
+                self.assertEqual([(x['pid'], x['start'], x.get('role')) for x in registered],
+                                 [(host['pid'], host['start'], 'test-host')])
+                self.assertIsNone(unrelated.poll(), 'cancellation signalled an unrelated process')
+            finally:
+                unrelated.terminate()
+                unrelated.wait(timeout=3)
+
+    def test_detached_test_host_cleanup_survives_malformed_marker(self):
+        with self.assertRaises(ValueError):
+            with self.detached_test_host() as (owner, marker):
+                host = self.wait_for_test_host(owner, marker)
+                marker.write_text('not-a-pid')
+                self.wait_for_test_host(owner, marker)
+        self.assertFalse(self.module.same(host))
+        self.assertIsNotNone(owner.poll())
+
+    def test_detached_test_host_cleanup_survives_missing_marker(self):
+        with self.assertRaises(AssertionError):
+            with self.detached_test_host() as (owner, marker):
+                host = self.wait_for_test_host(owner, marker)
+                marker.unlink()
+                self.wait_for_test_host(owner, marker, timeout=.1)
+        self.assertFalse(self.module.same(host))
+        self.assertIsNotNone(owner.poll())
 
     def test_signal_during_teardown_never_completes(self):
         self.prepare()

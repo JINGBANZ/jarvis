@@ -1,5 +1,4 @@
 import AppKit
-import JarvisTestHost
 import Testing
 @testable import JarvisOverlay
 
@@ -7,7 +6,6 @@ typealias TestOverlayBox = (box: OverlayBoxPanel, close: @MainActor () -> Void)
 
 @MainActor
 func makeTestOverlayBox(contentSize: NSSize? = nil) -> TestOverlayBox {
-    jarvis_test_host_link()
     let previous = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
     let box = contentSize.map { OverlayBoxPanel(contentSize: $0) } ?? OverlayBoxPanel()
     let windows = NSApplication.shared.windows.filter { !previous.contains(ObjectIdentifier($0)) }

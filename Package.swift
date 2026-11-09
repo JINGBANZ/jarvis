@@ -77,7 +77,7 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisOverlayTests",
-            dependencies: ["JarvisOverlay", "JarvisTestHost"]
+            dependencies: ["JarvisOverlay"]
         ),
         .testTarget(
             name: "JarvisScreenCaptureTests",
@@ -97,3 +97,11 @@ let package = Package(
         ),
     ]
 )
+
+// Swift Build creates a separate test product per target; each must register before discovery.
+for target in package.targets where target.type == .test {
+    target.dependencies.append("JarvisTestHost")
+    target.linkerSettings = (target.linkerSettings ?? []) + [
+        .unsafeFlags(["-Xlinker", "-u", "-Xlinker", "_jarvis_test_host_link"]),
+    ]
+}

@@ -143,7 +143,9 @@ an admitted command and current ancestry; missing context or refusal exits befor
 The supervisor records the kernel PID and birth identity and retains ownership after reparenting.
 The C initializer supplies the load-time boundary because SwiftPM's custom executable entry-point
 option does not apply to Darwin test bundles. `JarvisTestHost` depends on no product code and cannot
-be linked directly or transitively by any non-test target; the dependency guard enforces that rule.
+be linked directly or transitively by any non-test target. The package force-links it into every
+test target so both combined and separate-per-target test products register. The dependency guard
+checks every test target's dependency and linker retention as well as the product boundary.
 
 LaunchServices apps can leave that shell's process group. `launch-app` durably prepares one app
 launch before `open -W -n -g`; the app registers before AppKit initialization using its launch nonce
