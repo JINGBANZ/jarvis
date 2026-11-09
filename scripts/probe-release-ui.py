@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 AUTHORIZATION_STAGES = {
     "input", "accessibility", "owner", "form", "fields", "fill", "submit", "dismiss", "complete",
+    "revalidate-owner", "revalidate-form", "revalidate-controls", "field-owner", "focus-read",
+    "focus-settable", "focus-set", "focus-press", "focus-verify",
 }
 AUTHORIZATION_COUNTS = {"processCount", "formCount", "usernameCount", "secureCount", "modifySettingsCount"}
 AUTHORIZATION_FLAGS = {"uiElementsEnabled", "recognizedHeading", "recognizedText"}
@@ -205,6 +207,7 @@ def run_ui(arguments, *, timeout, log, roots, evidence):
     observed = {}
     process = None
     forced = False
+    timed_out = False
     deadline = time.monotonic() + timeout
     try:
         with log.open("w") as output:
@@ -216,11 +219,13 @@ def run_ui(arguments, *, timeout, log, roots, evidence):
                 for identity in owned_processes(roots, ownership):
                     observed[identity["pid"]] = identity
                 if time.monotonic() >= deadline:
+                    timed_out = True
                     raise ValueError("Installed-app UI execution exceeded its bound")
                 time.sleep(0.25)
             if process.returncode:
                 raise ValueError("Installed-app UI cases failed; raw output remains private")
     finally:
+        status = {"returnCode": process.poll() if process is not None else None, "timedOut": timed_out}
         for identity in owned_processes(roots, ownership):
             observed[identity["pid"]] = identity
         settle = time.monotonic() + 5
@@ -243,6 +248,7 @@ def run_ui(arguments, *, timeout, log, roots, evidence):
         if process is not None:
             process.wait(timeout=5)
         remaining = any(ownership["same"](item) for item in observed.values()) or bool(owned_processes(roots, ownership))
+        (evidence / "ui-command.json").write_text(json.dumps(status, indent=2) + "\n")
         receipt = {"observedCount": len(observed), "forcedCleanup": forced, "allOwnedProcessesAbsent": not remaining}
         (evidence / "cleanup.json").write_text(json.dumps(receipt, indent=2) + "\n")
         if remaining or forced:

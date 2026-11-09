@@ -51,6 +51,8 @@ class ProbeResultsTests(unittest.TestCase):
                 self.assertGreaterEqual(receipt['observedCount'], 2)
                 self.assertIs(receipt['forcedCleanup'], True)
                 self.assertIs(receipt['allOwnedProcessesAbsent'], True)
+                self.assertEqual(json.loads((directory / 'ui-command.json').read_text()),
+                                 {'returnCode': None, 'timedOut': True})
                 self.assertIsNone(unrelated.poll())
             finally:
                 unrelated.terminate()
@@ -130,6 +132,14 @@ class NativeAuthorizationTests(unittest.TestCase):
                 receipt = self.receipt()
                 receipt["diagnostics"].update({key: key == owner for key in PROBE["FOCUS_OWNER_FLAGS"]})
                 self.assertEqual(PROBE["validate_authorization_receipt"](json.dumps(receipt)), receipt)
+
+    def test_native_operation_stages_preserve_failed_verdict(self):
+        for stage in PROBE["AUTHORIZATION_STAGES"] - {"complete"}:
+            receipt = self.receipt(authorized=False, stage=stage)
+            self.assertEqual(PROBE["validate_authorization_receipt"](json.dumps(receipt)), receipt)
+            receipt["authorized"] = True
+            with self.assertRaises(ValueError):
+                PROBE["validate_authorization_receipt"](json.dumps(receipt))
 
     def test_unsuccessful_native_authorization_cannot_pass_and_raw_errors_are_private(self):
         failed = self.receipt(authorized=False, stage="fields")

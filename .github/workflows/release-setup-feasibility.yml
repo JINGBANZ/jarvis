@@ -109,6 +109,8 @@ jobs:
             .jarvis/release-ui-probe/audio-probe.json
             .jarvis/release-ui-probe/*/stage.json
             .jarvis/release-ui-probe/*/ui-stage.json
+            .jarvis/release-ui-probe/*/ui-issue.json
+            .jarvis/release-ui-probe/*/ui-command.json
             .jarvis/release-ui-probe/*/authorization.json
             .jarvis/release-ui-probe/*/authorization-process.json
             .jarvis/release-ui-probe/*/authorization-owner.json

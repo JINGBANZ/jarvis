@@ -10,6 +10,23 @@ final class ReleaseReadinessTests: XCTestCase {
     private var profilePrepared = false
     private var credentialFile: URL?
 
+    override func record(_ issue: XCTIssue) {
+        if let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] {
+            let location = issue.sourceCodeContext.location
+            let ownSource = location?.fileURL.lastPathComponent == "ReleaseReadinessTests.swift"
+            let receipt: [String: Any] = ["issueType": issue.type.rawValue,
+                                          "sourceIsHarness": ownSource,
+                                          "line": ownSource ? location?.lineNumber ?? 0 : 0]
+            do {
+                let data = try JSONSerialization.data(withJSONObject: receipt)
+                try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("ui-issue.json"), options: .atomic)
+            } catch {
+                print("Could not record the scalar UI issue location")
+            }
+        }
+        super.record(issue)
+    }
+
     func testFreshOnboarding() throws {
         try prepareProfile(completed: false)
         let app = try launchInstalledApp()
@@ -222,11 +239,13 @@ final class ReleaseReadinessTests: XCTestCase {
         attachEvidence(settings, name: "system-screen-recording-settings")
         let panes = settings.scrollViews.containing(.staticText, identifier: "Screen & System Audio Recording")
         XCTAssertTrue(panes.firstMatch.waitForExistence(timeout: 10), "The recording privacy pane must load")
+        attachEvidence(settings, name: "recording-pane-loaded")
         XCTAssertEqual(panes.count, 1, "The recording privacy pane must be unambiguous")
         let pane = panes.element
         let screenHeading = pane.staticTexts["Screen & System Audio Recording"]
         let audioOnlyHeading = pane.staticTexts["System Audio Recording Only"]
         XCTAssertTrue(audioOnlyHeading.waitForExistence(timeout: 10))
+        attachEvidence(settings, name: "recording-headings-loaded")
         XCTAssertGreaterThan(screenHeading.frame.height, 0)
         XCTAssertGreaterThan(audioOnlyHeading.frame.minY, screenHeading.frame.maxY)
         let sections = pane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex.filter {
@@ -235,9 +254,11 @@ final class ReleaseReadinessTests: XCTestCase {
         }
         XCTAssertEqual(sections.count, 1, "Exactly one Jarvis outline must belong to the screen-recording section")
         let section = try XCTUnwrap(sections.first)
+        attachEvidence(settings, name: "recording-section-matched")
         XCTAssertEqual(section.staticTexts["Jarvis_Title"].value as? String, "Jarvis")
         XCTAssertEqual(section.switches.matching(identifier: "Jarvis_Toggle").count, 1)
         let toggle = section.switches["Jarvis_Toggle"]
+        attachEvidence(settings, name: "recording-toggle-matched")
         if toggle.value as? String != "1" { toggle.click() }
         let authorized = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             toggle.value as? String == "1" || settings.buttons["Quit & Reopen"].exists
@@ -351,7 +372,6 @@ final class ReleaseReadinessTests: XCTestCase {
     private func cleanUpCandidateAndProfile() throws {
         if let app = application {
             if app.state != .notRunning {
-                attachEvidence(app, name: "final-ui-state")
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
                 if running.count == 1, running.first?.bundleURL?.resolvingSymlinksInPath() == installedURL {
                     app.terminate()

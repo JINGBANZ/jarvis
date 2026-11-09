@@ -215,8 +215,14 @@ function run() {
         publish();
 
         function revalidate() {
+            stage = "revalidate-owner";
+            publish();
             if (!isNativeOwner(form.pid) || pid(form.secure) !== form.pid) { fail(); }
+            stage = "revalidate-form";
+            publish();
             const current = inspect(form.root, form.secure, budget()).form;
+            stage = "revalidate-controls";
+            publish();
             if (!current || !same(current.username, form.username) || !same(current.modify, form.modify)) { fail(); }
         }
         function settable(element, name) {
@@ -225,14 +231,29 @@ function run() {
             return Boolean(value[0]);
         }
         function requireFocus(field) {
+            stage = "focus-verify";
+            publish();
             if (scalar(field, "AXFocused") !== true || !same(attribute(system, "AXFocusedUIElement"), field)) { fail(); }
         }
         function fill(field, value, secure) {
             revalidate();
+            stage = "field-owner";
+            publish();
             if (pid(field) !== form.pid) { fail(); }
+            stage = "focus-read";
+            publish();
             if (!same(attribute(system, "AXFocusedUIElement"), field)) {
-                if (settable(field, "AXFocused")) { check($.AXUIElementSetAttributeValue(field, $("AXFocused"), $(true))); }
-                else { check($.AXUIElementPerformAction(field, $("AXPress"))); }
+                stage = "focus-settable";
+                publish();
+                if (settable(field, "AXFocused")) {
+                    stage = "focus-set";
+                    publish();
+                    check($.AXUIElementSetAttributeValue(field, $("AXFocused"), $(true)));
+                } else {
+                    stage = "focus-press";
+                    publish();
+                    check($.AXUIElementPerformAction(field, $("AXPress")));
+                }
             }
             requireFocus(field);
             stage = "fill";
