@@ -193,7 +193,7 @@ def check_system_playback(speech, evidence):
     receipt = {"stage": "system-player-before-xctest", "passed": False, "timedOut": False}
     try:
         with (evidence / "private-playback.log").open("w") as output:
-            subprocess.run(["/usr/bin/afplay", str(speech)], check=True, timeout=30,
+            subprocess.run([str(evidence / "derived/readiness-afplay"), str(speech)], check=True, timeout=30,
                            stdout=output, stderr=subprocess.STDOUT)
         receipt["passed"] = True
     except subprocess.TimeoutExpired:

@@ -4,7 +4,10 @@ import XCTest
 extension ReleaseReadinessTests {
     func testInstalledJourney() throws {
         try prepareRun()
-        attachEvidence(name: "fixture-playback-preflight")
+        attachEvidence(name: "fixture-playback-default-route")
+        try playQuestion()
+        try audioDevices?.select()
+        attachEvidence(name: "fixture-playback-selected-route")
         try playQuestion()
         let environment = ProcessInfo.processInfo.environment
         let phase = try XCTUnwrap(environment["JARVIS_READINESS_PHASE"])

@@ -558,7 +558,6 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertGreaterThan((attributes[.size] as? NSNumber)?.intValue ?? 0, 0)
         let devices = try ReleaseAudioDevices()
         audioDevices = devices
-        try devices.select()
     }
 
     func launchInstalledApp() throws -> XCUIApplication {
