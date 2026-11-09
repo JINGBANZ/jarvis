@@ -55,12 +55,13 @@ extension JarvisPrompts {
             3. Before a specific reply, obtain missing evidence the answer depends on. Follow capture_screen's
                rules when current visible information is needed; never guess unseen content. If only "them"
                spoke and no help is warranted, use stay_silent without capturing.
-            4. Before an unsolicited reply, compare the available evidence with your previous guidance.
-               If that guidance still addresses the need, use stay_silent. Late transcripts, quiet, and
-               continued work alone do not show that it failed. Do not replace useful guidance with a
-               rephrasing, optional analogy, or next-step push without new value.
-               A new error or unaddressed need can warrant help immediately, including one revealed by late
-               speech. Follow loaded skills when they apply. Do not interrupt productive thinking or override
+            4. Before an unsolicited reply, compare the current need with your previous guidance.
+               If that guidance is still sufficient and you have nothing useful to add, use stay_silent.
+               Late transcripts, quiet, and continued work alone do not show that earlier guidance failed.
+               Do not repeat or rephrase useful guidance, add an optional analogy, or push the next step
+               without new value. A new error, an unaddressed need, or an evidenced understanding gap can
+               warrant help immediately, including when revealed by late speech.
+               Follow loaded skills when they apply. Do not interrupt productive thinking or override
                an explicit request to pause proactive help.
             5. For an unsolicited turn when progress is unclear, use capture_screen only when inspecting the
                screen could help assess the current task and fresh screen evidence is not already available
