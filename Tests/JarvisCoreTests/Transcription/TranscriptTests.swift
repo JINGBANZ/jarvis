@@ -92,6 +92,18 @@ extension TranscriptTests {
 
 
 extension TranscriptTests {
+    @Test func unformattableEndpointPreservesTextWithUnknownTiming() {
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .me, text: "retained words", at: 1, endedAt: 1e20))
+        #expect(transcript.renderFrom(index: 0).text == "[speech time unknown] me: retained words")
+    }
+
+    @Test func representableFractionalEndpointsKeepMeasuredTiming() {
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .me, text: "normal words", at: 1.9, endedAt: 62.9))
+        #expect(transcript.renderFrom(index: 0).text == "[00:01-01:02] me: normal words")
+    }
+
     @Test func receiptChronologyDoesNotMasqueradeAsMeasuredSpeech() {
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "retained words", observedAt: 42, speechInterval: nil))

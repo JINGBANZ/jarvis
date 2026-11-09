@@ -84,8 +84,10 @@ public final class RollingTranscript: @unchecked Sendable {
     where S.Element == TranscriptLine {
         lines
             .map { line in
-                let timing = line.speechInterval.map {
-                    "[\(stamp($0.startedAt))-\(stamp($0.endedAt))]"
+                let timing = line.speechInterval.flatMap { interval -> String? in
+                    guard Int(exactly: interval.startedAt.rounded(.down)) != nil,
+                          Int(exactly: interval.endedAt.rounded(.down)) != nil else { return nil }
+                    return "[\(stamp(interval.startedAt))-\(stamp(interval.endedAt))]"
                 } ?? "[speech time unknown]"
                 return "\(timing) \(line.speaker.rawValue): \(line.text)"
             }
