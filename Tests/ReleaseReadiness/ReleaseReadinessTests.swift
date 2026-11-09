@@ -14,20 +14,13 @@ final class ReleaseReadinessTests: XCTestCase {
         if let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] {
             let location = issue.sourceCodeContext.location
             let ownSource = location?.fileURL.lastPathComponent == "ReleaseReadinessTests.swift"
-            let knownConsentOwners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent",
-                                      "com.apple.accessibility.universalAccessAuthWarn"]
-            let description = issue.compactDescription
-            let missingConsentOwner = description.contains("could not be found")
-                && knownConsentOwners.contains(where: description.contains)
             let receipt: [String: Any] = ["issueType": issue.type.rawValue,
                                           "sourceIsHarness": ownSource,
-                                          "line": ownSource ? location?.lineNumber ?? 0 : 0,
-                                          "missingKnownConsentOwner": missingConsentOwner,
-                                          "executionTimeExceeded": description.contains("execution time allowance"),
-                                          "internalInconsistency": description.contains("NSInternalInconsistencyException")]
+                                          "line": ownSource ? location?.lineNumber ?? 0 : 0]
             do {
                 let data = try JSONSerialization.data(withJSONObject: receipt)
-                try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("ui-issue.json"), options: .atomic)
+                try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("ui-issue.json"), options: .withoutOverwriting)
+            } catch CocoaError.fileWriteFileExists {
             } catch {
                 print("Could not record the scalar UI issue location")
             }
@@ -76,6 +69,7 @@ final class ReleaseReadinessTests: XCTestCase {
         let grant = welcome.buttons["Grant Access"]
         XCTAssertTrue(grant.waitForExistence(timeout: 20), "Stored-key precondition must expose ordinary permission onboarding")
         attachEvidence(app, name: "permissions-before-grants")
+        recordPermissionState(onboarding: welcome, acceptedConsents: [], reason: .initial)
         var grantProcesses: Set<pid_t> = []
         var acceptedConsents: Set<String> = []
         var reachedReady = false
@@ -203,6 +197,7 @@ final class ReleaseReadinessTests: XCTestCase {
         }, object: nil)
         let result = XCTWaiter.wait(for: [visible], timeout: 20)
         guard result == .completed, let action else {
+            recordPermissionState(onboarding: onboarding, acceptedConsents: acceptedConsents, reason: .noAction)
             throw ReadinessFailure("No unique validated system consent or ordinary permission action became available")
         }
         if case .consent(let permissions, _) = action {
@@ -210,6 +205,39 @@ final class ReleaseReadinessTests: XCTestCase {
             print("nativeConsent=\(permissions.sorted().joined(separator: ",")) owner=\(owner)")
         }
         return action
+    }
+
+    private enum PermissionStateReason: String {
+        case initial = "initial-permission-state"
+        case noAction = "no-unique-permission-action"
+    }
+
+    private func recordPermissionState(onboarding: XCUIElement, acceptedConsents: Set<String>, reason: PermissionStateReason) {
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
+        let statuses = ["Granted", "Asking…", "Refused", "Needed", "Reopen to finish"]
+        let actions = ["Grant Access", "Open System Settings", "Quit & Reopen", "I’m Ready", "Waiting for macOS…"]
+        let receipt: [String: Any] = [
+            "reason": reason.rawValue,
+            "statuses": Dictionary(uniqueKeysWithValues: statuses.map { status in
+                (status, onboarding.staticTexts.matching(NSPredicate(format: "value == %@ OR label == %@", status, status)).count)
+            }),
+            "actions": Dictionary(uniqueKeysWithValues: actions.map { title in
+                let matches = onboarding.buttons.matching(identifier: title)
+                return (title, ["count": matches.count,
+                                "enabledCount": matches.allElementsBoundByIndex.filter(\.isEnabled).count])
+            }),
+            "nativeConsents": Dictionary(uniqueKeysWithValues: ["microphone", "audio", "screen"].map {
+                ($0, acceptedConsents.contains($0))
+            }),
+            "systemAudioInconclusive": onboarding.staticTexts["I couldn’t check system audio just now. Try again."].exists,
+        ]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: receipt)
+            let filename = reason == .initial ? "permission-initial.json" : "permission-state.json"
+            try data.write(to: URL(fileURLWithPath: path).appendingPathComponent(filename), options: .atomic)
+        } catch {
+            XCTFail("Could not record the scalar permission-wait reason")
+        }
     }
 
     private func grantedPermissionCount(in onboarding: XCUIElement) -> Int {
@@ -276,7 +304,11 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(authorizationResult, .completed, "Native Settings authorization must enable recording or offer relaunch")
         let confirm = settings.buttons["Quit & Reopen"]
         let relaunches = confirm.waitForExistence(timeout: 5)
-        if relaunches { confirm.click() }
+        if relaunches {
+            attachEvidence(settings, name: "recording-relaunch-offered")
+            confirm.click()
+            attachEvidence(settings, name: "recording-relaunch-clicked")
+        }
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '1'"), object: toggle)
         let enabledResult = XCTWaiter.wait(for: [enabled], timeout: 5)
         attachEvidence(settings, name: "system-screen-recording-settings-final")

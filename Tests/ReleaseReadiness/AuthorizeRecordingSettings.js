@@ -254,25 +254,29 @@ function run() {
             stage = "field-owner";
             publish();
             if (secure ? identifier !== form.pid : name === null) { fail(); }
-            stage = "focus-read";
-            publish();
-            if (!same(attribute(system, "AXFocusedUIElement"), field)) {
-                stage = "focus-settable";
+            // Targeted value updates do not need the unsupported AXPress focus action.
+            const directUsername = !secure && settable(field, "AXValue");
+            if (!directUsername) {
+                stage = "focus-read";
                 publish();
-                if (settable(field, "AXFocused")) {
-                    stage = "focus-set";
+                if (!same(attribute(system, "AXFocusedUIElement"), field)) {
+                    stage = "focus-settable";
                     publish();
-                    check($.AXUIElementSetAttributeValue(field, $("AXFocused"), $(true)));
-                } else {
-                    stage = "focus-press";
-                    publish();
-                    check($.AXUIElementPerformAction(field, $("AXPress")));
+                    if (settable(field, "AXFocused")) {
+                        stage = "focus-set";
+                        publish();
+                        check($.AXUIElementSetAttributeValue(field, $("AXFocused"), $(true)));
+                    } else {
+                        stage = "focus-press";
+                        publish();
+                        check($.AXUIElementPerformAction(field, $("AXPress")));
+                    }
                 }
+                requireFocus(field);
             }
-            requireFocus(field);
             stage = "fill";
             publish();
-            if (settable(field, "AXValue")) { check($.AXUIElementSetAttributeValue(field, $("AXValue"), $(value))); }
+            if (directUsername || settable(field, "AXValue")) { check($.AXUIElementSetAttributeValue(field, $("AXValue"), $(value))); }
             else {
                 requireFocus(field);
                 events.keystroke("a", {using: ["command down"]});
