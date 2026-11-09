@@ -59,7 +59,7 @@ def check_boundary(root, package):
 
     for path in (root / 'Sources').rglob('*.swift'):
         if re.search(r'\b(?:ReleaseReadiness\w*|JARVIS_READINESS_\w*)\b|'
-                     r'(?:probe-release-ui|prepare-release-ui-account|release-input-fixture|AudioServiceEvidence)\.py', path.read_text()):
+                     r'(?:probe-release-ui|prepare-release-ui-account)\.py', path.read_text()):
             raise ValueError(f'{path.relative_to(root)}: release UI checks must remain external to the product')
     for path in (root / 'Tests/ReleaseReadiness').rglob('*.swift'):
         if re.search(r'^\s*(?:@testable\s+)?import\s+Jarvis\w+', path.read_text(), re.MULTILINE):

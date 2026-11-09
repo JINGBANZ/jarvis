@@ -18,13 +18,24 @@ jobs:
       matrix:
         os: [macos-26, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 18
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Verify the public signed setup fixture
+      - name: Require the dedicated test credential
+        env:
+          RELEASE_READINESS_OPENAI_API_KEY: ${{ secrets.RELEASE_TEST_OPENAI_API_KEY }}
         run: |
+          python3 - <<'PYTHON'
+          import os
+          key = os.environ.get('RELEASE_READINESS_OPENAI_API_KEY', '')
+          if not 20 <= len(key) <= 1024 or any(character.isspace() for character in key):
+              raise SystemExit('A protected RELEASE_TEST_OPENAI_API_KEY secret is required')
+          PYTHON
+      - name: Verify the fixed public signed setup fixture
+        run: |
+          set -euo pipefail
           umask 077
-          mkdir -p .jarvis/release-ui-probe .jarvis/release-input-archives .build/setup-fixture
+          mkdir -p .jarvis/release-ui-probe .build/setup-fixture
           curl --fail --location --retry 3 \
             https://github.com/JINGBANZ/jarvis/releases/download/v0.5.14/Jarvis.dmg \
             --output .build/setup-fixture/Jarvis.dmg
@@ -32,12 +43,10 @@ jobs:
             eb2f8ebc0f78ff4d6b09773e9052652eae74ffcc9d4bebf885a8c62b9b38416c \
             .build/setup-fixture/Jarvis.dmg | shasum -a 256 -c -
           python3 -m venv "$RUNNER_TEMP/release-layout-venv"
-          "$RUNNER_TEMP/release-layout-venv/bin/pip" install -r scripts/requirements-release.txt
+          "$RUNNER_TEMP/release-layout-venv/bin/python" -m pip install \
+            --require-hashes --requirement scripts/requirements-release.txt
           DMGBUILD_PYTHON="$RUNNER_TEMP/release-layout-venv/bin/python" \
             ./scripts/verify-release.sh .build/setup-fixture/Jarvis.dmg v0.5.14
-      - name: Install the normal app outside the checkout
-        run: |
-          set -euo pipefail
           fixture_mount="$(mktemp -d "$RUNNER_TEMP/jarvis-setup.XXXXXX")"
           mounted=false
           cleanup() {
@@ -47,11 +56,10 @@ jobs:
           trap cleanup EXIT
           hdiutil attach .build/setup-fixture/Jarvis.dmg -readonly -nobrowse -mountpoint "$fixture_mount"
           mounted=true
-          test ! -e "$HOME/Applications/Jarvis.app"
-          mkdir -p "$HOME/Applications"
-          ditto "$fixture_mount/Jarvis.app" "$HOME/Applications/Jarvis.app"
-          codesign --verify --strict --deep "$HOME/Applications/Jarvis.app"
-          python3 - <<'PY'
+          test ! -e "$RUNNER_TEMP/Jarvis-setup-fixture.app"
+          ditto "$fixture_mount/Jarvis.app" "$RUNNER_TEMP/Jarvis-setup-fixture.app"
+          codesign --verify --strict --deep "$RUNNER_TEMP/Jarvis-setup-fixture.app"
+          python3 - <<'PYTHON'
           import json, os, platform
           from pathlib import Path
           Path('.jarvis/release-ui-probe/fixture.json').write_text(json.dumps({
@@ -60,16 +68,17 @@ jobs:
               'architecture': platform.machine(), 'macOS': platform.mac_ver()[0],
               'runnerImage': os.environ.get('ImageOS'),
               'runnerImageVersion': os.environ.get('ImageVersion'),
-              'releaseCandidateProven': False,
+              'releaseCandidateProven': False, 'upgradeProven': False,
           }, indent=2) + '\n')
-          PY
+          PYTHON
       - name: Inspect supported UI automation setup
         run: |
           sw_vers
           /usr/bin/automationmodetool
           /usr/bin/automationmodetool | grep -F 'DOES NOT REQUIRE'
-      - name: Install the pinned system-playback driver
+      - name: Install the pinned virtual audio devices
         run: |
+          set -euo pipefail
           curl --fail --location --retry 3 \
             https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg \
             --output "$RUNNER_TEMP/BlackHole2ch.pkg"
@@ -77,53 +86,21 @@ jobs:
             57b540f27a3e29c37e310e01bee0fdfab76733087e47f997ef9dccf851400dcf \
             "$RUNNER_TEMP/BlackHole2ch.pkg" | shasum -a 256 -c -
           sudo installer -pkg "$RUNNER_TEMP/BlackHole2ch.pkg" -target /
+          curl --fail --location --retry 3 \
+            https://existential.audio/downloads/BlackHole16ch-0.7.1.pkg \
+            --output "$RUNNER_TEMP/BlackHole16ch.pkg"
+          printf '%s  %s\n' \
+            57254e2f76cd40db7f3f715238b1a2cb2bd08819d38abf4087f2944f71a3641a \
+            "$RUNNER_TEMP/BlackHole16ch.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "$RUNNER_TEMP/BlackHole16ch.pkg" -target /
           sudo killall coreaudiod
           sleep 3
-      - name: Verify the raw virtual-audio prerequisite
-        id: raw-audio
-        run: |
-          umask 077
-          swiftc -swift-version 6 -strict-concurrency=complete -warnings-as-errors \
-            -parse-as-library -module-cache-path "$RUNNER_TEMP/audio-probe-module-cache" \
-            -framework CoreAudio Tests/ReleaseReadiness/AudioProbe.swift \
-            -o "$RUNNER_TEMP/AudioProbe"
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          import subprocess
-          with Path('.jarvis/release-ui-probe/audio-probe.json').open('w') as receipt:
-              subprocess.run([os.environ['RUNNER_TEMP'] + '/AudioProbe', '--verify-blackhole'],
-                             stdout=receipt, timeout=30, check=True)
-          PY
-      - name: Restore checksum-pinned public input archives
-        id: input-archives
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            .jarvis/release-input-archives/roc-vad-0.0.4.tar.bz2
-            .jarvis/release-input-archives/ffmpeg-8.0.1.tar.xz
-          key: release-input-archives-efa3ab380092de554160dc02140702d2b4f9aa2ddb503cf2b90618cdbc95e29a-05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41
-      - name: Prepare the pinned input-only microphone fixture
-        id: input-setup
-        run: python3 scripts/release-input-fixture.py setup
-      - name: Save verified public input archives before UI checks
-        if: ${{ steps.input-setup.outcome == 'success' && steps.input-archives.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            .jarvis/release-input-archives/roc-vad-0.0.4.tar.bz2
-            .jarvis/release-input-archives/ffmpeg-8.0.1.tar.xz
-          key: ${{ steps.input-archives.outputs.cache-primary-key }}
-      - name: Verify independent external microphone and system routes
-        run: python3 scripts/probe-release-ui.py --audio-routes
-      - name: Exercise ordinary launch and permissions without provider credentials
-        if: ${{ !cancelled() && steps.raw-audio.outcome == 'success' }}
-        run: |
-          python3 scripts/prepare-release-ui-account.py prepare
-          python3 scripts/probe-release-ui.py "$HOME/Applications/Jarvis.app"
-      - name: Remove the owned synthetic microphone receiver
-        if: always()
-        run: python3 scripts/release-input-fixture.py teardown
+      - name: Prepare native permission authorization
+        run: python3 scripts/prepare-release-ui-account.py prepare
+      - name: Exercise the basic journey on the fixed public fixture
+        env:
+          RELEASE_READINESS_OPENAI_API_KEY: ${{ secrets.RELEASE_TEST_OPENAI_API_KEY }}
+        run: python3 scripts/probe-release-ui.py --setup-candidate "$RUNNER_TEMP/Jarvis-setup-fixture.app"
       - name: Remove the temporary authorization account
         if: always()
         run: python3 scripts/prepare-release-ui-account.py cleanup
@@ -134,50 +111,29 @@ jobs:
           name: release-setup-feasibility-${{ matrix.os }}
           path: |
             .jarvis/release-ui-probe/fixture.json
-            .jarvis/release-ui-probe/audio-probe.json
+            .jarvis/release-ui-probe/*/setup-feasibility.json
             .jarvis/release-ui-probe/*/stage.json
-            .jarvis/release-ui-probe/*/ui-stage.json
-            .jarvis/release-ui-probe/*/ui-issue.json
-            .jarvis/release-ui-probe/*/ui-failure.json
-            .jarvis/release-ui-probe/*/ui-command.json
-            .jarvis/release-ui-probe/*/ui-progress.json
-            .jarvis/release-ui-probe/*/permission-state.json
-            .jarvis/release-ui-probe/*/permission-completion.json
-            .jarvis/release-ui-probe/*/permission-initial.json
-            .jarvis/release-ui-probe/*/permission-discovery.json
-            .jarvis/release-ui-probe/*/permission-owner.json
-            .jarvis/release-ui-probe/*/relaunch-control.json
-            .jarvis/release-ui-probe/*/recording-final.json
-            .jarvis/release-ui-probe/*/recording-initial.json
-            .jarvis/release-ui-probe/*/authorization.json
-            .jarvis/release-ui-probe/*/authorization-process.json
-            .jarvis/release-ui-probe/*/authorization-owner.json
-            .jarvis/release-ui-probe/*/authorization-username-owner.json
-            .jarvis/release-ui-probe/*/cleanup.json
-            .jarvis/release-ui-probe/*/summary.json
-            .jarvis/release-ui-probe/*/probe.json
-            .jarvis/release-ui-probe/*/audio-stage.json
-            .jarvis/release-ui-probe/*/audio-issue.json
-            .jarvis/release-ui-probe/*/audio-failure.json
-            .jarvis/release-ui-probe/*/audio-consent-timing.json
-            .jarvis/release-ui-probe/*/audio-permission-owner.json
-            .jarvis/release-ui-probe/*/audio-permission-discovery.json
-            .jarvis/release-ui-probe/*/audio-permission-wait.json
-            .jarvis/release-ui-probe/*/permission-wait.json
-            .jarvis/release-ui-probe/*/fixture-consents.json
-            .jarvis/release-ui-probe/*/route-authorize.json
-            .jarvis/release-ui-probe/*/route-mic-capture.json
-            .jarvis/release-ui-probe/*/route-mic-emit.json
-            .jarvis/release-ui-probe/*/route-mic-quiet-emit.json
-            .jarvis/release-ui-probe/*/input-fixture.json
-            .jarvis/release-input-fixture/setup.json
-            .jarvis/release-input-fixture/download-failure.json
-            .jarvis/release-input-fixture/ownership.json
-            .jarvis/release-input-fixture/teardown.json
-            .jarvis/release-ui-probe/*/route-system-capture.json
-            .jarvis/release-ui-probe/*/route-system-emit.json
-            .jarvis/release-ui-probe/*/audio-summary.json
-            .jarvis/release-ui-probe/*/audio-service.json
+            .jarvis/release-ui-probe/*/*/journey.json
+            .jarvis/release-ui-probe/*/*/ui-stage.json
+            .jarvis/release-ui-probe/*/*/ui-issue.json
+            .jarvis/release-ui-probe/*/*/ui-failure.json
+            .jarvis/release-ui-probe/*/*/ui-command.json
+            .jarvis/release-ui-probe/*/*/ui-progress.json
+            .jarvis/release-ui-probe/*/*/permission-state.json
+            .jarvis/release-ui-probe/*/*/permission-completion.json
+            .jarvis/release-ui-probe/*/*/permission-initial.json
+            .jarvis/release-ui-probe/*/*/permission-discovery.json
+            .jarvis/release-ui-probe/*/*/permission-owner.json
+            .jarvis/release-ui-probe/*/*/permission-wait.json
+            .jarvis/release-ui-probe/*/*/relaunch-control.json
+            .jarvis/release-ui-probe/*/*/recording-final.json
+            .jarvis/release-ui-probe/*/*/recording-initial.json
+            .jarvis/release-ui-probe/*/*/authorization.json
+            .jarvis/release-ui-probe/*/*/authorization-process.json
+            .jarvis/release-ui-probe/*/*/authorization-owner.json
+            .jarvis/release-ui-probe/*/*/authorization-username-owner.json
+            .jarvis/release-ui-probe/*/*/cleanup.json
+            .jarvis/release-ui-probe/*/*/summary.json
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 3

@@ -3,31 +3,23 @@
 
 from pathlib import Path
 import contextlib
-from datetime import datetime, timezone
 import io
-import hashlib
-import http.client
 import json
 import os
 import plistlib
 import runpy
+import shutil
+from types import SimpleNamespace
 import subprocess
-import ssl
 import sys
-import tarfile
 import tempfile
 import unittest
-import urllib.error
 from unittest import mock
 
 
 PROBE = runpy.run_path(str(Path(__file__).with_name("probe-release-ui.py")))
 ACCOUNT = runpy.run_path(str(Path(__file__).with_name("prepare-release-ui-account.py")))
 ACCOUNT_GLOBALS = ACCOUNT["prepare"].__globals__
-INPUT = runpy.run_path(str(Path(__file__).with_name("release-input-fixture.py")))
-INPUT_GLOBALS = INPUT["teardown"].__globals__
-SERVICE = runpy.run_path(str(Path(__file__).resolve().parent.parent / "Tests/ReleaseReadiness/AudioServiceEvidence.py"))
-SERVICE_GLOBALS = SERVICE["collect"].__globals__
 
 
 class ProbeResultsTests(unittest.TestCase):
@@ -103,16 +95,50 @@ class ProbeResultsTests(unittest.TestCase):
             self.assertNotIn('private', json.dumps(receipt))
             self.assertIs(json.loads((directory / 'cleanup.json').read_text())['forcedCleanup'], True)
 
-    def test_all_three_mandatory_cases_pass(self):
+    def test_repeated_inventory_refusal_still_reaps_known_owned_command(self):
+        class Refused(RuntimeError):
+            pass
+        alive = True
+        def signal_owned(_identity, _number):
+            nonlocal alive
+            alive = False
+        ownership = {'Refused': Refused, 'birth': lambda pid: {'pid': pid, 'start': 'fixed'},
+                     'same': lambda _: alive, 'signal_owned': signal_owned}
+        child = mock.Mock(pid=42)
+        child.poll.side_effect = lambda: None if alive else -15
+        ticks = iter(range(100))
+        globals_ = PROBE['run_ui'].__globals__
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with mock.patch.dict(globals_, owned_processes=mock.Mock(side_effect=[[], Refused('private native detail'), Refused('private final detail'), Refused('private final detail')])), \
+                    mock.patch.object(PROBE['runpy'], 'run_path', return_value=ownership), \
+                    mock.patch.object(PROBE['subprocess'], 'Popen', return_value=child), \
+                    mock.patch.object(PROBE['time'], 'monotonic', side_effect=lambda: next(ticks)), \
+                    mock.patch.object(PROBE['time'], 'sleep'):
+                with self.assertRaisesRegex(ValueError, 'cleanup did not finish normally'):
+                    PROBE['run_ui'](['private-command'], timeout=100, log=directory / 'test.log', roots=[directory], evidence=directory)
+            receipt = json.loads((directory / 'ui-command.json').read_text())
+            self.assertEqual(receipt['failurePhase'], 'process-monitor')
+            self.assertEqual(receipt['failureKind'], 'ownership-refused')
+            self.assertIs(receipt['timedOut'], False)
+            self.assertIsNone(receipt['returnCode'])
+            self.assertNotIn('private', json.dumps(receipt))
+            cleanup = json.loads((directory / 'cleanup.json').read_text())
+            self.assertIs(cleanup['forcedCleanup'], True)
+            self.assertIs(cleanup['allOwnedProcessesAbsent'], False)
+            child.wait.assert_called_once_with(timeout=5)
+            self.assertFalse(alive)
+
+    def test_required_journey_case_passes(self):
         PROBE["validate_summary"]({
-            "totalTestCount": 3, "passedTests": 3, "failedTests": 0, "skippedTests": 0,
+            "totalTestCount": 1, "passedTests": 1, "failedTests": 0, "skippedTests": 0,
         })
 
     def test_missing_partial_failed_skipped_or_mistyped_results_are_rejected(self):
-        complete = {"totalTestCount": 3, "passedTests": 3, "failedTests": 0, "skippedTests": 0}
+        complete = {"totalTestCount": 1, "passedTests": 1, "failedTests": 0, "skippedTests": 0}
         for replacement in ({}, {"totalTestCount": 0}, {"totalTestCount": 2, "passedTests": 2},
                             {"passedTests": 2}, {"failedTests": 1}, {"skippedTests": 1},
-                            {"failedTests": False}, {"passedTests": "3"}):
+                            {"failedTests": False}, {"passedTests": "1"}):
             with self.subTest(replacement=replacement):
                 summary = {**complete, **replacement} if replacement else {}
                 with self.assertRaises(ValueError):
@@ -128,8 +154,195 @@ class ProbeResultsTests(unittest.TestCase):
         target = manifest["TestConfigurations"][0]["TestTargets"][0]
         self.assertEqual(target["EnvironmentVariables"], {"EXISTING": "value", **environment})
         self.assertIs(target["TestTimeoutsEnabled"], True)
-        self.assertEqual(target["MaximumTestExecutionTimeAllowance"], 120)
+        self.assertEqual(target["MaximumTestExecutionTimeAllowance"], 1200)
         self.assertEqual(manifest["Metadata"]["EnvironmentVariables"], {"UNRELATED": "value"})
+
+
+class BasicJourneyTests(unittest.TestCase):
+    def receipt(self, phase="fresh"):
+        models = [("GPT Transcribe", 1)] if phase == "predecessor" else [
+            (model, cycle) for model in ("GPT Transcribe", "GPT-4o Transcribe") for cycle in (1, 2)]
+        return {"schemaVersion": 1, "phase": phase, "skills": 5, "manualCoaching": True,
+                "nativeProcessVerified": True, "normalQuit": True, "defaultsRestored": True,
+                "sessions": [{"model": model, "cycle": cycle, "fullActive": True, "freshSession": True,
+                              "stimulusTranscript": True, "shortcutHint": True, "stopped": True,
+                              "auditComplete": True} for model, cycle in models]}
+
+    def test_each_fixed_journey_requires_all_model_cycles_and_positive_proof(self):
+        for phase in ("fresh", "predecessor", "upgrade"):
+            valid = self.receipt(phase)
+            PROBE["validate_journey"](valid, phase)
+            for mutate in (
+                lambda r: r["sessions"].pop(),
+                lambda r: r.update(phase="other"),
+                lambda r: r.update(skills=True),
+                lambda r: r.update(normalQuit=False),
+                lambda r: r["sessions"][0].update(model="GPT-4o Transcribe"),
+                lambda r: r["sessions"][0].update(cycle=True),
+                lambda r: r["sessions"][0].update(freshSession=False),
+                lambda r: r["sessions"][0].update(shortcutHint=1),
+                lambda r: r["sessions"][0].update(stimulusTranscript=False),
+                lambda r: r["sessions"][0].update(auditComplete=False),
+                lambda r: r.update(rawTranscript="private"),
+            ):
+                receipt = json.loads(json.dumps(valid))
+                mutate(receipt)
+                with self.subTest(phase=phase, receipt=receipt), self.assertRaises(ValueError):
+                    PROBE["validate_journey"](receipt, phase)
+        duplicate = self.receipt()
+        duplicate["sessions"][1] = duplicate["sessions"][0]
+        with self.assertRaises(ValueError):
+            PROBE["validate_journey"](duplicate, "fresh")
+
+    def test_secret_is_consumed_before_children_and_never_allowed_in_manifest(self):
+        environment = {"RELEASE_READINESS_OPENAI_API_KEY": "synthetic-test-key-123456789",
+                       "OPENAI_API_KEY": "another-synthetic-key", "KEEP": "value"}
+        self.assertEqual(PROBE["take_key"](environment), b"synthetic-test-key-123456789")
+        self.assertEqual(environment, {"KEEP": "value"})
+        for name in ("OPENAI_API_KEY", "RELEASE_READINESS_OPENAI_API_KEY"):
+            with self.assertRaisesRegex(ValueError, "never enter"):
+                PROBE["inject_environment"]({"TestBundlePath": "fixed"}, {name: "synthetic"})
+        with mock.patch.dict(os.environ, {"RELEASE_READINESS_OPENAI_API_KEY": "", "OPENAI_API_KEY": "fallback"}, clear=True), \
+                mock.patch.object(PROBE["subprocess"], "Popen") as child:
+            with self.assertRaisesRegex(ValueError, "dedicated protected"):
+                PROBE["main"]()
+            child.assert_not_called()
+            self.assertNotIn("OPENAI_API_KEY", os.environ)
+            self.assertNotIn("RELEASE_READINESS_OPENAI_API_KEY", os.environ)
+
+    def test_private_key_writer_refuses_existing_or_symlink_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            key = directory / "key"
+            PROBE["private_write"](key, b"synthetic")
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+            with self.assertRaises(FileExistsError):
+                PROBE["private_write"](key, b"replacement")
+            link = directory / "link"
+            link.symlink_to(key)
+            with self.assertRaises(OSError):
+                PROBE["private_write"](link, b"replacement")
+            self.assertEqual(key.read_bytes(), b"synthetic")
+
+    def test_upgrade_version_comparison_requires_stable_ordered_versions(self):
+        self.assertLess(PROBE["version_tuple"]("0.5.14"), PROBE["version_tuple"]("0.5.15"))
+        self.assertLess(PROBE["version_tuple"]("0.9.99"), PROBE["version_tuple"]("0.10.0"))
+        for value in (None, True, "v0.5.14", "0.5.14-dev", "00.5.14", "0.5", "0.5.14\n"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                PROBE["version_tuple"](value)
+
+    def test_upgrade_preserves_real_preferences_key_and_completed_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = Path(temporary)
+            preferences = profile / "preferences.plist"
+            preferences.write_bytes(plistlib.dumps({"onboarding.completed": True, "coaching.mode": "manual",
+                                                     "transcription.openai.model": "gpt-transcribe", "unrelated": 1}))
+            key = profile / "openai-api-key"
+            key.write_bytes(b"synthetic-secret")
+            session = profile / "sessions/real-session"
+            session.mkdir(parents=True)
+            activity = session / "jarvis-activity.jsonl"
+            activity.write_text('{"k":"sessionEnded"}\n')
+            health = session / "audit-health.json"
+            health.write_text('{"state":"complete"}')
+            snapshot = PROBE["profile_snapshot"](profile, preferences)
+            self.assertNotIn("synthetic-secret", repr(snapshot))
+            PROBE["require_preserved"](profile, preferences, snapshot, check_preferences=True)
+            for path, changed in ((key, b"changed-key"), (activity, b"changed-history"), (health, b"{}")):
+                original = path.read_bytes()
+                path.write_bytes(changed)
+                with self.subTest(path=path.name), self.assertRaises(ValueError):
+                    PROBE["require_preserved"](profile, preferences, snapshot, check_preferences=False)
+                path.write_bytes(original)
+            values = plistlib.loads(preferences.read_bytes())
+            values["coaching.mode"] = "automatic"
+            preferences.write_bytes(plistlib.dumps(values))
+            with self.assertRaisesRegex(ValueError, "user preferences"):
+                PROBE["require_preserved"](profile, preferences, snapshot, check_preferences=True)
+            with self.assertRaisesRegex(ValueError, "genuinely used"):
+                PROBE["profile_snapshot"](profile, preferences)
+
+
+class FixedPhaseOrchestrationTests(unittest.TestCase):
+    def run_driver(self, *, setup=False, predecessor_version="0.5.14"):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        home = root / "home"
+        (home / "Library/Preferences").mkdir(parents=True)
+        (home / "Library/Application Support").mkdir()
+        candidate = root / "candidate.app"
+        predecessor = root / "predecessor.app"
+        candidate.mkdir()
+        predecessor.mkdir()
+        globals_ = PROBE["main"].__globals__
+        phases = []
+        def path(value):
+            return home if value == "/Users/runner" else Path(value)
+        def command(arguments, **_kwargs):
+            self.assertNotIn("RELEASE_READINESS_OPENAI_API_KEY", os.environ)
+            self.assertNotIn("OPENAI_API_KEY", os.environ)
+            if arguments[0] == "/usr/bin/uname":
+                return "arm64\n"
+            if arguments[0] == "/usr/bin/say":
+                Path(arguments[arguments.index("-o") + 1]).write_bytes(b"private synthetic audio")
+            elif arguments[0] == "/usr/bin/ditto":
+                shutil.copytree(arguments[1], arguments[2])
+            elif arguments[0] == "/usr/bin/defaults":
+                (home / "Library/Preferences/com.jarvis.coach.plist").unlink()
+            return ""
+        def phase(name, _version, _app, _evidence, _derived, _template, _speech, _architecture, upgrade=None):
+            phases.append(name)
+            profile = home / "Library/Application Support/Jarvis"
+            self.assertEqual((profile / "openai-api-key").read_bytes(), b"synthetic-protected-key-123456")
+            preferences = home / "Library/Preferences/com.jarvis.coach.plist"
+            if name == "upgrade":
+                self.assertTrue((profile / "sessions/predecessor/jarvis-activity.jsonl").exists())
+                self.assertIsNotNone(upgrade)
+                self.assertEqual(plistlib.loads(upgrade.read_bytes())["coaching.mode"], "manual")
+            preferences.write_bytes(plistlib.dumps({"onboarding.completed": True, "coaching.mode": "manual"}))
+            session = profile / "sessions" / name
+            session.mkdir(parents=True)
+            (session / "jarvis-activity.jsonl").write_text('{"k":"sessionEnded"}\n')
+            (session / "audit-health.json").write_text('{"state":"complete"}')
+        argv = ["probe-release-ui.py", "--setup-candidate" if setup else "--candidate", str(candidate)]
+        if not setup:
+            argv += ["--predecessor", str(predecessor)]
+        environment = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted",
+                       "RELEASE_READINESS_OPENAI_API_KEY": "synthetic-protected-key-123456"}
+        with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(PROBE["pwd"], "getpwuid", return_value=SimpleNamespace(pw_name="runner", pw_dir="/Users/runner")), \
+                mock.patch.object(PROBE["runpy"], "run_path", return_value={}), \
+                mock.patch.dict(globals_, ROOT=root, Path=path, run=command,
+                                verify_app=lambda app, _: "0.5.15" if app == candidate else predecessor_version,
+                                build_ui=lambda evidence, _: (evidence / "derived", evidence / "manifest"),
+                                run_phase=phase, owned_processes=lambda *_: []):
+            PROBE["main"]()
+        evidence = next((root / ".jarvis/release-ui-probe").iterdir())
+        self.assertFalse((home / "Library/Application Support/Jarvis/openai-api-key").exists())
+        return phases, evidence
+
+    def test_full_run_requires_fresh_predecessor_upgrade_and_retains_real_profile(self):
+        phases, evidence = self.run_driver()
+        self.assertEqual(phases, ["fresh", "predecessor", "upgrade"])
+        receipt = json.loads((evidence / "readiness.json").read_text())
+        self.assertIs(receipt["releaseReady"], True)
+        self.assertIs(receipt["retainedSessionHistory"], True)
+        self.assertFalse((evidence / "setup-feasibility.json").exists())
+
+    def test_setup_can_never_produce_release_readiness(self):
+        phases, evidence = self.run_driver(setup=True)
+        self.assertEqual(phases, ["fresh"])
+        receipt = json.loads((evidence / "setup-feasibility.json").read_text())
+        self.assertEqual(receipt["check"], "setup-feasibility")
+        self.assertIs(receipt["releaseReady"], False)
+        self.assertFalse((evidence / "readiness.json").exists())
+
+    def test_full_run_refuses_same_or_newer_predecessor(self):
+        for version in ("0.5.15", "0.6.0"):
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "older predecessor"):
+                self.run_driver(predecessor_version=version)
 
 
 class NativeAuthorizationTests(unittest.TestCase):
@@ -406,537 +619,6 @@ class TemporaryAccountSafetyTests(unittest.TestCase):
             with self.assertRaises(ValueError) as error:
                 ACCOUNT["command"](["tool"], stage="account-creation", input_text=secret)
             self.assertEqual(str(error.exception), "account-creation")
-
-
-class InputFixtureDownloadTests(unittest.TestCase):
-    payload = b"pinned public dependency"
-
-    def setUp(self):
-        self.exporter = mock.Mock()
-        patch = mock.patch.dict(INPUT_GLOBALS, receipt=self.exporter)
-        patch.start()
-        self.addCleanup(patch.stop)
-
-    def response(self, data=None, length=None):
-        value = mock.MagicMock()
-        value.__enter__.return_value = value
-        value.read.return_value = self.payload if data is None else data
-        value.getheader.return_value = str(len(value.read.return_value)) if length is None else length
-        return value
-
-    def fetch(self):
-        return INPUT["download"](INPUT["FFMPEG_URL"], hashlib.sha256(self.payload).hexdigest())
-
-    def test_known_transient_transport_failures_retry_then_verify(self):
-        errors = [urllib.error.URLError(ConnectionResetError(54, "reset")), TimeoutError(),
-                  http.client.IncompleteRead(b""), http.client.RemoteDisconnected(),
-                  ssl.SSLEOFError(), *[urllib.error.HTTPError("url", code, "transient", None, None)
-                                     for code in (408, 429, 503)]]
-        for error in errors:
-            with self.subTest(error=type(error).__name__), \
-                 mock.patch.object(INPUT["urllib"].request, "urlopen", side_effect=[error, self.response()]) as opened, \
-                 mock.patch.object(INPUT["time"], "sleep") as delay:
-                self.assertEqual(self.fetch(), self.payload)
-                self.assertEqual(opened.call_count, 2)
-                delay.assert_called_once_with(1)
-
-    def test_three_failed_attempts_exhaust_fixed_bound_without_raw_error(self):
-        with mock.patch.object(INPUT["urllib"].request, "urlopen", side_effect=ConnectionResetError("private detail")) as opened, \
-             mock.patch.object(INPUT["time"], "sleep") as delay:
-            with self.assertRaisesRegex(RuntimeError, "^Pinned fixture dependency download failed$"):
-                self.fetch()
-            self.assertEqual(opened.call_count, 3)
-            self.assertEqual(delay.call_args_list, [mock.call(1), mock.call(2)])
-            self.assertEqual(self.exporter.call_args.args[1], {
-                "schemaVersion": 1, "dependency": "ffmpeg", "attemptCount": 3, "category": "connection-reset"})
-            self.assertNotIn("private", json.dumps(self.exporter.call_args.args[1]))
-
-    def test_download_failure_exports_only_closed_transport_metadata(self):
-        cases = [(urllib.error.HTTPError("private-url", 403, "private message", None, None),
-                  {"category": "http", "httpStatus": 403}),
-                 (urllib.error.URLError(ConnectionResetError(54, "private detail")),
-                  {"category": "connection-reset", "errno": 54})]
-        for error, fields in cases:
-            with mock.patch.object(INPUT["urllib"].request, "urlopen", side_effect=error), \
-                    mock.patch.object(INPUT["time"], "sleep"):
-                with self.assertRaises(RuntimeError):
-                    self.fetch()
-            result = self.exporter.call_args.args[1]
-            self.assertEqual(result, {"schemaVersion": 1, "dependency": "ffmpeg",
-                                      "attemptCount": 1 if fields["category"] == "http" else 3, **fields})
-            self.assertNotIn("private", json.dumps(result))
-
-    def test_certificate_and_not_found_never_retry(self):
-        for error in (urllib.error.HTTPError("url", 404, "missing", None, None),
-                      urllib.error.URLError(ssl.SSLCertVerificationError("untrusted"))):
-            with mock.patch.object(INPUT["urllib"].request, "urlopen", side_effect=error) as opened, \
-                 mock.patch.object(INPUT["time"], "sleep") as delay:
-                with self.assertRaises(RuntimeError):
-                    self.fetch()
-                self.assertEqual(opened.call_count, 1)
-                delay.assert_not_called()
-
-    def test_short_transport_retries_but_checksum_or_size_failure_does_not(self):
-        with mock.patch.object(INPUT["urllib"].request, "urlopen",
-                               side_effect=[self.response(b"short", str(len(self.payload))), self.response()]) as opened, \
-             mock.patch.object(INPUT["time"], "sleep"):
-            self.assertEqual(self.fetch(), self.payload)
-            self.assertEqual(opened.call_count, 2)
-        for response in (self.response(b"wrong bytes"), self.response(length="30000001"), self.response(length="invalid")):
-            with mock.patch.object(INPUT["urllib"].request, "urlopen", return_value=response) as opened, \
-                 mock.patch.object(INPUT["time"], "sleep") as delay:
-                with self.assertRaises(ValueError):
-                    self.fetch()
-                self.assertEqual(opened.call_count, 1)
-                delay.assert_not_called()
-        self.exporter.assert_not_called()
-
-
-class AudioServiceEvidenceTests(unittest.TestCase):
-    start = 1_800_000_000
-    end = start + 60
-
-    def report(self, **changes):
-        body = {"procName": "coreaudiod", "procPath": "/usr/sbin/coreaudiod",
-                "captureTime": datetime.fromtimestamp(self.start + 10, timezone.utc).isoformat(),
-                "exception": {"type": "EXC_BAD_ACCESS", "signal": "SIGSEGV", "private": "secret"},
-                "faultingThread": 0,
-                "usedImages": [{"path": "/Library/Audio/Plug-Ins/HAL/roc_vad.driver/Contents/MacOS/roc_vad"}],
-                "threads": [{"frames": [{"imageIndex": 0, "symbol": "roc::RingBuffer::read(private-secret)"},
-                                        {"imageIndex": 0, "symbol": "roc::RequestHandler::OnReadClientInput"},
-                                        {"imageIndex": 0, "symbol": "std::__1::fill_n"}]}],
-                "privatePath": "/Users/private-person/secret"}
-        body.update(changes)
-        return json.dumps({"bug_type": "309", "private": "secret"}).encode() + b"\n" + json.dumps(body).encode()
-
-    def summarize(self, raw):
-        return SERVICE["summarize_report"](raw, self.start, self.end)
-
-    def baseline(self):
-        return {"schemaVersion": 1, "wallTime": self.start, "reportIDs": [],
-                "inventoryUnavailable": False, "daemonUnavailable": False,
-                "daemon": {"pid": 42, "start": [self.start - 10, 1]}}
-
-    def test_only_closed_crashed_thread_categories_leave_report_parser(self):
-        result = self.summarize(self.report())
-        self.assertEqual(result, {"rocImageLoaded": True, "rocFrameCount": 3, "ringBufferFrame": True,
-                                  "requestHandlerFrame": True, "memoryFillCopyFrame": True,
-                                  "exception": "EXC_BAD_ACCESS", "signal": "SIGSEGV"})
-        self.assertNotIn("secret", json.dumps(result))
-        self.assertNotIn("/", json.dumps(result))
-        unknown = self.summarize(self.report(exception={"type": "secret", "signal": "private"}))
-        self.assertEqual((unknown["exception"], unknown["signal"]), ("other", "other"))
-
-    def test_wrong_process_report_type_or_time_window_cannot_match(self):
-        for changes in ({"procName": "unrelated"}, {"procPath": "/private/coreaudiod"},
-                        {"captureTime": datetime.fromtimestamp(self.start - 1, timezone.utc).isoformat()},
-                        {"captureTime": datetime.fromtimestamp(self.end + 1, timezone.utc).isoformat()},
-                        {"captureTime": "2027-01-01T00:00:00"}):
-            self.assertIsNone(self.summarize(self.report(**changes)))
-        self.assertIsNone(self.summarize(self.report().replace(b'"309"', b'"288"', 1)))
-
-    def test_malformed_oversize_and_invalid_frame_indexes_refuse(self):
-        for raw in (b"private malformed", self.report() + b"trailing-private-data",
-                    b"x" * (SERVICE["MAX_REPORT_BYTES"] + 1), self.report(faultingThread=True),
-                    self.report(threads=[{"frames": [{"imageIndex": 12, "symbol": "secret"}]}])):
-            with self.assertRaises((ValueError, KeyError, TypeError)):
-                self.summarize(raw)
-
-    def test_report_symlink_fifo_and_oversize_are_never_read(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            target = directory / "private"
-            target.write_bytes(self.report())
-            path = directory / "coreaudiod.ips"
-            path.symlink_to(target)
-            with self.assertRaises(OSError):
-                SERVICE["read_report"](path)
-            path.unlink()
-            os.mkfifo(path, 0o600)
-            with self.assertRaises(ValueError):
-                SERVICE["read_report"](path)
-            path.unlink()
-            with path.open("wb") as output:
-                output.truncate(SERVICE["MAX_REPORT_BYTES"] + 1)
-            with self.assertRaises(ValueError):
-                SERVICE["read_report"](path)
-
-    def test_only_new_reports_are_collected_and_daemon_birth_change_is_explicit(self):
-        before = self.baseline()
-        before["reportIDs"] = ["a" * 64]
-        after = {**before, "wallTime": self.end, "daemon": {"pid": 43, "start": [self.start + 20, 2]}}
-        reports = {"a" * 64: Path("old"), "b" * 64: Path("new")}
-        with mock.patch.dict(SERVICE_GLOBALS, snapshot=mock.Mock(return_value=after),
-                             inventory=mock.Mock(return_value=(reports, False)),
-                             read_report=mock.Mock(return_value=self.report())) as values:
-            result = SERVICE["collect"](before)
-            values["read_report"].assert_called_once_with(Path("new"))
-        self.assertIs(result["daemonChanged"], True)
-        self.assertEqual(len(result["matchedReports"]), 1)
-        with mock.patch.dict(SERVICE_GLOBALS, snapshot=mock.Mock(return_value=after),
-                             inventory=mock.Mock(return_value=(reports, True)),
-                             read_report=mock.Mock(side_effect=PermissionError("private detail"))):
-            unavailable = SERVICE["collect"](before)
-        self.assertIs(unavailable["reportCollectionUnavailable"], True)
-        self.assertEqual(unavailable["unreadableReports"], 1)
-        self.assertNotIn("private", json.dumps(unavailable))
-
-    def test_baseline_and_export_schema_reject_private_extra_data(self):
-        for changes in ({"daemon": {"pid": 1, "start": [1, 0], "secret": "private"}},
-                        {"wallTime": float("nan")}, {"reportIDs": ["private-path"]}, {"unknown": "private"}):
-            with self.assertRaises(ValueError):
-                SERVICE["validate_snapshot"]({**self.baseline(), **changes})
-
-    def test_diagnostic_failure_cannot_replace_original_ui_cleanup_failure(self):
-        with tempfile.TemporaryDirectory() as temporary, \
-             mock.patch.dict(PROBE["export_audio_service_evidence"].__globals__,
-                             audio_service_evidence=mock.Mock(side_effect=ValueError("private report"))):
-            evidence = Path(temporary)
-            with self.assertRaisesRegex(ValueError, "original cleanup failure"):
-                try:
-                    raise ValueError("original cleanup failure")
-                finally:
-                    PROBE["export_audio_service_evidence"](evidence, self.baseline())
-            self.assertEqual(json.loads((evidence / "audio-service.json").read_text()),
-                             {"schemaVersion": 1, "collectionUnavailable": True})
-
-
-class InputFixtureArchiveTests(unittest.TestCase):
-    payload = b"pinned public dependency"
-
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.directory = Path(temporary.name).resolve() / "archives"
-        self.digest = hashlib.sha256(self.payload).hexdigest()
-        patch = mock.patch.dict(INPUT_GLOBALS, ARCHIVES=self.directory, FFMPEG_SHA=self.digest)
-        patch.start()
-        self.addCleanup(patch.stop)
-        self.path = self.directory / "ffmpeg-8.0.1.tar.xz"
-
-    def fetch(self):
-        return INPUT["cached_archive"](INPUT["FFMPEG_URL"], self.digest)
-
-    def seed(self, data=None):
-        self.directory.mkdir(mode=0o700)
-        INPUT["create"](self.path, self.payload if data is None else data)
-
-    def test_miss_downloads_once_and_hit_rehashes_without_network(self):
-        with mock.patch.dict(INPUT_GLOBALS, download=mock.Mock(return_value=self.payload)):
-            self.assertEqual(self.fetch(), self.payload)
-            self.assertEqual(self.fetch(), self.payload)
-            INPUT_GLOBALS["download"].assert_called_once_with(INPUT["FFMPEG_URL"], self.digest)
-        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(self.directory.stat().st_mode & 0o777, 0o700)
-        self.assertEqual(list(self.directory.iterdir()), [self.path])
-        self.path.write_bytes(b"substituted after a successful hit")
-        with mock.patch.dict(INPUT_GLOBALS, download=mock.Mock()) as values:
-            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
-                self.fetch()
-            values["download"].assert_not_called()
-
-    def test_corrupt_restored_bytes_never_fall_back_to_download(self):
-        self.seed(b"private corrupted contents")
-        with mock.patch.dict(INPUT_GLOBALS, download=mock.Mock()) as values:
-            with self.assertRaisesRegex(ValueError, "^Cached fixture archive checksum mismatch$"):
-                self.fetch()
-            values["download"].assert_not_called()
-
-    def test_symlinks_hardlinks_fifo_permissions_and_oversize_refuse(self):
-        self.directory.mkdir(mode=0o700)
-        target = self.directory / "private-unrelated"
-        INPUT["create"](target, self.payload)
-        variants = [lambda: self.path.symlink_to(target), lambda: os.link(target, self.path),
-                    lambda: os.mkfifo(self.path, 0o600), lambda: self.path.mkdir(),
-                    lambda: INPUT["create"](self.path, self.payload, 0o644)]
-        for variant in variants:
-            with self.subTest(variant=variant), mock.patch.dict(INPUT_GLOBALS, download=mock.Mock()) as values:
-                variant()
-                with self.assertRaises((ValueError, OSError)):
-                    self.fetch()
-                values["download"].assert_not_called()
-                self.path.rmdir() if self.path.is_dir() else self.path.unlink()
-        with self.path.open("wb") as output:
-            output.truncate(30_000_001)
-        self.path.chmod(0o600)
-        with self.assertRaisesRegex(ValueError, "bounded private regular file"):
-            self.fetch()
-
-    def test_cache_directory_and_unpinned_request_refuse(self):
-        self.seed()
-        self.directory.chmod(0o755)
-        with self.assertRaisesRegex(ValueError, "owned and private"):
-            self.fetch()
-        with self.assertRaisesRegex(ValueError, "pinned dependency checksum"):
-            INPUT["cached_archive"](INPUT["FFMPEG_URL"], "0" * 64)
-
-    def test_cached_archive_still_requires_safe_extraction(self):
-        archive = io.BytesIO()
-        with tarfile.open(fileobj=archive, mode="w:xz") as output:
-            member = tarfile.TarInfo("ffmpeg-8.0.1/private-link")
-            member.type = tarfile.SYMTYPE
-            member.linkname = "/private-unrelated"
-            output.addfile(member)
-        data = archive.getvalue()
-        self.seed(data)
-        with mock.patch.dict(INPUT_GLOBALS, FFMPEG_SHA=hashlib.sha256(data).hexdigest(), run=mock.Mock()) as values:
-            with self.assertRaisesRegex(ValueError, "Unexpected FFmpeg source archive contents"):
-                INPUT["build_ffmpeg"]()
-            values["run"].assert_not_called()
-
-
-class InputFixtureOwnershipTests(unittest.TestCase):
-    header = "index type state uid name\n"
-
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.directory = Path(temporary.name).resolve()
-        self.command = mock.Mock()
-        patcher = mock.patch.dict(INPUT_GLOBALS, BASE=self.directory, run=self.command)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.owned = self.header + "1 receiver on com.jarvis.release-input Jarvis Synthetic Microphone\n"
-
-    def claim(self):
-        self.command.return_value = self.header
-        INPUT["claim_receiver"]()
-        self.command.reset_mock()
-
-    def test_no_ownership_never_deletes_and_preexisting_uid_refuses_claim(self):
-        INPUT["teardown"]()
-        self.command.assert_not_called()
-        self.command.return_value = self.owned
-        with self.assertRaisesRegex(ValueError, "preexisting"):
-            INPUT["claim_receiver"]()
-        self.assertFalse((self.directory / "ownership.json").exists())
-        self.assertEqual(self.command.call_count, 1)
-
-    def test_cancelled_setup_without_success_receipt_cleans_exact_owned_receiver(self):
-        self.claim()
-        self.assertFalse((self.directory / "setup.json").exists())
-        self.assertEqual((self.directory / "ownership.json").stat().st_mode & 0o777, 0o600)
-        self.command.side_effect = [self.owned, "", self.header]
-        INPUT["teardown"]()
-        self.assertEqual(self.command.call_args_list[1].args[0],
-                         [str(INPUT["ROC"]), "device", "del", "--uid", INPUT["UID"]])
-        receipt = json.loads((self.directory / "teardown.json").read_text())
-        self.assertIs(receipt["receiverRemoved"], True)
-        self.assertIs(receipt["receiverAbsent"], True)
-
-    def test_already_absent_owned_receiver_requires_successful_inventory(self):
-        self.claim()
-        self.command.return_value = self.header
-        INPUT["teardown"]()
-        self.assertEqual(self.command.call_count, 2)
-        receipt = json.loads((self.directory / "teardown.json").read_text())
-        self.assertIs(receipt["receiverRemoved"], False)
-        self.assertIs(receipt["receiverAbsent"], True)
-
-    def test_changed_receiver_identity_or_inventory_failure_never_implies_absence(self):
-        self.claim()
-        for output in (self.owned.replace("Jarvis Synthetic Microphone", "Unrelated Receiver"),
-                       "not an inventory\n"):
-            self.command.reset_mock()
-            self.command.return_value = output
-            with self.assertRaises(ValueError):
-                INPUT["remove_owned_receiver"]()
-            self.assertEqual(self.command.call_count, 1)
-        self.command.side_effect = RuntimeError("RPC unavailable")
-        with self.assertRaisesRegex(RuntimeError, "RPC unavailable"):
-            INPUT["remove_owned_receiver"]()
-        self.assertFalse((self.directory / "teardown.json").exists())
-
-    def test_post_delete_presence_is_failure(self):
-        self.claim()
-        self.command.side_effect = [self.owned, "", self.owned]
-        with self.assertRaisesRegex(RuntimeError, "remains after cleanup"):
-            INPUT["teardown"]()
-        self.assertFalse((self.directory / "teardown.json").exists())
-
-
-class AudioRouteTests(unittest.TestCase):
-    def receipt(self, phase="mic-only"):
-        empty = {"frames": 192_000, "rms": 0.0, "micToneAmplitude": 0.0, "systemToneAmplitude": 0.0,
-                 "micToneFraction": 0.0, "systemToneFraction": 0.0}
-        active = {**empty, "rms": 0.071}
-        prefix = "micTone" if phase == "mic-only" else "systemTone"
-        active.update({prefix + "Amplitude": 0.1, prefix + "Fraction": 0.99})
-        return {"schemaVersion": 1, "check": "production-aggregate-route-isolation", "mode": "capture",
-                "phase": phase, "stage": "complete", "passed": True, "outputFrames": 0,
-                "rawMic": active if phase == "mic-only" else empty,
-                "globalTap": empty if phase == "mic-only" else active,
-                "micUID": "com.jarvis.release-input", "systemUID": "BlackHole2ch_UID", "micChannels": 2,
-                "sampleRate": 48_000, "defaultsRestored": True, "resourcesReleased": True,
-                "measurementStartUptime": 102.0, "measurementEndUptime": 106.0}
-
-    def test_both_independent_phases_pass(self):
-        for phase in ("mic-only", "system-only"):
-            PROBE["validate_audio_receipt"](self.receipt(phase), "capture", phase)
-
-    def test_bootstrap_requires_observed_acknowledgement_without_claiming_capture(self):
-        receipt = self.receipt()
-        for key in ("micUID", "systemUID", "micChannels", "sampleRate", "measurementStartUptime", "measurementEndUptime"):
-            del receipt[key]
-        receipt.update(check="fixture-capture-consent-bootstrap", mode="authorize", phase="consent",
-                       microphoneAuthorized=True, tapCreated=True, nativeConsentAcknowledged=True, captureGrantProven=False,
-                       microphoneRequestUptime=100.0, microphoneFinishedUptime=110.0, microphoneCompletionUptime=109.0,
-                       microphoneCallbackReceived=True, microphoneAuthorizationStatus=3,
-                       ioStarted=True, ioStartRequestedUptime=111.0, ioStartReturnedUptime=112.0)
-        PROBE["validate_audio_receipt"](receipt, "authorize", "consent")
-        for key, value in (("nativeConsentAcknowledged", False), ("microphoneAuthorized", False),
-                           ("captureGrantProven", True), ("tapCreated", 1), ("ioStarted", False),
-                           ("ioStartRequestedUptime", 99.0), ("ioStartReturnedUptime", 110.0),
-                           ("authorizationFailureStage", "cleanup")):
-            with self.assertRaises(ValueError):
-                PROBE["validate_audio_receipt"]({**receipt, key: value}, "authorize", "consent")
-
-    def test_microphone_diagnostics_reject_malformed_status_or_clock(self):
-        receipt = self.receipt()
-        for key in ("micUID", "systemUID", "micChannels", "sampleRate", "measurementStartUptime", "measurementEndUptime"):
-            del receipt[key]
-        receipt.update(check="fixture-capture-consent-bootstrap", mode="authorize", phase="consent", passed=False,
-                       microphoneRequestUptime=100.0, microphoneFinishedUptime=130.0,
-                       microphoneCallbackReceived=False, microphoneAuthorizationStatus=0)
-        PROBE["validate_audio_receipt"](receipt, "authorize", "consent", require_pass=False)
-        for key, value in (("microphoneFinishedUptime", 99), ("microphoneRequestUptime", float("nan")),
-                           ("microphoneAuthorizationStatus", 4), ("microphoneCallbackReceived", True)):
-            with self.assertRaises(ValueError):
-                PROBE["validate_audio_receipt"]({**receipt, key: value}, "authorize", "consent", require_pass=False)
-
-    def test_emitter_requires_matching_device_complete_tone_and_cleanup(self):
-        receipt = self.receipt()
-        for key in ("micUID", "systemUID", "micChannels", "measurementStartUptime", "measurementEndUptime"):
-            del receipt[key]
-        receipt.update(check="virtual-device-tone-emission", mode="emit", phase="system",
-                       emitterUID="BlackHole2ch_UID", outputFrames=384_000, senderStartUptime=100.0, senderEndUptime=108.0)
-        PROBE["validate_audio_receipt"](receipt, "emit", "system")
-        for key, value in (("outputFrames", 0), ("emitterUID", "BlackHole16ch_UID"), ("resourcesReleased", False)):
-            with self.assertRaises(ValueError):
-                PROBE["validate_audio_receipt"]({**receipt, key: value}, "emit", "system")
-
-    def test_rtp_active_and_quiet_senders_require_transport_completion_and_exact_reaping(self):
-        receipt = self.receipt()
-        for key in ("micUID", "systemUID", "micChannels", "measurementStartUptime", "measurementEndUptime"):
-            del receipt[key]
-        receipt.update(check="synthetic-microphone-rtp", mode="emit", emitterUID="com.jarvis.release-input",
-                       micChannels=2, transport="rtp", wireSampleRate=44_100, outputDurationSeconds=8, sourceDurationSeconds=8,
-                       senderElapsedSeconds=8.1, senderExitCode=0, senderReaped=True,
-                       senderStartUptime=100.0, senderEndUptime=108.1)
-        for phase in ("mic", "mic-quiet"):
-            receipt["phase"] = phase
-            PROBE["validate_audio_receipt"](receipt, "emit", phase)
-            for key, value in (("outputDurationSeconds", 0), ("outputDurationSeconds", 8.2), ("outputDurationSeconds", float("nan")),
-                               ("sourceDurationSeconds", 7), ("senderExitCode", 1), ("senderExitCode", False),
-                               ("senderReaped", False), ("senderElapsedSeconds", 6.9), ("senderElapsedSeconds", 13.1), ("transport", "hal"),
-                               ("wireSampleRate", 48_000), ("outputFrames", 384_000)):
-                with self.assertRaises(ValueError):
-                    PROBE["validate_audio_receipt"]({**receipt, key: value}, "emit", phase)
-            for missing in ("senderReaped", "outputDurationSeconds", "senderExitCode"):
-                with self.assertRaises(ValueError):
-                    PROBE["validate_audio_receipt"]({k: v for k, v in receipt.items() if k != missing}, "emit", phase)
-
-    def test_measurement_requires_all_producers_to_cover_the_scored_interval(self):
-        for phase, producers in (("mic-only", ["mic"]), ("system-only", ["system", "mic-quiet"])):
-            capture = self.receipt(phase)
-            emitters = [{"phase": name, "senderStartUptime": 100.0, "senderEndUptime": 108.0} for name in producers]
-            PROBE["validate_audio_coverage"](capture, emitters)
-            with self.assertRaisesRegex(ValueError, "every active and quiet producer"):
-                PROBE["validate_audio_coverage"](capture, emitters[:-1])
-            for index in range(len(emitters)):
-                for key, value in (("senderStartUptime", 102.1), ("senderEndUptime", 105.9)):
-                    invalid = [dict(emitter) for emitter in emitters]
-                    invalid[index][key] = value
-                    with self.assertRaisesRegex(ValueError, "complete measurement"):
-                        PROBE["validate_audio_coverage"](capture, invalid)
-
-    def test_phase_cancelled_leak_is_rejected_by_inactive_rms(self):
-        for phase in ("mic-only", "system-only"):
-            receipt = self.receipt(phase)
-            receipt["globalTap" if phase == "mic-only" else "rawMic"]["rms"] = 0.071
-            with self.assertRaisesRegex(ValueError, "not independent"):
-                PROBE["validate_audio_receipt"](receipt, "capture", phase)
-
-    def test_missing_signal_partial_capture_cleanup_and_nonfinite_values_refuse(self):
-        for key, value in (("frames", 1), ("rms", float("nan")), ("micToneAmplitude", 0), ("micToneFraction", 0.1)):
-            receipt = self.receipt()
-            receipt["rawMic"][key] = value
-            with self.assertRaises(ValueError):
-                PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")
-        for key, value in (("passed", False), ("defaultsRestored", False), ("resourcesReleased", False),
-                           ("micUID", "physical-device"), ("mode", "emit"), ("sampleRate", True),
-                           ("measurementStartUptime", float("nan")), ("measurementEndUptime", 101)):
-            receipt = {**self.receipt(), key: value}
-            with self.assertRaises(ValueError):
-                PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")
-
-    def test_failure_export_retains_only_scalar_metrics_and_presence_of_error(self):
-        receipt = {**self.receipt(), "passed": False, "error": "private native diagnostic",
-                   "failureStage": "capture", "failureReason": "invalid-buffers",
-                   "invalidBufferReason": "bytes", "invalidBufferCount": 2, "invalidBufferIndex": 0,
-                   "invalidBufferChannels": 2, "invalidBufferByteSize": 0, "invalidBufferHasData": False,
-                   "invalidBufferUptime": 103.5}
-        safe = PROBE["validate_audio_receipt"](receipt, "capture", "mic-only", require_pass=False)
-        self.assertIs(safe["errorPresent"], True)
-        self.assertEqual(safe["failureStage"], "capture")
-        self.assertEqual(safe["invalidBufferByteSize"], 0)
-        self.assertEqual(safe["rawMic"]["frames"], 192_000)
-        self.assertNotIn("error", safe)
-        self.assertNotIn("private", json.dumps(safe))
-        with self.assertRaises(ValueError):
-            PROBE["validate_audio_receipt"]({**receipt, "rawAudio": "untrusted"}, "capture", "mic-only", require_pass=False)
-
-    def test_device_snapshot_retains_only_typed_route_facts(self):
-        state = {"uptime": 101.0, "queryFailed": False, "micEnumerated": True, "micAlive": True,
-                 "micObjectMatchesRequested": True, "aggregateActiveSubdeviceCount": 1, "aggregateMicActive": True,
-                 "aggregateActiveTapCount": 1, "aggregateTapMatchesRequested": True,
-                 "defaultInputMatchesRequested": True, "defaultInputMatchesAggregate": False}
-        receipt = {**self.receipt(), "beforeIOState": state}
-        PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")
-        for key, value in (("deviceName", "private"), ("micAlive", 1), ("uptime", float("nan")),
-                           ("aggregateActiveTapCount", 4097), ("queryOSStatus", -50)):
-            with self.assertRaises(ValueError):
-                PROBE["validate_audio_receipt"]({**receipt, "beforeIOState": {**state, key: value}}, "capture", "mic-only")
-        failure = {**receipt, "passed": False, "error": "private diagnostic",
-                   "failureState": {"uptime": 105.0, "queryFailed": True, "queryOSStatus": -50, "micEnumerated": False}}
-        safe = PROBE["validate_audio_receipt"](failure, "capture", "mic-only", require_pass=False)
-        self.assertEqual(safe["failureState"]["queryOSStatus"], -50)
-        self.assertNotIn("private", json.dumps(safe))
-        with self.assertRaises(ValueError):
-            PROBE["validate_audio_receipt"]({**receipt, "failureState": failure["failureState"]}, "capture", "mic-only")
-
-    def test_closed_failure_metadata_refuses_unknown_text_types_and_false_success(self):
-        receipt = {**self.receipt(), "passed": False, "error": "private native diagnostic",
-                   "failureStage": "final-defaults", "failureReason": "os-status", "failureOSStatus": -50,
-                   "finalDefaultInputMatchesRequested": True, "finalDefaultOutputMatchesRequested": False}
-        PROBE["validate_audio_receipt"](receipt, "capture", "mic-only", require_pass=False)
-        for key, value in (("failureStage", "private text"), ("failureReason", "private text"),
-                           ("failureOSStatus", True), ("failureOSStatus", 2 ** 31),
-                           ("finalDefaultInputMatchesRequested", 1), ("invalidBufferCount", -1),
-                           ("invalidBufferIndex", 2), ("invalidBufferByteSize", 2 ** 32),
-                           ("invalidBufferReason", "private text"), ("invalidBufferHasData", 1), ("passed", True)):
-            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
-                PROBE["validate_audio_receipt"]({**receipt, key: value}, "capture", "mic-only", require_pass=False)
-        with self.assertRaisesRegex(ValueError, "defaults changed"):
-            PROBE["validate_audio_receipt"]({**self.receipt(), "finalDefaultInputMatchesRequested": False}, "capture", "mic-only")
-
-    def test_single_rtp_progress_observation_exports_failure_but_cannot_pass(self):
-        receipt = self.receipt()
-        for key in ("micUID", "systemUID", "measurementStartUptime", "measurementEndUptime"):
-            del receipt[key]
-        receipt.update(check="synthetic-microphone-rtp", mode="emit", phase="mic", passed=False,
-                       emitterUID="com.jarvis.release-input", transport="rtp", wireSampleRate=44_100,
-                       sourceDurationSeconds=8, senderExitCode=15, senderReaped=True,
-                       senderStartUptime=101.0, senderEndUptime=101.0,
-                       failureStage="operation", failureReason="validation", error="private progress error")
-        safe = PROBE["validate_audio_receipt"](receipt, "emit", "mic", require_pass=False)
-        self.assertEqual(safe["senderStartUptime"], safe["senderEndUptime"])
-        self.assertIs(safe["errorPresent"], True)
-        self.assertNotIn("private", json.dumps(safe))
-        with self.assertRaises(ValueError):
-            PROBE["validate_audio_receipt"](receipt, "emit", "mic")
-        with self.assertRaises(ValueError):
-            PROBE["validate_audio_receipt"]({**receipt, "senderEndUptime": 100.0}, "emit", "mic", require_pass=False)
 
 
 if __name__ == "__main__":

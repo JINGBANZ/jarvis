@@ -39,7 +39,9 @@ bundle, so a debug build without that identity still refuses a scenario.
 the object a production Start uses ([architecture.md → Components](./architecture.md#3-components)).
 Two ports are substituted: the audio source, `FixtureAudioSource` in place of
 `AggregateEchoCapture`, and the screen capture, `FixtureScreenCapture` in place of
-`WindowScopedScreenCapture`. The composition also takes an optional attempt-auditing factory;
+`WindowScopedScreenCapture`. Direct fixture delivery bypasses device capture, echo cancellation,
+and local voice-activity inference; clip boundaries supply speech-activity events.
+The composition also takes an optional attempt-auditing factory;
 production records straight into the session evidence, and the runner wraps it to watch attempts
 start and finish. The Foundation-only scenario model, launch options, and audio timeline live in
 `Tests/Support/ScenarioHarness/Scenarios/`.
@@ -57,9 +59,10 @@ The run is not:
   subscriptions. The
   Gate compiles the `JarvisLiveTests` target but never runs it
   ([build-and-run.md → Toolchain](./build-and-run.md#toolchain)). Unit targets never reach a
-  provider. Real-provider test entry points live only under `Tests/JarvisLiveTests/` and invoke
-  the shared harness; offline harness tests inject synthetic adapters. Live execution stays
-  explicit through the existing command.
+  provider. Scenario and evaluation provider entry points live under `Tests/JarvisLiveTests/`
+  and invoke the shared harness; offline harness tests inject synthetic adapters. Their live
+  execution stays explicit through the existing command. The external installed-app readiness
+  runner has a separate [ownership boundary](#external-installed-app-readiness).
 - **A timing test.** Press-to-tip and question-to-tip times are printed as `time` lines and never
   asserted, because provider latency varies between runs. Scenarios A and B also print a `tokens`
   line per provider with its coach calls and their input, cache-read, cache-write, and output
@@ -96,7 +99,7 @@ Product modules expose the interfaces exercised by the harness and do not import
 | `Sources/JarvisApp/Testing/` | Debug-only signed-app adapters and explicit native harness modes requiring app composition or macOS frameworks. |
 | `Tests/JarvisScenarioHarnessTests/` | Offline verification of the shared harness; included in the Gate with synthetic dependencies. |
 | `Tests/JarvisLiveTests/` | Real-provider and signed-app test entry points, the suite catalog, scenarios, and fixtures; excluded from Gate execution. |
-| `Tests/ReleaseReadiness/` | External XCTest UI runner, native permission-form automation, and standalone synthetic OS-audio probes for the installed production app. It imports no Jarvis product module and is not linked into the shipped app. |
+| `Tests/ReleaseReadiness/` | External XCTest UI runner, native permission-form automation, virtual-device selection, and synthetic system playback for the installed production app. It imports no Jarvis product module and is not linked into the shipped app. |
 
 `EvaluationSuiteRunner` in
 [`Execution/`](../Tests/Support/ScenarioHarness/Execution/EvaluationSuiteRunner.swift) owns provider
@@ -113,36 +116,6 @@ so native helpers and other test executables can use it without importing model 
 source-placement rules; its negative fixtures run in the Gate. The debug compilation guard keeps
 scenario machinery and ownership reporting out of release execution.
 
-The external `ReleaseReadiness` target is an Xcode UI-test boundary because it drives the ordinary
-installed app through Accessibility and native consent controls. Its setup-feasibility workflow
-uses a checksum-pinned public signed release on disposable hosted Macs, without provider credentials.
-The required setup matrix is Apple silicon on macOS 15 and 26, and Intel on macOS 15. Intel macOS 26
-retains ordinary source-Gate coverage; the full normal installed-app release journey has no Intel
-macOS 26 coverage. The product minimum remains macOS 15.
-Only allowlisted scalar setup receipts are uploaded; private XCTest results and UI logs stay on the
-disposable runner. This setup check does not establish a full coaching journey or final candidate
-readiness. It does not replace the existing source or release checks.
-The standalone route fixture has its own native consent identity. It measures microphone-only and
-system-only synthetic tones through the production-shaped unexcluded global tap and default-input
-aggregate, rejects cross-route tone and RMS energy, and restores device defaults.
-[`release-input-fixture.py`](../scripts/release-input-fixture.py) owns the checksum-pinned Roc input-only
-receiver and minimal FFmpeg file-to-RTP sender on disposable hosted Macs. The sender has no audio-device
-output backend: ordinary app playback enters the global system tap even when routed to a second
-loopback device. Synthetic PCM files stay owner-only inside the run directory and travel only over
-loopback. System-only measurement actively streams a separate silent microphone file; stopping a
-sender does not establish quiet because a receiver can buffer or conceal missing packets. The bundled
-sender stays inside the fixture's exact process-ownership root, and teardown removes only the owned
-receiver. Pins and transport settings live in the setup script. Scalar evidence establishes external
-capture routing only; Jarvis's own capture grant and speech-to-hint journey remain separate requirements.
-The setup workflow caches only the two pinned public dependency archives under an exact checksum key.
-Every use checks the file type, ownership, size and checksum before the existing archive-content checks.
-Invalid cached bytes fail without a download fallback. The cache is saved after successful dependency
-setup, before UI execution, and contains no locally built binaries, app bundles, logs or synthetic audio.
-`AudioServiceEvidence.py` reads only new Core Audio daemon crash reports during the hosted route test
-window. It exports daemon birth-identity changes and closed crash categories; raw reports stay in memory
-on the disposable runner. Missing or unavailable crash evidence does not establish that no crash occurred,
-and this diagnostic never changes the route verdict or restarts a service.
-
 An ordinary new eval adds scenarios and a manifest entry under
 [`Scenarios/`](../Tests/JarvisLiveTests/Scenarios), using an existing executor and acceptance contract.
 A new execution mode or grading contract extends the shared harness with focused offline checks;
@@ -154,6 +127,45 @@ remain beside the product target they verify.
 The transcription benchmark retains its own capture instrumentation and scoring contract described
 in [transcription-benchmark.md](./transcription-benchmark.md). It is not an alternate entry point for
 coaching regression suites.
+
+### External installed-app readiness
+
+The external `ReleaseReadiness` target is an Xcode UI-test boundary because it drives the ordinary
+installed app through Accessibility and native consent controls. It launches the signed app outside
+the checkout, without a product diagnostic mode, injected transcript, or product-module import.
+[`probe-release-ui.py`](../scripts/probe-release-ui.py) owns the hosted command and exact app/test-runner
+process cleanup. It accepts candidate and predecessor app paths for fresh-install and retained-profile
+upgrade checks. This runner is a hosted acceptance boundary, separate from the scenario and evaluation
+command above.
+
+[`ReleaseAudioDevices`](../Tests/ReleaseReadiness/ReleaseAudioDevices.swift) selects BlackHole 16-channel
+input for silent microphone frames and BlackHole 2-channel output for system playback, verifies the
+selected defaults, and restores them at teardown. The external runner plays a fixed synthetic question
+generated with the built-in speech tool. Audio stays owner-only under the run's workspace-local
+`.jarvis/` directory. The app receives it through its ordinary system-audio capture path.
+
+[`ReleaseReadinessTests+Journey.swift`](../Tests/ReleaseReadiness/ReleaseReadinessTests+Journey.swift)
+owns the basic working-app contract: all five bundled skills, native permissions, Manual coaching,
+and normal Settings selection of GPT Transcribe and GPT-4o Transcribe. Each candidate configuration
+must reach the exact full-active status, produce a fresh finalized system transcript, and deliver a
+fresh nonempty hint after the ordinary Hint shortcut. Stop/restart requires fresh session evidence;
+upgrade preserves the predecessor's used profile and credentials. Client-commit startup constructs
+both local turn detectors, so missing bundled models fail on the normal Start path. These checks do
+not establish spoken-microphone recognition, acoustic echo suppression, route isolation, automatic
+intervention policy, or hint usefulness. Component tests, capture integration checks, transcription
+benchmarks, and coaching evals own those separate contracts.
+
+The hosted journey needs a dedicated provider key written by trusted setup to the app's normal
+owner-only secrets file; UI automation does not type it. Only allowlisted scalar receipts are uploaded.
+Private XCTest results, UI logs, session content, screenshots, and synthetic audio stay on the disposable
+runner. Permission-form automation uses a temporary owned administrator account on that runner;
+[`prepare-release-ui-account.py`](../scripts/prepare-release-ui-account.py) owns its creation and cleanup.
+
+The setup matrix requires Apple silicon on macOS 15 and 26, and Intel on macOS 15. Intel macOS 26
+retains ordinary source-Gate coverage; installed-app readiness has no Intel macOS 26 coverage. The
+product minimum is macOS 15. The setup-feasibility workflow uses a checksum-pinned public signed
+release to exercise the runner. It is not the production premerge gate: required fresh candidate
+acceptance and exact-artifact promotion are not yet wired into the source and release workflows.
 
 ## Evaluation suites
 
@@ -523,10 +535,10 @@ successful attempts. Any rerun is a separate reported result.
   production code, which is all the coaching cases need. Playing the interviewer into a private
   process tap, the way the benchmark does, would add a Core Audio edge the benchmark already covers
   and no coaching coverage in return.
-- **Only Scenario R touches the real audio device.** The physical microphone, the aggregate device,
-  echo cancellation, and the system-wide tap run only in R, which starts the production capture and
+- **Only Scenario R among these scenarios touches the real audio device.** The physical microphone,
+  the aggregate device, echo cancellation, and the system-wide tap run only in R, which starts the production capture and
   waits for readiness on real frames. The [transcription benchmark](./transcription-benchmark.md)
-  covers the tap with known audio, and the onboarding walk stays manual.
+  covers the tap with known audio; Scenario R does not drive onboarding.
 - **The screen is injected.** No scenario shoots the Mac's screen, so the front-window pick, the
   `screencapture` helper, and its cleanup run only in their Gate tests (`FrontWindowSelectorTests`,
   `ScreenCaptureRunnerTests`) and in everyday use. A real front window would need an idle, unlocked
@@ -623,8 +635,9 @@ release, a real device change, or macOS's own dialogs, so the run cannot perform
 to run it and what to confirm. A pull request that changes one of these areas runs its check or names
 it as unverified in its description.
 
-- **Onboarding walk (F03),** when onboarding, its key check, or its permission probes change, because
-  macOS does not let automation click its own permission dialogs. Reset as
+- **Onboarding walk (F03),** when onboarding, its key check, or its permission probes change. The
+  scenario command does not drive the normal onboarding UI; hosted native permission automation
+  belongs to [external installed-app readiness](#external-installed-app-readiness). For a manual walk, reset as
   [build-and-run.md → Packaging & signing](./build-and-run.md#packaging--signing--why-permission-grants-persist)
   describes, then walk both steps against [architecture.md → Onboarding](./architecture.md#onboarding)
   and [Permissions](./architecture.md#permissions).

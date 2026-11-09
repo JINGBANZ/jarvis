@@ -173,8 +173,6 @@ class GuardTests(ScriptTests):
         external.write_text('import XCTest')
         product = self.root / 'Sources/JarvisApp/Fixture.swift'
         for source in ('let mode = environment["JARVIS_READINESS_MODE"]',
-                       'let helper = "scripts/release-input-fixture.py"',
-                       'let helper = "AudioServiceEvidence.py"',
                        'let helper = "scripts/probe-release-ui.py"'):
             product.write_text(source)
             with self.assertRaisesRegex(ValueError, 'must remain external'):

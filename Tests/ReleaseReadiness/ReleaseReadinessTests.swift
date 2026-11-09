@@ -3,12 +3,10 @@ import XCTest
 
 @MainActor
 final class ReleaseReadinessTests: XCTestCase {
-    private let bundleID = "com.jarvis.coach"
-    private var application: XCUIApplication?
-    private var installedURL: URL?
-    private var savedPreferences: [String: Any]?
-    private var profilePrepared = false
-    private var credentialFile: URL?
+    let bundleID = "com.jarvis.coach"
+    var application: XCUIApplication?
+    var installedURL: URL?
+    var audioDevices: ReleaseAudioDevices?
 
     override func record(_ issue: XCTIssue) {
         UIIssueEvidence.record(issue, sourceName: "ReleaseReadinessTests.swift",
@@ -16,43 +14,8 @@ final class ReleaseReadinessTests: XCTestCase {
         super.record(issue)
     }
 
-    func testFreshOnboarding() throws {
-        try prepareProfile(completed: false)
-        let app = try launchInstalledApp()
-        let welcome = app.windows["Welcome to Jarvis"]
-        XCTAssertTrue(welcome.waitForExistence(timeout: 20), "Normal fresh launch must show onboarding")
-        XCTAssertTrue(welcome.secureTextFields["OpenAI API key"].exists)
-        XCTAssertTrue(welcome.staticTexts["Hi, I’m Jarvis."].exists)
-        attachEvidence(app, name: "fresh-onboarding")
-    }
-
-    func testConfiguredSettingsAndSkills() throws {
-        try prepareProfile(completed: true)
-        let app = try launchInstalledApp()
-        let status = app.statusItems["Jarvis is stopped"]
-        XCTAssertTrue(status.waitForExistence(timeout: 20), "Normal launch must create the stopped status item")
-        status.click()
-        let settings = app.menuItems["Settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.menuItems["Start Jarvis"].exists)
-        settings.click()
-        let window = app.windows["Jarvis Settings"]
-        XCTAssertTrue(window.waitForExistence(timeout: 10))
-        window.buttons["Skills"].click()
-        let titles = ["Behavioral", "Coding", "Coding with AI", "Customer scenario design", "System design"]
-        for title in titles {
-            XCTAssertTrue(window.staticTexts[title].waitForExistence(timeout: 10), "Missing installed skill: \(title)")
-            XCTAssertTrue(window.switches["\(title) skill"].exists, "Missing skill control: \(title)")
-        }
-        XCTAssertFalse(window.staticTexts["No skills are installed."].exists)
-        attachEvidence(app, name: "installed-skills")
-        window.typeKey("q", modifierFlags: .command)
-        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "Normal Quit must terminate the installed app")
-    }
-
-    func testPermissionOnboarding() throws {
-        try prepareProfile(completed: false, placeholderCredential: true)
-        var app = try launchInstalledApp()
+    func completePermissionOnboarding(_ initialApp: XCUIApplication) throws -> XCUIApplication {
+        var app = initialApp
         var welcome = app.windows["Welcome to Jarvis"]
         let grant = welcome.buttons["Grant Access"]
         XCTAssertTrue(grant.waitForExistence(timeout: 20), "Stored-key precondition must expose ordinary permission onboarding")
@@ -153,6 +116,7 @@ final class ReleaseReadinessTests: XCTestCase {
                                           "nativeInstalledProcessVerified": try candidateProcessID() > 0]
         try JSONSerialization.data(withJSONObject: completion).write(
             to: URL(fileURLWithPath: evidence).appendingPathComponent("permission-completion.json"), options: .atomic)
+        return app
     }
 
     private enum PermissionAction {
@@ -350,7 +314,7 @@ final class ReleaseReadinessTests: XCTestCase {
         }
     }
 
-    private func persistedOnboardingCompleted() -> Bool {
+    func persistedOnboardingCompleted() -> Bool {
         let preferencesURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Preferences/\(bundleID).plist")
         guard let data = try? Data(contentsOf: preferencesURL),
@@ -363,7 +327,7 @@ final class ReleaseReadinessTests: XCTestCase {
         onboarding.staticTexts.matching(NSPredicate(format: "value == 'Granted' OR label == 'Granted'")).count
     }
 
-    private func candidateProcessID() throws -> pid_t {
+    func candidateProcessID() throws -> pid_t {
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
         XCTAssertEqual(running.count, 1, "Exactly one installed candidate must run")
         let candidate = try XCTUnwrap(running.first)
@@ -494,46 +458,35 @@ final class ReleaseReadinessTests: XCTestCase {
         return ["kind": kind, "knownBoolean": enabled != nil, "enabled": enabled == true]
     }
 
-    private func prepareProfile(completed: Bool, placeholderCredential: Bool = false) throws {
+    func prepareRun() throws {
         continueAfterFailure = false
-        executionTimeAllowance = 180
-        addTeardownBlock { @MainActor [self] in try cleanUpCandidateAndProfile() }
-        let username = NSUserName()
-        let home = NSHomeDirectory()
-        let githubActions = ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true"
-        guard username == "runner", home == "/Users/runner", githubActions,
+        executionTimeAllowance = 1200
+        guard NSUserName() == "runner", NSHomeDirectory() == "/Users/runner",
+              ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true",
               ProcessInfo.processInfo.environment["RUNNER_ENVIRONMENT"] == "github-hosted" else {
-            let resolvedHome = URL(fileURLWithPath: home).resolvingSymlinksInPath().path
-            throw ReadinessFailure("Profile-mutating release setup requires the disposable GitHub-hosted runner account; username=\(username), resolvedHome=\(resolvedHome), GITHUB_ACTIONS=\(githubActions)")
+            throw ReadinessFailure("Release checks require a disposable hosted Mac")
         }
-        XCTAssertTrue(NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty,
-                      "Refuse to replace a pre-existing Jarvis process")
-        let defaults = UserDefaults.standard
-        savedPreferences = defaults.persistentDomain(forName: bundleID)
-        defaults.removePersistentDomain(forName: bundleID)
-        defaults.setPersistentDomain(["onboarding.completed": completed], forName: bundleID)
-        defaults.synchronize()
-        profilePrepared = true
-        let support = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Jarvis", isDirectory: true)
-        for name in ["openai-api-key", "gemini-api-key", "deepgram-api-key"] {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: support.appendingPathComponent(name).path),
-                           "Credential-free acceptance refuses an existing credential")
+        addTeardownBlock { @MainActor [self] in
+            var failure: Error?
+            do { try cleanUpCandidate() } catch { failure = error }
+            do { try audioDevices?.restore() } catch { failure = error }
+            audioDevices = nil
+            if let failure { throw failure }
         }
-        if placeholderCredential {
-            try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
-            let file = support.appendingPathComponent("openai-api-key")
-            guard FileManager.default.createFile(atPath: file.path,
-                contents: Data("release-readiness-placeholder-not-a-credential".utf8),
-                attributes: [.posixPermissions: 0o600]) else {
-                throw ReadinessFailure("Couldn't create the owner-only placeholder precondition")
-            }
-            credentialFile = file
-        }
+        XCTAssertTrue(NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty)
+        let key = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Jarvis/openai-api-key")
+        let attributes = try FileManager.default.attributesOfItem(atPath: key.path)
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeRegular)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        XCTAssertEqual((attributes[.ownerAccountID] as? NSNumber)?.uint32Value, getuid())
+        XCTAssertGreaterThan((attributes[.size] as? NSNumber)?.intValue ?? 0, 0)
+        let devices = try ReleaseAudioDevices()
+        audioDevices = devices
+        try devices.select()
     }
 
-    private func launchInstalledApp() throws -> XCUIApplication {
+    func launchInstalledApp() throws -> XCUIApplication {
         let environment = ProcessInfo.processInfo.environment
         guard let path = environment["JARVIS_READINESS_APP_PATH"], path.hasPrefix("/"),
               let expectedVersion = environment["JARVIS_READINESS_EXPECTED_VERSION"], !expectedVersion.isEmpty else {
@@ -562,7 +515,7 @@ final class ReleaseReadinessTests: XCTestCase {
         let expectedArchitecture = NSBundleExecutableArchitectureX86_64
         let architectureName = "x86_64"
         #else
-        #error("Release acceptance requires a supported native Mac architecture")
+        #error("Release ready check requires a supported native Mac architecture")
         #endif
         XCTAssertEqual(actual.executableArchitecture, expectedArchitecture,
                        "The installed candidate must execute the runner's native architecture")
@@ -574,7 +527,7 @@ final class ReleaseReadinessTests: XCTestCase {
         return app
     }
 
-    private func attachEvidence(_ app: XCUIApplication, name: String) {
+    func attachEvidence(_ app: XCUIApplication, name: String) {
         guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else {
             XCTFail("Required private evidence directory is missing")
             return
@@ -597,7 +550,7 @@ final class ReleaseReadinessTests: XCTestCase {
         }
     }
 
-    private func cleanUpCandidateAndProfile() throws {
+    private func cleanUpCandidate() throws {
         if let app = application {
             if app.state != .notRunning {
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
@@ -609,16 +562,9 @@ final class ReleaseReadinessTests: XCTestCase {
                 }
             }
         }
-        if profilePrepared {
-            let defaults = UserDefaults.standard
-            if let savedPreferences { defaults.setPersistentDomain(savedPreferences, forName: bundleID) }
-            else { defaults.removePersistentDomain(forName: bundleID) }
-            defaults.synchronize()
-        }
-        if let credentialFile { try FileManager.default.removeItem(at: credentialFile) }
     }
 
-    private struct ReadinessFailure: Error, CustomStringConvertible {
+    struct ReadinessFailure: Error, CustomStringConvertible {
         let description: String
         init(_ description: String) { self.description = description }
     }
