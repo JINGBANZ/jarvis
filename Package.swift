@@ -25,6 +25,7 @@ let package = Package(
         // The ordinary spawn seam is shared by production OS adapters and executable composition.
         .target(name: "JarvisProcess"),
         .target(name: "JarvisTestProcesses", dependencies: ["JarvisProcess"], path: "Tests/Support/ProcessOwnership"),
+        .target(name: "JarvisTestDisplay", path: "Tests/Support/TestDisplay"),
         .target(name: "JarvisTestHost", path: "Tests/Support/TestHost"),
         .target(name: "JarvisScenarioHarness", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"], path: "Tests/Support/ScenarioHarness", swiftSettings: liveE2ESettings),
         .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore", "JarvisProcess"]),
@@ -42,6 +43,7 @@ let package = Package(
             dependencies: [
                 "JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisOverlay",
                 "JarvisScreenCapture", "JarvisProcess", "JarvisTestProcesses", "JarvisScenarioHarness", "CJarvisAEC",
+                "JarvisTestDisplay",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             // Prebuilt by scripts/build-vad.sh. `.process` would flatten the .mlmodelc directory.
@@ -77,7 +79,7 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisOverlayTests",
-            dependencies: ["JarvisOverlay"]
+            dependencies: ["JarvisOverlay", "JarvisTestDisplay"]
         ),
         .testTarget(
             name: "JarvisScreenCaptureTests",

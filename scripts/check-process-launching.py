@@ -7,7 +7,7 @@ import subprocess
 
 
 PRODUCTION_TARGETS = ('JarvisCore', 'JarvisBrainProviders', 'JarvisScreenCapture',
-                      'JarvisEvaluation', 'JarvisProcess')
+                      'JarvisEvaluation', 'JarvisProcess', 'JarvisOverlay')
 SOURCE_AREAS = (*PRODUCTION_TARGETS, 'JarvisReferenceHelper',
                 'JarvisApp/Capture', 'JarvisApp/References')
 HARNESS_PREFIXES = ('LiveE2E', 'CoachingReplay', 'EvaluationSuite', 'Intervention',
@@ -49,14 +49,14 @@ def check_boundary(root, package):
         pending, visited = [target], set()
         while pending:
             name = pending.pop()
-            if name in ('JarvisTestProcesses', 'JarvisScenarioHarness'):
+            if name in ('JarvisTestProcesses', 'JarvisScenarioHarness', 'JarvisTestDisplay'):
                 raise ValueError(target + ' depends on ' + name)
             if name not in visited:
                 visited.add(name)
                 pending.extend(dependencies.get(name, []))
     if any(name != 'JarvisProcess' for name in dependencies.get('JarvisTestProcesses', [])):
         raise ValueError('JarvisTestProcesses may depend only on JarvisProcess')
-    forbidden = re.compile(r'\b(?:JarvisTestProcesses|JarvisScenarioHarness|TestCommandOwnership|JARVIS_TEST_\w*)\b')
+    forbidden = re.compile(r'\b(?:JarvisTestProcesses|JarvisScenarioHarness|JarvisTestDisplay|OverlayTestDisplay|TestWindowPlacement|TestDisplayPanel|TestCommandOwnership|JARVIS_TEST_\w*)\b')
     for area in SOURCE_AREAS:
         directory = root / 'Sources' / area
         if not directory.is_dir():

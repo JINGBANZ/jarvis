@@ -178,6 +178,24 @@ class GuardTests(ScriptTests):
         with self.assertRaisesRegex(ValueError, 'depends on JarvisTestProcesses'):
             check(self.root, package)
 
+    def test_overlay_boundary_rejects_display_support_and_environment(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in guard['PRODUCTION_TARGETS']]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        overlay = next(target for target in package['targets'] if target['name'] == 'JarvisOverlay')
+        overlay['dependencies'] = [{'byName': ['JarvisTestDisplay', None]}]
+        with self.assertRaisesRegex(ValueError, 'JarvisOverlay depends on JarvisTestDisplay'):
+            guard['check_boundary'](self.root, package)
+        overlay['dependencies'] = []
+        source = self.root / 'Sources/JarvisOverlay/Fixture.swift'
+        for text in ('import JarvisTestDisplay', 'OverlayTestDisplay(window: panel)',
+                     'let display = environment["JARVIS_TEST_DISPLAY_ID"]'):
+            source.write_text(text)
+            with self.assertRaisesRegex(ValueError, 'test ownership in production logic'):
+                guard['check_boundary'](self.root, package)
+
     def test_scenario_harness_boundaries(self):
         guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
         package = {'targets': [{'name': name, 'dependencies': []}

@@ -1,7 +1,8 @@
+#if DEBUG
 import AppKit
 
 @MainActor
-final class OverlayTestDisplay: NSObject {
+public final class OverlayTestDisplay: NSObject {
     private let displayID: CGDirectDisplayID
     private weak var window: NSWindow?
     private var isPositioning = false
@@ -27,7 +28,7 @@ final class OverlayTestDisplay: NSObject {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    static var requestedScreen: NSScreen? {
+    public static var requestedScreen: NSScreen? {
         guard let raw = ProcessInfo.processInfo.environment["JARVIS_TEST_DISPLAY_ID"] else { return nil }
         guard let id = CGDirectDisplayID(raw), let screen = resolve(id) else {
             fail("The isolated test display is unavailable; refusing to use the desktop.")
@@ -98,3 +99,4 @@ final class OverlayTestDisplay: NSObject {
         exit(1)
     }
 }
+#endif

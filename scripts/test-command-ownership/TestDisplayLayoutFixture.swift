@@ -47,6 +47,10 @@ struct TestDisplayLayoutFixture {
         precondition(TestWindowPlacement.frame(CGRect(x: 0, y: 0, width: 1921, height: 440), within: test.frame) == nil)
         precondition(TestWindowPlacement.frame(CGRect(x: CGFloat.infinity, y: 0, width: 520, height: 440), within: test.frame) == nil)
         precondition(TestWindowPlacement.frame(.zero, within: test.frame) == nil)
-        print("Window placement: 6 preservation, relocation and refusal checks passed")
+        precondition(TestWindowPlacement.frame(test.frame, within: test.frame) == test.frame)
+        precondition(TestWindowPlacement.frame(CGRect(origin: .zero, size: test.frame.size), within: test.frame) == test.frame)
+        precondition(TestWindowPlacement.frame(CGRect(x: 0, y: 0, width: 1920, height: 440), within: test.frame)?.width == 1920)
+        precondition(TestWindowPlacement.frame(CGRect(x: 0, y: 0, width: 520, height: 1080), within: test.frame)?.height == 1080)
+        print("Window placement: 10 preservation, relocation, exact-size and refusal checks passed")
     }
 }

@@ -309,7 +309,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     private func makeComposition(for scenario: LiveE2EScenario) -> SessionComposition {
-        let box = OverlayBoxPanel()
+        let box = OverlayComposition.makeBox()
         let audio = scenario.audio
         let isCache = scenario.id == LiveE2ECacheCheck.scenarioID
         var config = isCache ? LiveE2ECacheFixture.config : .default

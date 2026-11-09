@@ -103,7 +103,7 @@ final class CapturePrivacyAppDelegate: NSObject, NSApplicationDelegate {
                                 expectsVisibleContent: true))
             probe.orderOut(nil)
             try await Task.sleep(for: .milliseconds(300))
-            let box = OverlayBoxPanel(contentSize: NSSize(width: 560, height: 320))
+            let box = OverlayComposition.makeBox(contentSize: NSSize(width: 560, height: 320))
             defer { box.setSessionLive(false) }
             var overlay: NSWindow?
             try await phase("session-start", stream: stream) {

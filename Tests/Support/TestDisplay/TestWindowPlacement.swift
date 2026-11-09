@@ -1,3 +1,4 @@
+#if DEBUG
 import CoreGraphics
 
 enum TestWindowPlacement {
@@ -11,3 +12,4 @@ enum TestWindowPlacement {
                       width: proposed.width, height: proposed.height)
     }
 }
+#endif

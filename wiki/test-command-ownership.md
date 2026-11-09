@@ -216,11 +216,13 @@ identity checks establish that host's exit while `waitpid` reaps its directly ow
 
 ## Test window containment
 
-[`OverlayBoxWindow`](../Sources/JarvisOverlay/OverlayBoxWindow.swift) constrains proposed frames to
+[`TestDisplayPanel`](../Tests/Support/TestDisplay/TestDisplayPanel.swift) constrains proposed frames to
 the explicitly requested isolated display before AppKit applies moves, resizes, or screen fitting.
-The ordinary app path uses AppKit's normal geometry. With a test display requested, unavailable,
+The product overlay accepts a panel factory and otherwise uses ordinary `NSPanel` geometry.
+Debug app composition and overlay fixtures inject the shared test panel; display discovery and
+containment remain in `JarvisTestDisplay`, whose implementation is absent from release builds. With a test display requested, unavailable,
 mirrored, overlapping, nonfinite, or oversized geometry fails instead of selecting a physical screen.
-[`OverlayTestDisplay`](../Sources/JarvisOverlay/OverlayTestDisplay.swift) validates placement before
+[`OverlayTestDisplay`](../Tests/Support/TestDisplay/OverlayTestDisplay.swift) validates placement before
 and after showing, observes moves and screen changes, and hides a visible window before refusing
 invalid placement. There is no desktop fallback after an isolated display was requested.
 
