@@ -145,8 +145,9 @@ generated with the built-in speech tool. Audio stays owner-only under the run's 
 `.jarvis/` directory. The app receives it through its ordinary system-audio capture path.
 
 [`ReleaseReadinessTests+Journey.swift`](../Tests/ReleaseReadiness/ReleaseReadinessTests+Journey.swift)
-owns the basic working-app contract: all five bundled skills, native permissions, Manual coaching,
-and normal Settings selection of GPT Transcribe and GPT-4o Transcribe. Each candidate configuration
+owns the basic working-app contract: all five bundled skills, native permissions,
+and normal Settings selection of GPT Transcribe and GPT-4o Transcribe. It leaves the app's coaching
+mode unchanged. Each candidate configuration
 must reach the exact full-active status, produce a fresh finalized system transcript, and deliver a
 fresh nonempty hint after the ordinary Hint shortcut. Stop/restart requires fresh session evidence;
 upgrade preserves the predecessor's used profile and credentials. Client-commit startup constructs

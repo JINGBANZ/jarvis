@@ -44,7 +44,7 @@ extension ReleaseReadinessTests {
         try audioDevices?.restore()
         audioDevices = nil
         let receipt: [String: Any] = ["schemaVersion": 1, "phase": phase, "skills": 5,
-                                     "manualCoaching": true, "nativeProcessVerified": true,
+                                     "nativeProcessVerified": true,
                                      "normalQuit": true, "defaultsRestored": true, "sessions": results]
         let evidence = try XCTUnwrap(environment["JARVIS_READINESS_EVIDENCE"])
         try JSONSerialization.data(withJSONObject: receipt).write(
@@ -116,13 +116,6 @@ extension ReleaseReadinessTests {
         XCTAssertTrue(app.statusItems["Jarvis is active"].waitForExistence(timeout: 60),
                       "Both endpoints and capture must reach full active readiness")
         attachEvidence(app, name: "journey-active")
-        attachEvidence(app, name: "journey-manual")
-        if try preferences()["coaching.mode"] as? String != "manual" {
-            app.typeKey(".", modifierFlags: [.command, .option])
-        }
-        try waitUntil("Normal shortcut must select Manual coaching", timeout: 10) {
-            (try? self.preferences()["coaching.mode"] as? String) == "manual"
-        }
         try audioDevices?.verify()
         let fresh = try sessionDirectories().subtracting(previous)
         XCTAssertEqual(fresh.count, 1, "Start must create one fresh production session")

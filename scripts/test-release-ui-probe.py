@@ -162,7 +162,7 @@ class BasicJourneyTests(unittest.TestCase):
     def receipt(self, phase="fresh"):
         models = [("GPT Transcribe", 1)] if phase == "predecessor" else [
             (model, cycle) for model in ("GPT Transcribe", "GPT-4o Transcribe") for cycle in (1, 2)]
-        return {"schemaVersion": 1, "phase": phase, "skills": 5, "manualCoaching": True,
+        return {"schemaVersion": 1, "phase": phase, "skills": 5,
                 "nativeProcessVerified": True, "normalQuit": True, "defaultsRestored": True,
                 "sessions": [{"model": model, "cycle": cycle, "fullActive": True, "freshSession": True,
                               "stimulusTranscript": True, "shortcutHint": True, "stopped": True,
@@ -184,6 +184,7 @@ class BasicJourneyTests(unittest.TestCase):
                 lambda r: r["sessions"][0].update(stimulusTranscript=False),
                 lambda r: r["sessions"][0].update(auditComplete=False),
                 lambda r: r.update(rawTranscript="private"),
+                lambda r: r.update(manualCoaching=True),
             ):
                 receipt = json.loads(json.dumps(valid))
                 mutate(receipt)
@@ -235,7 +236,7 @@ class BasicJourneyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             profile = Path(temporary)
             preferences = profile / "preferences.plist"
-            preferences.write_bytes(plistlib.dumps({"onboarding.completed": True, "coaching.mode": "manual",
+            preferences.write_bytes(plistlib.dumps({"onboarding.completed": True, "coaching.mode": "automatic",
                                                      "transcription.openai.model": "gpt-transcribe", "unrelated": 1}))
             key = profile / "openai-api-key"
             key.write_bytes(b"synthetic-secret")
@@ -255,10 +256,18 @@ class BasicJourneyTests(unittest.TestCase):
                     PROBE["require_preserved"](profile, preferences, snapshot, check_preferences=False)
                 path.write_bytes(original)
             values = plistlib.loads(preferences.read_bytes())
-            values["coaching.mode"] = "automatic"
+            values["coaching.mode"] = "manual"
             preferences.write_bytes(plistlib.dumps(values))
             with self.assertRaisesRegex(ValueError, "user preferences"):
                 PROBE["require_preserved"](profile, preferences, snapshot, check_preferences=True)
+            self.assertEqual(PROBE["profile_snapshot"](profile, preferences)[0]["coaching.mode"], "manual")
+            del values["coaching.mode"]
+            preferences.write_bytes(plistlib.dumps(values))
+            snapshot = PROBE["profile_snapshot"](profile, preferences)
+            self.assertNotIn("coaching.mode", snapshot[0])
+            PROBE["require_preserved"](profile, preferences, snapshot, check_preferences=True)
+            values["onboarding.completed"] = False
+            preferences.write_bytes(plistlib.dumps(values))
             with self.assertRaisesRegex(ValueError, "genuinely used"):
                 PROBE["profile_snapshot"](profile, preferences)
 
@@ -299,8 +308,8 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
             if name == "upgrade":
                 self.assertTrue((profile / "sessions/predecessor/jarvis-activity.jsonl").exists())
                 self.assertIsNotNone(upgrade)
-                self.assertEqual(plistlib.loads(upgrade.read_bytes())["coaching.mode"], "manual")
-            preferences.write_bytes(plistlib.dumps({"onboarding.completed": True, "coaching.mode": "manual"}))
+                self.assertNotIn("coaching.mode", plistlib.loads(upgrade.read_bytes()))
+            preferences.write_bytes(plistlib.dumps({"onboarding.completed": True}))
             session = profile / "sessions" / name
             session.mkdir(parents=True)
             (session / "jarvis-activity.jsonl").write_text('{"k":"sessionEnded"}\n')

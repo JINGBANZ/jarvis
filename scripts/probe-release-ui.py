@@ -393,7 +393,7 @@ def verify_app(path, installed):
 
 
 def validate_journey(receipt, phase):
-    flags = {"manualCoaching", "nativeProcessVerified", "normalQuit", "defaultsRestored"}
+    flags = {"nativeProcessVerified", "normalQuit", "defaultsRestored"}
     if (not isinstance(receipt, dict) or set(receipt) != flags | {"schemaVersion", "phase", "skills", "sessions"}
             or type(receipt["schemaVersion"]) is not int or receipt["schemaVersion"] != 1
             or receipt["phase"] != phase or type(receipt["skills"]) is not int or receipt["skills"] != 5
@@ -418,7 +418,7 @@ def profile_snapshot(profile, preferences):
         values = plistlib.load(source)
     selected = {key: value for key, value in values.items()
                 if key.startswith(("brain.", "transcription.", "coaching.", "onboarding."))}
-    if selected.get("onboarding.completed") is not True or selected.get("coaching.mode") != "manual":
+    if selected.get("onboarding.completed") is not True:
         raise ValueError("Predecessor must create a genuinely used profile")
     files = [profile / "openai-api-key"]
     sessions = profile / "sessions"
