@@ -230,19 +230,21 @@ final class ReleaseReadinessTests: XCTestCase {
             for identifier in owners {
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
                 let visible = running.filter { visibleOwners.contains($0.processIdentifier) }.count
-                var counts = ["running": running.count, "visibleOwners": visible, "dialogs": 0, "containers": 0, "jarvisTextMatches": 0,
+                let ready = running.filter { visibleOwners.contains($0.processIdentifier) && $0.isFinishedLaunching && !$0.isTerminated }
+                var counts = ["running": running.count, "visibleOwners": visible, "readyOwners": ready.count,
+                              "dialogs": 0, "containers": 0, "jarvisTextMatches": 0,
                               "fixtureTextMatches": 0,
                               "jarvisLabelMatches": 0, "jarvisTitleMatches": 0, "jarvisStaticTextMatches": 0,
                               "microphoneMatches": 0, "audioMatches": 0, "screenMatches": 0,
                               "allowButtons": 0, "openSettingsButtons": 0]
                 discovery[identifier] = counts
-                guard visible > 0 else { continue }
+                guard ready.count == 1, let ownerURL = ready[0].bundleURL else { continue }
                 counts["queryStartedMilliseconds"] = Int(ProcessInfo.processInfo.systemUptime * 1_000)
                 discovery[identifier] = counts
                 recordDiscovery()
-                let candidate = XCUIApplication(bundleIdentifier: identifier)
+                let candidate = XCUIApplication(url: ownerURL)
                 if captured.insert(identifier).inserted {
-                    self.attachEvidence(candidate, name: "permission-owner-first-\(identifier)")
+                    self.attachEvidence(name: "permission-owner-first-\(identifier)")
                 }
                 let dialogs = candidate.dialogs.allElementsBoundByIndex
                 let containers = dialogs.isEmpty ? candidate.windows.allElementsBoundByIndex : dialogs

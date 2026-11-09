@@ -2,10 +2,7 @@ import CoreAudio
 import Foundation
 
 struct ReleaseAudioDevices {
-    enum OutputKind: String { case host, blackHole2, blackHole16 }
-    let outputKind: OutputKind
     private let microphone: AudioObjectID
-    private let output: AudioObjectID
     private let previousInput: AudioObjectID
     private let previousOutput: AudioObjectID
 
@@ -21,7 +18,7 @@ struct ReleaseAudioDevices {
         try devices.withUnsafeMutableBytes {
             try Self.check(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, $0.baseAddress!))
         }
-        var inputs: [AudioObjectID] = [], outputs: [AudioObjectID] = []
+        var inputs: [AudioObjectID] = []
         for device in devices {
             var uid: Unmanaged<CFString>?
             var bytes = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
@@ -30,16 +27,12 @@ struct ReleaseAudioDevices {
             guard let uid else { throw Failure.invalidDevices }
             let identifier = uid.takeRetainedValue() as String
             if identifier == "BlackHole16ch_UID" { inputs.append(device) }
-            if identifier == "BlackHole2ch_UID" { outputs.append(device) }
         }
-        guard inputs.count == 1, outputs.count == 1,
-              try Self.channels(inputs[0], scope: kAudioObjectPropertyScopeInput) == 16,
-              try Self.channels(outputs[0], scope: kAudioObjectPropertyScopeOutput) == 2 else {
+        guard inputs.count == 1,
+              try Self.channels(inputs[0], scope: kAudioObjectPropertyScopeInput) == 16 else {
             throw Failure.invalidDevices
         }
         microphone = inputs[0]
-        output = previousOutput
-        outputKind = previousOutput == outputs[0] ? .blackHole2 : previousOutput == inputs[0] ? .blackHole16 : .host
     }
 
     func select() throws {
@@ -49,7 +42,7 @@ struct ReleaseAudioDevices {
 
     func verify() throws {
         guard try Self.defaultDevice(kAudioHardwarePropertyDefaultInputDevice) == microphone,
-              try Self.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) == output else {
+              try Self.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) == previousOutput else {
             throw Failure.routingChanged
         }
     }

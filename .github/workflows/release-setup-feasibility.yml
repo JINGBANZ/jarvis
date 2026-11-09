@@ -77,16 +77,9 @@ jobs:
           sw_vers
           /usr/bin/automationmodetool
           /usr/bin/automationmodetool | grep -F 'DOES NOT REQUIRE'
-      - name: Install the pinned virtual audio devices
+      - name: Install the pinned silent microphone input
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 \
-            https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg \
-            --output "$RUNNER_TEMP/BlackHole2ch.pkg"
-          printf '%s  %s\n' \
-            57b540f27a3e29c37e310e01bee0fdfab76733087e47f997ef9dccf851400dcf \
-            "$RUNNER_TEMP/BlackHole2ch.pkg" | shasum -a 256 -c -
-          sudo installer -pkg "$RUNNER_TEMP/BlackHole2ch.pkg" -target /
           curl --fail --location --retry 3 \
             https://existential.audio/downloads/BlackHole16ch-0.7.1.pkg \
             --output "$RUNNER_TEMP/BlackHole16ch.pkg"
