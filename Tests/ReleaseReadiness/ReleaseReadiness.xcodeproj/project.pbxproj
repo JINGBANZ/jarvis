@@ -40,7 +40,7 @@
 			name = Debug;
 		};
 		A0000000000000000000000C = {isa = XCConfigurationList; buildConfigurations = (A0000000000000000000000D); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
-		A0000000000000000000000D = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 14.2; SDKROOT = macosx; }; name = Debug; };
+		A0000000000000000000000D = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; SDKROOT = macosx; }; name = Debug; };
 		A0000000000000000000000E = {
 			isa = PBXProject;
 			attributes = {BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2600; };
