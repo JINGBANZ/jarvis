@@ -60,12 +60,44 @@ class ProbeResultsTests(unittest.TestCase):
                 command_receipt = json.loads((directory / 'ui-command.json').read_text())
                 self.assertIsNone(command_receipt['returnCode'])
                 self.assertIs(command_receipt['timedOut'], True)
+                self.assertEqual(command_receipt['failurePhase'], 'command-deadline')
+                self.assertEqual(command_receipt['failureKind'], 'validation')
                 self.assertGreater(command_receipt['startedUptime'], 0)
                 self.assertGreaterEqual(command_receipt['elapsedSeconds'], 1)
                 self.assertIsNone(unrelated.poll())
             finally:
                 unrelated.terminate()
                 unrelated.wait(timeout=5)
+
+    def test_cleanup_failure_preserves_closed_original_monitor_refusal(self):
+        class Refused(RuntimeError):
+            pass
+        alive = True
+        def signal_owned(_identity, _number):
+            nonlocal alive
+            alive = False
+        ownership = {'Refused': Refused, 'birth': lambda pid: {'pid': pid, 'start': 'fixed'},
+                     'same': lambda _: alive, 'signal_owned': signal_owned}
+        child = mock.Mock(pid=42)
+        child.poll.side_effect = lambda: None if alive else -15
+        ticks = iter(range(100))
+        globals_ = PROBE['run_ui'].__globals__
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with mock.patch.dict(globals_, owned_processes=mock.Mock(side_effect=[[], Refused('private native detail'), [], []])), \
+                    mock.patch.object(PROBE['runpy'], 'run_path', return_value=ownership), \
+                    mock.patch.object(PROBE['subprocess'], 'Popen', return_value=child), \
+                    mock.patch.object(PROBE['time'], 'monotonic', side_effect=lambda: next(ticks)), \
+                    mock.patch.object(PROBE['time'], 'sleep'):
+                with self.assertRaisesRegex(ValueError, 'cleanup did not finish normally'):
+                    PROBE['run_ui'](['private-command'], timeout=100, log=directory / 'test.log', roots=[directory], evidence=directory)
+            receipt = json.loads((directory / 'ui-command.json').read_text())
+            self.assertEqual(receipt['failurePhase'], 'process-monitor')
+            self.assertEqual(receipt['failureKind'], 'ownership-refused')
+            self.assertIs(receipt['timedOut'], False)
+            self.assertIsNone(receipt['returnCode'])
+            self.assertNotIn('private', json.dumps(receipt))
+            self.assertIs(json.loads((directory / 'cleanup.json').read_text())['forcedCleanup'], True)
 
     def test_all_three_mandatory_cases_pass(self):
         PROBE["validate_summary"]({
@@ -617,13 +649,52 @@ class AudioRouteTests(unittest.TestCase):
                 PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")
 
     def test_failure_export_retains_only_scalar_metrics_and_presence_of_error(self):
-        receipt = {**self.receipt(), "passed": False, "error": "private native diagnostic"}
+        receipt = {**self.receipt(), "passed": False, "error": "private native diagnostic",
+                   "failureStage": "capture", "failureReason": "invalid-buffers",
+                   "invalidBufferReason": "bytes", "invalidBufferCount": 2, "invalidBufferIndex": 0,
+                   "invalidBufferChannels": 2, "invalidBufferByteSize": 0, "invalidBufferHasData": False}
         safe = PROBE["validate_audio_receipt"](receipt, "capture", "mic-only", require_pass=False)
         self.assertIs(safe["errorPresent"], True)
+        self.assertEqual(safe["failureStage"], "capture")
+        self.assertEqual(safe["invalidBufferByteSize"], 0)
+        self.assertEqual(safe["rawMic"]["frames"], 192_000)
         self.assertNotIn("error", safe)
         self.assertNotIn("private", json.dumps(safe))
         with self.assertRaises(ValueError):
             PROBE["validate_audio_receipt"]({**receipt, "rawAudio": "untrusted"}, "capture", "mic-only", require_pass=False)
+
+    def test_closed_failure_metadata_refuses_unknown_text_types_and_false_success(self):
+        receipt = {**self.receipt(), "passed": False, "error": "private native diagnostic",
+                   "failureStage": "final-defaults", "failureReason": "os-status", "failureOSStatus": -50,
+                   "finalDefaultInputMatchesRequested": True, "finalDefaultOutputMatchesRequested": False}
+        PROBE["validate_audio_receipt"](receipt, "capture", "mic-only", require_pass=False)
+        for key, value in (("failureStage", "private text"), ("failureReason", "private text"),
+                           ("failureOSStatus", True), ("failureOSStatus", 2 ** 31),
+                           ("finalDefaultInputMatchesRequested", 1), ("invalidBufferCount", -1),
+                           ("invalidBufferIndex", 2), ("invalidBufferByteSize", 2 ** 32),
+                           ("invalidBufferReason", "private text"), ("invalidBufferHasData", 1), ("passed", True)):
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                PROBE["validate_audio_receipt"]({**receipt, key: value}, "capture", "mic-only", require_pass=False)
+        with self.assertRaisesRegex(ValueError, "defaults changed"):
+            PROBE["validate_audio_receipt"]({**self.receipt(), "finalDefaultInputMatchesRequested": False}, "capture", "mic-only")
+
+    def test_single_rtp_progress_observation_exports_failure_but_cannot_pass(self):
+        receipt = self.receipt()
+        for key in ("micUID", "systemUID", "measurementStartUptime", "measurementEndUptime"):
+            del receipt[key]
+        receipt.update(check="synthetic-microphone-rtp", mode="emit", phase="mic", passed=False,
+                       emitterUID="com.jarvis.release-input", transport="rtp", wireSampleRate=44_100,
+                       sourceDurationSeconds=8, senderExitCode=15, senderReaped=True,
+                       senderStartUptime=101.0, senderEndUptime=101.0,
+                       failureStage="operation", failureReason="validation", error="private progress error")
+        safe = PROBE["validate_audio_receipt"](receipt, "emit", "mic", require_pass=False)
+        self.assertEqual(safe["senderStartUptime"], safe["senderEndUptime"])
+        self.assertIs(safe["errorPresent"], True)
+        self.assertNotIn("private", json.dumps(safe))
+        with self.assertRaises(ValueError):
+            PROBE["validate_audio_receipt"](receipt, "emit", "mic")
+        with self.assertRaises(ValueError):
+            PROBE["validate_audio_receipt"]({**receipt, "senderEndUptime": 100.0}, "emit", "mic", require_pass=False)
 
 
 if __name__ == "__main__":

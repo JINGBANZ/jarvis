@@ -214,25 +214,49 @@ def run_ui(arguments, *, timeout, log, roots, evidence):
     process = None
     forced = False
     timed_out = False
+    phase = "command-start"
+    original_failure = {}
     deadline = time.monotonic() + timeout
     try:
         with log.open("w") as output:
             process = subprocess.Popen(arguments, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT,
                                        start_new_session=True)
+            phase = "command-identity"
             command = ownership["birth"](process.pid)
             observed[process.pid] = command
             while process.poll() is None:
+                phase = "process-monitor"
                 for identity in owned_processes(roots, ownership):
                     observed[identity["pid"]] = identity
+                phase = "command-deadline"
                 if time.monotonic() >= deadline:
                     timed_out = True
                     raise ValueError("Installed-app UI execution exceeded its bound")
                 time.sleep(0.25)
+            phase = "command-result"
             if process.returncode:
                 raise ValueError("Installed-app UI cases failed; raw output remains private")
+    except BaseException as error:
+        if isinstance(error, subprocess.TimeoutExpired):
+            kind = "subprocess-timeout"
+        elif isinstance(error, subprocess.CalledProcessError):
+            kind = "subprocess-status"
+        elif isinstance(error, ownership["Refused"]):
+            kind = "ownership-refused"
+        elif isinstance(error, ValueError):
+            kind = "validation"
+        elif isinstance(error, OSError):
+            kind = "os-error"
+        elif isinstance(error, (KeyboardInterrupt, SystemExit)):
+            kind = "interrupted"
+        else:
+            kind = "other"
+        original_failure = {"failurePhase": phase, "failureKind": kind}
+        raise
     finally:
         status = {"returnCode": process.poll() if process is not None else None, "timedOut": timed_out,
-                  "startedUptime": deadline - timeout, "elapsedSeconds": round(time.monotonic() - (deadline - timeout), 3)}
+                  "startedUptime": deadline - timeout, "elapsedSeconds": round(time.monotonic() - (deadline - timeout), 3),
+                  **original_failure}
         for identity in owned_processes(roots, ownership):
             observed[identity["pid"]] = identity
         settle = time.monotonic() + 5
@@ -299,10 +323,14 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
               "microphoneCallbackReceived", "microphoneCompletionUptime"} if mode == "authorize" else set()
     io_timing = {"ioStartRequestedUptime", "ioStartReturnedUptime"} if mode == "authorize" else set()
     failure_stages = {"authorizationFailureStage"} if mode == "authorize" else set()
+    failures = {"failureStage", "failureReason", "failureOSStatus"}
+    capture_diagnostics = {"finalDefaultInputMatchesRequested", "finalDefaultOutputMatchesRequested",
+                           "invalidBufferReason", "invalidBufferCount", "invalidBufferIndex",
+                           "invalidBufferChannels", "invalidBufferByteSize", "invalidBufferHasData"} if mode == "capture" else set()
     checks = {"authorize": "fixture-capture-consent-bootstrap", "capture": "production-aggregate-route-isolation",
               "emit": "synthetic-microphone-rtp" if rtp else "virtual-device-tone-emission"}
     if (not isinstance(receipt, dict) or not common <= receipt.keys()
-            or receipt.keys() - common - specific - timing - io_timing - failure_stages - {"error"}
+            or receipt.keys() - common - specific - timing - io_timing - failure_stages - failures - capture_diagnostics - {"error"}
             or type(receipt["schemaVersion"]) is not int or receipt["schemaVersion"] != 1
             or receipt["mode"] != mode or receipt["phase"] != phase or receipt["check"] != checks[mode]
             or receipt["stage"] != "complete"):
@@ -348,10 +376,40 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
         for key in set(interval) & receipt.keys():
             if type(receipt[key]) not in (int, float) or not math.isfinite(receipt[key]) or not 0 < receipt[key] < 10_000_000_000:
                 raise ValueError("Invalid audio interval time")
-        if interval[1] in receipt and (interval[0] not in receipt or receipt[interval[1]] <= receipt[interval[0]]):
+        if interval[1] in receipt and (interval[0] not in receipt or receipt[interval[1]] < receipt[interval[0]]
+                or receipt[interval[1]] == receipt[interval[0]] and (require_pass or receipt["passed"] is not False)):
             raise ValueError("Invalid audio interval order")
     if "error" in receipt and (not isinstance(receipt["error"], str) or len(receipt["error"]) > 1_024):
         raise ValueError("Invalid audio failure metadata")
+    failure_values = {
+        "failureStage": {"arguments", "paths", "operation", "device-selection", "formats", "defaults", "tap",
+                         "aggregate", "io-proc", "phase-start", "io-start", "capture", "final-defaults", "score", "cleanup", "final-quit",
+                         "sender-setup", "sender-start", "sender-progress", "sender-exit", "sender-duration"},
+        "failureReason": {"validation", "os-status", "interrupted", "invalid-buffers", "timeout", "defaults-changed",
+                          "intended-tone-missing", "tone-leak", "unexpected-energy", "unexpected-tone", "cleanup", "other",
+                          "child-exit", "duration-mismatch"},
+        "invalidBufferReason": {"count", "channels", "bytes", "missing-data", "non-finite"},
+    }
+    for key, values in failure_values.items():
+        if key in receipt and (type(receipt[key]) is not str or receipt[key] not in values):
+            raise ValueError("Unknown audio failure category")
+    if failures & receipt.keys() and (not {"failureStage", "failureReason"} <= receipt.keys() or receipt["passed"] is not False):
+        raise ValueError("Audio failure diagnostics require a failed receipt")
+    if "failureOSStatus" in receipt and (type(receipt["failureOSStatus"]) is not int
+            or not -(2 ** 31) <= receipt["failureOSStatus"] < 2 ** 31):
+        raise ValueError("Invalid audio failure status")
+    for key in {"finalDefaultInputMatchesRequested", "finalDefaultOutputMatchesRequested", "invalidBufferHasData"} & receipt.keys():
+        if type(receipt[key]) is not bool:
+            raise ValueError("Invalid capture diagnostic flag")
+    for key in {"invalidBufferCount", "invalidBufferChannels", "invalidBufferByteSize", "invalidBufferIndex"} & receipt.keys():
+        maximum = 1 if key == "invalidBufferIndex" else 2 ** 32 - 1
+        if type(receipt[key]) is not int or not 0 <= receipt[key] <= maximum:
+            raise ValueError("Invalid capture buffer metadata")
+    layout = {key for key in capture_diagnostics if key.startswith("invalidBuffer")}
+    if layout & receipt.keys() and (not {"invalidBufferReason", "invalidBufferCount"} <= receipt.keys()
+            or receipt["passed"] is not False
+            or receipt["invalidBufferReason"] != "count" and not layout <= receipt.keys()):
+        raise ValueError("Incomplete failed capture layout")
     if timing & receipt.keys():
         if not timing - {"microphoneCompletionUptime"} <= receipt.keys():
             raise ValueError("Incomplete microphone timing")
@@ -400,6 +458,9 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
         elif receipt["outputFrames"] < 8 * receipt["sampleRate"]:
             raise ValueError("Emitter did not complete its finite tone")
     else:
+        if any(receipt.get(key, True) is not True for key in (
+                "finalDefaultInputMatchesRequested", "finalDefaultOutputMatchesRequested")):
+            raise ValueError("Capture defaults changed before completion")
         mic, tap = receipt["rawMic"], receipt["globalTap"]
         if min(mic["frames"], tap["frames"]) < 4 * receipt["sampleRate"]:
             raise ValueError("Both capture routes require the complete measurement")

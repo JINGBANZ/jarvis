@@ -179,15 +179,31 @@ final class ReleaseReadinessTests: XCTestCase {
                     return true
                 }
             }
-            if acceptedConsents.isEmpty, onboarding.staticTexts.matching(identifier: "Needed").count == 3 {
-                let grants = onboarding.buttons.matching(identifier: "Grant Access")
-                if grants.count == 1, grants.element.isEnabled, grants.element.isHittable {
-                    action = .onboarding("Grant Access")
-                    return true
+            let titles = ["Grant Access", "Open System Settings", "Quit & Reopen", "I’m Ready"].filter { title in
+                let permitted: Bool
+                switch title {
+                case "Grant Access":
+                    permitted = acceptedConsents.isEmpty && onboarding.staticTexts.matching(identifier: "Needed").count == 3
+                case "Open System Settings":
+                    permitted = acceptedConsents.isSuperset(of: ["microphone", "audio"])
+                        && self.grantedPermissionCount(in: onboarding) == 2
+                        && onboarding.staticTexts.matching(identifier: "Refused").count == 1
+                case "Quit & Reopen":
+                    permitted = self.grantedPermissionCount(in: onboarding) == 2
+                        && onboarding.staticTexts.matching(identifier: "Reopen to finish").count == 1
+                default:
+                    permitted = acceptedConsents == ["microphone", "audio", "screen"]
+                        && self.grantedPermissionCount(in: onboarding) == 3
                 }
+                guard permitted else { return false }
+                let buttons = onboarding.buttons.matching(identifier: title)
+                return buttons.count == 1 && buttons.element.isEnabled && buttons.element.isHittable
+            }
+            if titles.count == 1 {
+                action = .onboarding(titles[0])
+                return true
             }
             var matches: [(String, Set<String>, XCUIElement)] = []
-            var hasConsentPrompt = false
             var discovery: [String: [String: Int]] = [:]
             func recordDiscovery() {
                 guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
@@ -237,7 +253,6 @@ final class ReleaseReadinessTests: XCTestCase {
                     })
                     guard !permissions.isEmpty else { continue }
                     for permission in permissions { counts[permission + "Matches", default: 0] += 1 }
-                    hasConsentPrompt = true
                     let allow = self.consentButtons(in: container)
                     counts["allowButtons", default: 0] += allow.count
                     counts["openSettingsButtons", default: 0] += container.buttons.matching(identifier: "Open System Settings").count
@@ -256,20 +271,7 @@ final class ReleaseReadinessTests: XCTestCase {
                 consentOwner = owner
                 return true
             }
-            guard matches.isEmpty, !hasConsentPrompt else { return false }
-            let titles = ["Grant Access", "Open System Settings", "Quit & Reopen", "I’m Ready"].filter {
-                let pendingScreenRelaunch = $0 == "Quit & Reopen" && self.grantedPermissionCount(in: onboarding) == 2
-                    && onboarding.staticTexts.matching(identifier: "Reopen to finish").count == 1
-                let refusedScreenSettings = $0 == "Open System Settings" && acceptedConsents.isSuperset(of: ["microphone", "audio"])
-                    && self.grantedPermissionCount(in: onboarding) == 2 && onboarding.staticTexts.matching(identifier: "Refused").count == 1
-                guard $0 == "Grant Access" || acceptedConsents.contains("screen") || pendingScreenRelaunch || refusedScreenSettings
-                else { return false }
-                let button = onboarding.buttons[$0]
-                return button.exists && button.isEnabled
-            }
-            guard titles.count == 1 else { return false }
-            action = .onboarding(titles[0])
-            return true
+            return false
         }, object: nil)
         let waitStarted = ProcessInfo.processInfo.systemUptime
         let result = XCTWaiter.wait(for: [visible], timeout: 20)

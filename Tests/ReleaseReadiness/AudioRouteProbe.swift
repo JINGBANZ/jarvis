@@ -30,7 +30,56 @@ struct AudioRouteProbe {
 
     private struct Failure: Error, CustomStringConvertible {
         let description: String
-        init(_ description: String) { self.description = description }
+        let reason: FailureReason
+        let status: OSStatus?
+        init(_ description: String, reason: FailureReason = .validation, status: OSStatus? = nil) {
+            self.description = description
+            self.reason = reason
+            self.status = status
+        }
+    }
+
+    private enum FailureStage: String, Encodable {
+        case arguments, paths, operation, formats, defaults, tap, aggregate, capture, score, cleanup
+        case deviceSelection = "device-selection"
+        case ioProc = "io-proc"
+        case phaseStart = "phase-start"
+        case ioStart = "io-start"
+        case finalDefaults = "final-defaults"
+        case finalQuit = "final-quit"
+        case senderSetup = "sender-setup"
+        case senderStart = "sender-start"
+        case senderProgress = "sender-progress"
+        case senderExit = "sender-exit"
+        case senderDuration = "sender-duration"
+    }
+
+    private enum FailureReason: String, Encodable {
+        case validation, interrupted, timeout, cleanup, other
+        case osStatus = "os-status"
+        case invalidBuffers = "invalid-buffers"
+        case defaultsChanged = "defaults-changed"
+        case intendedToneMissing = "intended-tone-missing"
+        case toneLeak = "tone-leak"
+        case unexpectedEnergy = "unexpected-energy"
+        case unexpectedTone = "unexpected-tone"
+        case childExit = "child-exit"
+        case durationMismatch = "duration-mismatch"
+    }
+
+    private enum InvalidBufferReason: String, Encodable, Sendable {
+        case count, channels, bytes
+        case missingData = "missing-data"
+        case nonFinite = "non-finite"
+    }
+
+    private struct InvalidBuffer: Sendable {
+        let reason: InvalidBufferReason
+        let count: Int
+        let index: Int?
+        let channels: Int?
+        let byteSize: Int?
+        let hasData: Bool?
     }
 
     private struct Options {
@@ -154,6 +203,17 @@ struct AudioRouteProbe {
         var authorizationFailureStage: AuthorizationStage?
         var nativeConsentAcknowledged: Bool?
         var captureGrantProven: Bool?
+        var failureStage: FailureStage?
+        var failureReason: FailureReason?
+        var failureOSStatus: OSStatus?
+        var finalDefaultInputMatchesRequested: Bool?
+        var finalDefaultOutputMatchesRequested: Bool?
+        var invalidBufferReason: InvalidBufferReason?
+        var invalidBufferCount: Int?
+        var invalidBufferIndex: Int?
+        var invalidBufferChannels: Int?
+        var invalidBufferByteSize: Int?
+        var invalidBufferHasData: Bool?
         var error: String?
     }
 
@@ -263,6 +323,17 @@ struct AudioRouteProbe {
         var outputFrames = 0
         var firstFrameUptime: Double?
         var lastFrameUptime: Double?
+        var invalidBuffer: InvalidBuffer?
+
+        mutating func invalidate(_ reason: InvalidBufferReason, count: Int, index: Int? = nil, buffer: AudioBuffer? = nil) {
+            invalid = true
+            if invalidBuffer == nil {
+                invalidBuffer = InvalidBuffer(reason: reason, count: count, index: index,
+                                              channels: buffer.map { Int($0.mNumberChannels) },
+                                              byteSize: buffer.map { Int($0.mDataByteSize) },
+                                              hasData: buffer.map { $0.mData != nil })
+            }
+        }
     }
 
     private final class Stream: Sendable {
@@ -292,14 +363,20 @@ struct AudioRouteProbe {
                     current.lastFrameUptime = now
                 }
                 let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
-                guard buffers.count == 2 else { current.invalid = true; return }
+                guard buffers.count == 2 else { current.invalidate(.count, count: buffers.count); return }
                 for index in 0..<2 {
                     let buffer = buffers[index]
                     let expectedChannels = index == 0 ? channels : 1
-                    guard Int(buffer.mNumberChannels) == expectedChannels,
-                          buffer.mDataByteSize > 0,
-                          Int(buffer.mDataByteSize) % (MemoryLayout<Float>.size * expectedChannels) == 0,
-                          let data = buffer.mData else { current.invalid = true; return }
+                    guard Int(buffer.mNumberChannels) == expectedChannels else {
+                        current.invalidate(.channels, count: buffers.count, index: index, buffer: buffer); return
+                    }
+                    guard buffer.mDataByteSize > 0,
+                          Int(buffer.mDataByteSize) % (MemoryLayout<Float>.size * expectedChannels) == 0 else {
+                        current.invalidate(.bytes, count: buffers.count, index: index, buffer: buffer); return
+                    }
+                    guard let data = buffer.mData else {
+                        current.invalidate(.missingData, count: buffers.count, index: index, buffer: buffer); return
+                    }
                     let frames = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / expectedChannels
                     let values = data.assumingMemoryBound(to: Float.self)
                     for frame in 0..<frames {
@@ -307,7 +384,9 @@ struct AudioRouteProbe {
                         for channel in 0..<expectedChannels {
                             mono += Double(values[frame * expectedChannels + channel]) / Double(expectedChannels)
                         }
-                        guard mono.isFinite else { current.invalid = true; return }
+                        guard mono.isFinite else {
+                            current.invalidate(.nonFinite, count: buffers.count, index: index, buffer: buffer); return
+                        }
                         if index == 0, current.mic.frames < Int(sampleRate * captureSeconds) {
                             current.mic.append(mono, sampleRate: sampleRate)
                         } else if index == 1, current.tap.frames < Int(sampleRate * captureSeconds) {
@@ -368,6 +447,7 @@ struct AudioRouteProbe {
     private static func runProbe() {
         var receipt = Receipt()
         var destination: FileHandle?
+        var operation = FailureStage.arguments
         do {
             let options = try Options()
             receipt.mode = String(options.mode.dropFirst(2))
@@ -377,6 +457,7 @@ struct AudioRouteProbe {
             default: receipt.check = "fixture-capture-consent-bootstrap"
             }
             receipt.phase = options.phase
+            operation = .paths
             destination = try openReceipt(options.receipt)
             if let start = options.start {
                 try validatePrivateParent(start)
@@ -385,13 +466,18 @@ struct AudioRouteProbe {
                       !FileManager.default.fileExists(atPath: start.path) else { throw Failure("phase start must be new and private") }
             }
             try checkQuitRequest()
+            operation = .operation
             if options.mode == "--capture" { try capture(options, receipt: &receipt) }
             else if options.mode == "--emit" { try emit(options, receipt: &receipt) }
             else { try authorize(options, receipt: &receipt) }
+            operation = .finalQuit
             try checkQuitRequest()
             receipt.passed = true
         } catch {
             receipt.error = String(describing: error)
+            receipt.failureStage = receipt.failureStage ?? operation
+            receipt.failureReason = (error as? Failure)?.reason ?? .other
+            receipt.failureOSStatus = (error as? Failure)?.status
         }
         receipt.stage = "complete"
         do {
@@ -411,7 +497,7 @@ struct AudioRouteProbe {
     }
 
     private static func checkQuitRequest() throws {
-        if quitRequested.withLock({ $0 }) { throw Failure("interrupted") }
+        if quitRequested.withLock({ $0 }) { throw Failure("interrupted", reason: .interrupted) }
     }
 
     private static func openReceipt(_ url: URL) throws -> FileHandle {
@@ -605,11 +691,11 @@ struct AudioRouteProbe {
         let beginning = ProcessInfo.processInfo.systemUptime
         while ProcessInfo.processInfo.systemUptime - beginning < 45 {
             try checkQuitRequest()
-            if interrupted() { throw Failure("interrupted") }
+            if interrupted() { throw Failure("interrupted", reason: .interrupted) }
             if try consentAcknowledged(options.start!, content: "fixture-phase-start-v1\n") { return }
             Thread.sleep(forTimeInterval: 0.02)
         }
-        throw Failure("phase start acknowledgement timed out")
+        throw Failure("phase start acknowledgement timed out", reason: .timeout)
     }
 
     private static func ready(_ options: Options, stage: String = "ready") throws {
@@ -626,9 +712,13 @@ struct AudioRouteProbe {
     }
 
     private static func capture(_ options: Options, receipt: inout Receipt) throws {
+        var operation = FailureStage.deviceSelection
+        var completed = false
+        defer { if !completed, receipt.failureStage == nil { receipt.failureStage = operation } }
         let mic = try device(uid: options.micUID!)
         let system = try device(uid: options.deviceUID)
         guard mic != system else { throw Failure("routes resolve to the same device") }
+        operation = .formats
         let micFormat = try microphoneFormat(mic)
         let outputFormat = try format(system, scope: kAudioObjectPropertyScopeOutput)
         guard outputFormat.mChannelsPerFrame == 2, outputFormat.mSampleRate == 48_000 else {
@@ -637,6 +727,7 @@ struct AudioRouteProbe {
         receipt.micUID = options.micUID
         receipt.systemUID = options.deviceUID
         receipt.micChannels = Int(micFormat.mChannelsPerFrame)
+        operation = .defaults
         let oldInput: AudioObjectID = try property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice, initial: 0)
         let oldOutput: AudioObjectID = try property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, initial: 0)
         guard oldInput != kAudioObjectUnknown, oldOutput != kAudioObjectUnknown else { throw Failure("missing original defaults") }
@@ -658,7 +749,8 @@ struct AudioRouteProbe {
             try setDefault(kAudioHardwarePropertyDefaultOutputDevice, system)
             let selected: AudioObjectID = try property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice, initial: 0)
             let selectedUID = try stringProperty(selected, kAudioDevicePropertyDeviceUID)
-            guard selectedUID == options.micUID else { throw Failure("default input UID changed") }
+            guard selectedUID == options.micUID else { throw Failure("default input UID changed", reason: .defaultsChanged) }
+            operation = .tap
             let tapDescription = CATapDescription(monoGlobalTapButExcludeProcesses: [])
             tapDescription.isPrivate = true
             tapDescription.muteBehavior = .unmuted
@@ -678,20 +770,25 @@ struct AudioRouteProbe {
                 kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: tapDescription.uuid.uuidString,
                                                   kAudioSubTapDriftCompensationKey: 1]],
             ]
+            operation = .aggregate
             try check(AudioHardwareCreateAggregateDevice(description as CFDictionary, &aggregate), "create microphone and tap aggregate")
             guard aggregate != kAudioObjectUnknown else { throw Failure("missing aggregate") }
             let rate: Float64 = try property(aggregate, kAudioDevicePropertyNominalSampleRate, initial: 0)
             guard rate.isFinite, rate == stream.sampleRate else { throw Failure("aggregate sample rate differs from microphone") }
             receipt.sampleRate = rate
+            operation = .ioProc
             try check(AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, nil) { _, input, _, output, _ in
                 stream.capture(input, output: output)
             }, "create aggregate IOProc")
             guard let proc else { throw Failure("missing aggregate IOProc") }
+            operation = .phaseStart
             try ready(options)
             try awaitStart(options, interrupted: { stream.state.withLock { $0.interrupted } })
             try checkQuitRequest()
+            operation = .ioStart
             try check(AudioDeviceStart(aggregate, proc), "start aggregate IOProc")
             started = true
+            operation = .capture
             let beginning = ProcessInfo.processInfo.systemUptime
             while ProcessInfo.processInfo.systemUptime - beginning < 12 {
                 try checkQuitRequest()
@@ -700,8 +797,8 @@ struct AudioRouteProbe {
                     if elapsed >= 2 { state.collecting = true }
                     return state
                 }
-                if state.interrupted { throw Failure("interrupted") }
-                if state.invalid { throw Failure("missing or malformed aggregate buffers") }
+                if state.interrupted { throw Failure("interrupted", reason: .interrupted) }
+                if state.invalid { throw Failure("missing or malformed aggregate buffers", reason: .invalidBuffers) }
                 if state.mic.frames >= Int(rate * captureSeconds), state.tap.frames >= Int(rate * captureSeconds) { break }
                 Thread.sleep(forTimeInterval: 0.02)
             }
@@ -711,45 +808,81 @@ struct AudioRouteProbe {
             receipt.measurementStartUptime = state.firstFrameUptime
             receipt.measurementEndUptime = state.lastFrameUptime
             guard state.mic.frames >= Int(rate * captureSeconds), state.tap.frames >= Int(rate * captureSeconds) else {
-                throw Failure("timed out waiting for both aggregate routes")
+                throw Failure("timed out waiting for both aggregate routes", reason: .timeout)
             }
+            operation = .finalDefaults
             let finalInput: AudioObjectID = try property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice, initial: 0)
+            receipt.finalDefaultInputMatchesRequested = finalInput == mic
             let finalOutput: AudioObjectID = try property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, initial: 0)
-            guard finalInput == mic, finalOutput == system else { throw Failure("default route changed during measurement") }
+            receipt.finalDefaultOutputMatchesRequested = finalOutput == system
+            guard finalInput == mic, finalOutput == system else {
+                throw Failure("default route changed during measurement", reason: .defaultsChanged)
+            }
+            operation = .score
             try score(options.phase, mic: receipt.rawMic, tap: receipt.globalTap)
-        } catch { failure = error }
+        } catch { failure = error; receipt.failureStage = operation }
+        operation = .cleanup
         var cleanup: [String] = []
-        if let proc {
-            if started { collect(AudioDeviceStop(aggregate, proc), "stop aggregate IOProc", into: &cleanup) }
-            collect(AudioDeviceDestroyIOProcID(aggregate, proc), "destroy aggregate IOProc", into: &cleanup)
+        var cleanupStatus: OSStatus?
+        func recordCleanup(_ status: OSStatus, _ description: String) {
+            if status != noErr, cleanupStatus == nil { cleanupStatus = status }
+            collect(status, description, into: &cleanup)
         }
-        if aggregate != kAudioObjectUnknown { collect(AudioHardwareDestroyAggregateDevice(aggregate), "destroy aggregate", into: &cleanup) }
-        if tap != kAudioObjectUnknown { collect(AudioHardwareDestroyProcessTap(tap), "destroy tap", into: &cleanup) }
+        if let proc {
+            if started { recordCleanup(AudioDeviceStop(aggregate, proc), "stop aggregate IOProc") }
+            recordCleanup(AudioDeviceDestroyIOProcID(aggregate, proc), "destroy aggregate IOProc")
+        }
+        if aggregate != kAudioObjectUnknown { recordCleanup(AudioHardwareDestroyAggregateDevice(aggregate), "destroy aggregate") }
+        if tap != kAudioObjectUnknown { recordCleanup(AudioHardwareDestroyProcessTap(tap), "destroy tap") }
         receipt.resourcesReleased = cleanup.isEmpty
+        let observed = stream.state.withLock { $0 }
+        receipt.rawMic = observed.mic.metric
+        receipt.globalTap = observed.tap.metric
+        receipt.measurementStartUptime = observed.firstFrameUptime
+        receipt.measurementEndUptime = observed.lastFrameUptime
+        receipt.invalidBufferReason = observed.invalidBuffer?.reason
+        receipt.invalidBufferCount = observed.invalidBuffer?.count
+        receipt.invalidBufferIndex = observed.invalidBuffer?.index
+        receipt.invalidBufferChannels = observed.invalidBuffer?.channels
+        receipt.invalidBufferByteSize = observed.invalidBuffer?.byteSize
+        receipt.invalidBufferHasData = observed.invalidBuffer?.hasData
         for (changed, selector, original) in [(outputChanged, kAudioHardwarePropertyDefaultOutputDevice, oldOutput),
                                                (inputChanged, kAudioHardwarePropertyDefaultInputDevice, oldInput)] where changed {
             do { try setDefault(selector, original) }
-            catch { receipt.defaultsRestored = false; cleanup.append(String(describing: error)) }
+            catch {
+                receipt.defaultsRestored = false
+                if cleanupStatus == nil { cleanupStatus = (error as? Failure)?.status }
+                cleanup.append(String(describing: error))
+            }
         }
         if let failure { cleanup.insert(String(describing: failure), at: 0) }
-        if !cleanup.isEmpty { throw Failure(cleanup.joined(separator: "; ")) }
+        if !cleanup.isEmpty {
+            throw Failure(cleanup.joined(separator: "; "),
+                          reason: (failure as? Failure)?.reason ?? (failure == nil ? .cleanup : .other),
+                          status: (failure as? Failure)?.status ?? cleanupStatus)
+        }
+        completed = true
     }
 
     private static func score(_ phase: String, mic: Metric, tap: Metric) throws {
         let intended = phase == "mic-only" ? mic : tap
         let amplitude = phase == "mic-only" ? intended.micToneAmplitude : intended.systemToneAmplitude
         let fraction = phase == "mic-only" ? intended.micToneFraction : intended.systemToneFraction
-        guard intended.rms > 0.02, amplitude > 0.02, fraction > 0.8 else { throw Failure("intended route tone missing") }
+        guard intended.rms > 0.02, amplitude > 0.02, fraction > 0.8 else {
+            throw Failure("intended route tone missing", reason: .intendedToneMissing)
+        }
         let leakage = phase == "mic-only" ? tap.micToneAmplitude : mic.systemToneAmplitude
-        guard leakage < 0.001, leakage < amplitude * 0.01 else { throw Failure("tone leaked into the other capture route") }
+        guard leakage < 0.001, leakage < amplitude * 0.01 else {
+            throw Failure("tone leaked into the other capture route", reason: .toneLeak)
+        }
         let inactive = phase == "mic-only" ? tap : mic
         guard inactive.rms < 0.001, inactive.rms < intended.rms * 0.01 else {
-            throw Failure("unexpected energy in inactive capture route")
+            throw Failure("unexpected energy in inactive capture route", reason: .unexpectedEnergy)
         }
         let unexpectedMic = phase == "mic-only" ? mic.systemToneAmplitude : mic.micToneAmplitude
         let unexpectedTap = phase == "mic-only" ? tap.systemToneAmplitude : tap.micToneAmplitude
         guard unexpectedMic < 0.001, unexpectedTap < 0.001 else {
-            throw Failure("unexpected tone in capture routes")
+            throw Failure("unexpected tone in capture routes", reason: .unexpectedTone)
         }
     }
 
@@ -805,6 +938,9 @@ struct AudioRouteProbe {
     }
 
     private static func emitMicrophone(_ options: Options, receipt: inout Receipt) throws {
+        var operation = FailureStage.senderSetup
+        var completed = false
+        defer { if !completed, receipt.failureStage == nil { receipt.failureStage = operation } }
         let selected = try device(uid: options.deviceUID)
         let inputFormat = try microphoneFormat(selected)
         receipt.emitterUID = options.deviceUID
@@ -853,24 +989,36 @@ struct AudioRouteProbe {
         defer { for source in sources { source.cancel() } }
         var launched = false
         var failure: Error?
+        var senderBeginning: Double?
         do {
+            operation = .phaseStart
             try ready(options)
             try awaitStart(options, interrupted: { interrupted.withLock { $0 } })
+            operation = .senderStart
             try child.run()
             launched = true
             let beginning = ProcessInfo.processInfo.systemUptime
+            senderBeginning = beginning
+            operation = .senderProgress
             while child.isRunning, ProcessInfo.processInfo.systemUptime - beginning < duration + 5 {
                 try checkQuitRequest()
-                if interrupted.withLock({ $0 }) { throw Failure("interrupted") }
+                if interrupted.withLock({ $0 }) { throw Failure("interrupted", reason: .interrupted) }
                 try observedProgress.read(progressInput)
                 Thread.sleep(forTimeInterval: 0.02)
             }
-            guard !child.isRunning else { throw Failure("RTP sender timed out") }
+            guard !child.isRunning else { throw Failure("RTP sender timed out", reason: .timeout) }
             receipt.senderElapsedSeconds = ProcessInfo.processInfo.systemUptime - beginning
             try observedProgress.read(progressInput)
-        } catch { failure = error }
+        } catch { failure = error; receipt.failureStage = operation }
+        if receipt.senderElapsedSeconds == nil, let senderBeginning {
+            receipt.senderElapsedSeconds = ProcessInfo.processInfo.systemUptime - senderBeginning
+        }
         receipt.senderStartUptime = observedProgress.firstOutputUptime
         receipt.senderEndUptime = observedProgress.lastOutputUptime
+        if observedProgress.outputMicroseconds > 0 {
+            receipt.outputDurationSeconds = Double(observedProgress.outputMicroseconds) / 1_000_000
+        }
+        operation = .cleanup
         if launched {
             if child.isRunning {
                 child.terminate()
@@ -890,19 +1038,26 @@ struct AudioRouteProbe {
                 receipt.senderExitCode = child.terminationStatus
             }
         } else { receipt.senderReaped = true }
-        guard receipt.resourcesReleased else { throw Failure("RTP sender cleanup did not complete") }
+        guard receipt.resourcesReleased else {
+            receipt.failureStage = .cleanup
+            throw Failure("RTP sender cleanup did not complete", reason: .cleanup)
+        }
         if let failure { throw failure }
-        guard child.terminationReason == .exit, receipt.senderExitCode == 0 else { throw Failure("RTP sender failed") }
+        operation = .senderExit
+        guard child.terminationReason == .exit, receipt.senderExitCode == 0 else { throw Failure("RTP sender failed", reason: .childExit) }
+        operation = .senderProgress
         guard observedProgress.ended, observedProgress.pending.isEmpty,
               !observedProgress.recordHasTimestamp, observedProgress.outputMicroseconds > 0 else {
             throw Failure("RTP sender did not finish its bounded input")
         }
         let outputDuration = Double(observedProgress.outputMicroseconds) / 1_000_000
         receipt.outputDurationSeconds = outputDuration
+        operation = .senderDuration
         guard outputDuration >= duration, outputDuration <= duration + 0.1,
               let elapsed = receipt.senderElapsedSeconds, elapsed >= duration - 1, elapsed <= duration + 5 else {
-            throw Failure("RTP sender duration or pacing mismatch")
+            throw Failure("RTP sender duration or pacing mismatch", reason: .durationMismatch)
         }
+        completed = true
     }
 
     private static func privateInput(_ url: URL, maximumBytes: Int, allowEmpty: Bool = false) throws -> FileHandle {
@@ -1032,7 +1187,7 @@ struct AudioRouteProbe {
         let system = AudioObjectID(kAudioObjectSystemObject)
         try check(AudioObjectSetPropertyData(system, &address, 0, nil, UInt32(MemoryLayout.size(ofValue: value)), &value), "set default device")
         let actual: AudioObjectID = try property(system, selector, initial: 0)
-        guard actual == device else { throw Failure("default device readback mismatch") }
+        guard actual == device else { throw Failure("default device readback mismatch", reason: .defaultsChanged) }
     }
 
     private static func collect(_ status: OSStatus, _ operation: String, into errors: inout [String]) {
@@ -1040,6 +1195,6 @@ struct AudioRouteProbe {
     }
 
     private static func check(_ status: OSStatus, _ operation: String) throws {
-        guard status == noErr else { throw Failure("\(operation): OSStatus \(status)") }
+        guard status == noErr else { throw Failure("\(operation): OSStatus \(status)", reason: .osStatus, status: status) }
     }
 }
