@@ -335,6 +335,7 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
         predecessor.mkdir()
         globals_ = PROBE["main"].__globals__
         phases = []
+        permission_resets = []
         def path(value):
             return home if value == "/Users/runner" else Path(value)
         def command(arguments, **_kwargs):
@@ -348,6 +349,10 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
                 shutil.copytree(arguments[1], arguments[2])
             elif arguments[0] == "/usr/bin/defaults":
                 (home / "Library/Preferences/com.jarvis.coach.plist").unlink()
+            elif arguments[0] == "/usr/bin/tccutil":
+                self.assertEqual(arguments, ["/usr/bin/tccutil", "reset", "All", "com.jarvis.coach"])
+                self.assertEqual(phases, ["fresh"])
+                permission_resets.append("predecessor")
             return ""
         def phase(name, _version, _app, _evidence, _derived, _template, _speech, _architecture, upgrade=None):
             phases.append(name)
@@ -378,6 +383,7 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
                                 run_phase=phase, owned_processes=lambda *_: []):
             PROBE["main"]()
         evidence = next((root / ".jarvis/release-ui-probe").iterdir())
+        self.assertEqual(permission_resets, [] if setup else ["predecessor"])
         self.assertFalse((home / "Library/Application Support/Jarvis/openai-api-key").exists())
         return phases, evidence
 

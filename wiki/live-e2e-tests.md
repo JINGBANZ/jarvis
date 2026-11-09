@@ -136,7 +136,9 @@ the checkout, without a product diagnostic mode, injected transcript, or product
 [`probe-release-ui.py`](../scripts/probe-release-ui.py) owns the hosted command and exact app/test-runner
 process cleanup. It accepts candidate and predecessor app paths for fresh-install and retained-profile
 upgrade checks. This runner is a hosted acceptance boundary, separate from the scenario and evaluation
-command above.
+command above. Predecessor preparation clears the clean-install profile and resets only Jarvis's
+privacy decisions with the system `tccutil` command, so the predecessor performs its own normal
+onboarding. The upgrade retains that predecessor's profile and permission grants.
 
 [`ReleaseAudioDevices`](../Tests/ReleaseReadiness/ReleaseAudioDevices.swift) selects BlackHole 16-channel
 input for silent microphone frames, preserves the hosted Mac's existing output, verifies those

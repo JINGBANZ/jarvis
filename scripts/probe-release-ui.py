@@ -555,6 +555,7 @@ def main():
             run(["/usr/bin/ditto", str(source), str(app)], timeout=60)
             upgrade_profile = None
             if name == "predecessor":
+                run(["/usr/bin/tccutil", "reset", "All", "com.jarvis.coach"], timeout=10)
                 run(["/usr/bin/defaults", "delete", "com.jarvis.coach"], timeout=10)
                 shutil.rmtree(profile)
             if name != "upgrade":
