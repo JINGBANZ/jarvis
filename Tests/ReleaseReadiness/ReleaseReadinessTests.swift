@@ -103,19 +103,19 @@ final class ReleaseReadinessTests: XCTestCase {
                     acceptedConsents.insert("screen")
                     app.activate()
                 case "Quit & Reopen":
+                    let previousPID = try candidateProcessID()
+                    let relaunch = (pid: previousPID, installedURL: try XCTUnwrap(installedURL))
+                    pendingRelaunch.withLock { $0 = relaunch }
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 2,
                                    "Relaunch requires microphone and system audio proof")
                     XCTAssertEqual(welcome.staticTexts.matching(identifier: "Reopen to finish").count, 1,
                                    "The ordinary relaunch must be offered for the pending screen grant")
-                    let previousPID = try candidateProcessID()
-                    let relaunch = (pid: previousPID, installedURL: try XCTUnwrap(installedURL))
-                    pendingRelaunch.withLock { $0 = relaunch }
                     welcome.buttons[title].click()
                     app = try waitForReplacement(of: previousPID)
-                    pendingRelaunch.withLock { $0 = nil }
                     welcome = app.windows["Welcome to Jarvis"]
                     replacementPID = try candidateProcessID()
                     app.activate()
+                    pendingRelaunch.withLock { $0 = nil }
                 case "I’m Ready":
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 3, "Every permission must be positively granted")
                     XCTAssertTrue(acceptedConsents.contains("microphone"), "Fresh acceptance must grant native microphone consent")

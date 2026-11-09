@@ -109,6 +109,14 @@ extension ReleaseReadinessTests {
         attachEvidence(app, name: "journey-start")
         _ = try candidateProcessID()
         try audioDevices?.verify()
+        let environment = ProcessInfo.processInfo.environment
+        let source = URL(fileURLWithPath: try XCTUnwrap(environment["JARVIS_READINESS_SPEECH_FILE"]))
+        let player = try AVAudioPlayer(contentsOf: source)
+        defer { player.stop() }
+        XCTAssertTrue(player.duration.isFinite && player.duration > 1 && player.duration < 30)
+        attachEvidence(app, name: "journey-playback-prepare")
+        // Preparing before the tap registers the playback process with Core Audio.
+        XCTAssertTrue(player.prepareToPlay(), "System playback must prepare before capture starts")
         let previous = try sessionDirectories()
         let started = Date().timeIntervalSince1970
         app.statusItems["Jarvis is stopped"].click()
@@ -120,11 +128,6 @@ extension ReleaseReadinessTests {
         let fresh = try sessionDirectories().subtracting(previous)
         XCTAssertEqual(fresh.count, 1, "Start must create one fresh production session")
         let directory = try XCTUnwrap(fresh.first)
-        let environment = ProcessInfo.processInfo.environment
-        let source = URL(fileURLWithPath: try XCTUnwrap(environment["JARVIS_READINESS_SPEECH_FILE"]))
-        let player = try AVAudioPlayer(contentsOf: source)
-        defer { player.stop() }
-        XCTAssertTrue(player.duration.isFinite && player.duration > 1 && player.duration < 30)
         attachEvidence(app, name: "journey-transcript")
         XCTAssertTrue(player.play(), "Ordinary system playback must start")
         try waitUntil("The fixed system question must produce a fresh finalized transcript", timeout: 60) {
