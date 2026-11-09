@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import CoreAudio
 import Darwin
@@ -11,6 +12,20 @@ struct AudioRouteProbe {
     private static let systemFrequency = 1_601.0
     private static let captureSeconds = 4.0
     private static let emitSeconds = 8.0
+    private static let quitRequested = OSAllocatedUnfairLock(initialState: false)
+
+    @MainActor
+    private final class ApplicationDelegate: NSObject, NSApplicationDelegate {
+        func applicationDidFinishLaunching(_ notification: Notification) {
+            DispatchQueue.global(qos: .userInitiated).async { runProbe() }
+        }
+
+        func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+            quitRequested.withLock { $0 = true }
+            // The worker must release CoreAudio resources and restore defaults before exiting.
+            return .terminateCancel
+        }
+    }
 
     private struct Failure: Error, CustomStringConvertible {
         let description: String
@@ -227,16 +242,28 @@ struct AudioRouteProbe {
         }
     }
 
+    @MainActor
     static func main() {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["GITHUB_ACTIONS"] == "true", environment["RUNNER_OS"] == "macOS",
+              environment["RUNNER_ENVIRONMENT"] == "github-hosted",
+              NSUserName() == "runner", NSHomeDirectory() == "/Users/runner" else {
+            do {
+                try FileHandle.standardError.write(contentsOf: Data("Audio route probe requires a disposable GitHub-hosted macOS job.\n".utf8))
+            } catch { exit(2) }
+            exit(1)
+        }
+        let application = NSApplication.shared
+        let delegate = ApplicationDelegate()
+        application.delegate = delegate
+        application.setActivationPolicy(.prohibited) // ghost-mode-allowed: hidden synthetic fixture on an explicitly authorized hosted Mac
+        withExtendedLifetime(delegate) { application.run() }
+    }
+
+    private static func runProbe() {
         var receipt = Receipt()
         var destination: FileHandle?
         do {
-            let environment = ProcessInfo.processInfo.environment
-            guard environment["GITHUB_ACTIONS"] == "true", environment["RUNNER_OS"] == "macOS",
-                  environment["RUNNER_ENVIRONMENT"] == "github-hosted",
-                  NSUserName() == "runner", NSHomeDirectory() == "/Users/runner" else {
-                throw Failure("requires a disposable GitHub-hosted macOS job")
-            }
             let options = try Options()
             receipt.mode = String(options.mode.dropFirst(2))
             switch options.mode {
@@ -246,9 +273,11 @@ struct AudioRouteProbe {
             }
             receipt.phase = options.phase
             destination = try openReceipt(options.receipt)
+            try checkQuitRequest()
             if options.mode == "--capture" { try capture(options, receipt: &receipt) }
             else if options.mode == "--emit" { try emit(options, receipt: &receipt) }
             else { try authorize(options, receipt: &receipt) }
+            try checkQuitRequest()
             receipt.passed = true
         } catch {
             receipt.error = String(describing: error)
@@ -268,6 +297,10 @@ struct AudioRouteProbe {
             }
         } catch { exit(2) }
         exit(receipt.passed ? 0 : 1)
+    }
+
+    private static func checkQuitRequest() throws {
+        if quitRequested.withLock({ $0 }) { throw Failure("interrupted") }
     }
 
     private static func openReceipt(_ url: URL) throws -> FileHandle {
@@ -320,6 +353,7 @@ struct AudioRouteProbe {
         let state = OSAllocatedUnfairLock(initialState: ConsentState())
         let sources = signalSources { state.withLock { $0.interrupted = true } }
         defer { for source in sources { source.cancel() } }
+        try checkQuitRequest()
         receipt.microphoneRequestUptime = ProcessInfo.processInfo.systemUptime
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             let completed = ProcessInfo.processInfo.systemUptime
@@ -338,6 +372,7 @@ struct AudioRouteProbe {
                 receipt.microphoneCallbackReceived = current.microphoneResult != nil
             }
             while ProcessInfo.processInfo.systemUptime < deadline {
+                try checkQuitRequest()
                 let current = state.withLock { $0 }
                 if current.interrupted { throw Failure("interrupted") }
                 if let granted = current.microphoneResult {
@@ -349,6 +384,7 @@ struct AudioRouteProbe {
         }
         guard state.withLock({ $0.microphoneResult }) != nil else { throw Failure("microphone authorization request timed out") }
         guard receipt.microphoneAuthorized == true else { throw Failure("microphone authorization was not granted") }
+        try checkQuitRequest()
         let description = CATapDescription(monoGlobalTapButExcludeProcesses: [])
         description.isPrivate = true
         description.muteBehavior = .unmuted
@@ -362,6 +398,7 @@ struct AudioRouteProbe {
             try ready(options, stage: "authorization-ready")
             let acknowledgementDeadline = ProcessInfo.processInfo.systemUptime + 45
             while ProcessInfo.processInfo.systemUptime < acknowledgementDeadline {
+                try checkQuitRequest()
                 if state.withLock({ $0.interrupted }) { throw Failure("interrupted") }
                 if try consentAcknowledged(acknowledgement) {
                     receipt.nativeConsentAcknowledged = true
@@ -441,6 +478,7 @@ struct AudioRouteProbe {
         var started = false
         var failure: Error?
         do {
+            try checkQuitRequest()
             inputChanged = true
             try setDefault(kAudioHardwarePropertyDefaultInputDevice, mic)
             outputChanged = true
@@ -474,11 +512,13 @@ struct AudioRouteProbe {
                 stream.capture(input, output: output)
             }, "create aggregate IOProc")
             guard let proc else { throw Failure("missing aggregate IOProc") }
+            try checkQuitRequest()
             try check(AudioDeviceStart(aggregate, proc), "start aggregate IOProc")
             started = true
             try ready(options)
             let beginning = ProcessInfo.processInfo.systemUptime
             while ProcessInfo.processInfo.systemUptime - beginning < 12 {
+                try checkQuitRequest()
                 let elapsed = ProcessInfo.processInfo.systemUptime - beginning
                 let state = stream.state.withLock { state in
                     if elapsed >= 2 { state.collecting = true }
@@ -548,15 +588,18 @@ struct AudioRouteProbe {
         var started = false
         var failure: Error?
         do {
+            try checkQuitRequest()
             try check(AudioDeviceCreateIOProcIDWithBlock(&proc, selected, nil) { _, _, _, output, _ in
                 stream.emit(output)
             }, "create emitter IOProc")
             guard let proc else { throw Failure("missing emitter IOProc") }
+            try checkQuitRequest()
             try check(AudioDeviceStart(selected, proc), "start emitter IOProc")
             started = true
             try ready(options)
             let beginning = ProcessInfo.processInfo.systemUptime
             while ProcessInfo.processInfo.systemUptime - beginning < 12 {
+                try checkQuitRequest()
                 let state = stream.state.withLock { $0 }
                 if state.interrupted { throw Failure("interrupted") }
                 if state.invalid { throw Failure("missing or malformed emitter buffers") }

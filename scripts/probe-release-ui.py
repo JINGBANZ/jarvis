@@ -407,7 +407,7 @@ def audio_routes(evidence, architecture):
                       "NSAudioCaptureUsageDescription": "Measure synthetic system playback for route verification."}, output)
     run(["/usr/bin/swiftc", "-swift-version", "6", "-strict-concurrency=complete", "-warnings-as-errors",
          "-parse-as-library", "-target", architecture + "-apple-macos15.0", "-module-cache-path",
-         str(evidence / "module-cache"), "-framework", "CoreAudio", "-framework", "AVFoundation",
+         str(evidence / "module-cache"), "-framework", "CoreAudio", "-framework", "AVFoundation", "-framework", "AppKit",
          str(ROOT / "Tests/ReleaseReadiness/AudioRouteProbe.swift"), "-o", str(executable)],
         timeout=120, log=evidence / "audio-build.log")
     run(["/usr/bin/codesign", "--force", "--sign", "-", str(fixture)], timeout=30, log=evidence / "audio-sign.log")

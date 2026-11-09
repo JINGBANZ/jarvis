@@ -107,6 +107,8 @@ final class ReleaseReadinessTests: XCTestCase {
                 case "Quit & Reopen":
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 2,
                                    "Relaunch requires microphone and system audio proof")
+                    XCTAssertEqual(welcome.staticTexts.matching(identifier: "Reopen to finish").count, 1,
+                                   "The ordinary relaunch must be offered for the pending screen grant")
                     let previousPID = try candidateProcessID()
                     welcome.buttons[title].click()
                     waitForReplacement(of: previousPID)
@@ -160,6 +162,8 @@ final class ReleaseReadinessTests: XCTestCase {
             for identifier in owners {
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).count
                 var counts = ["running": running, "dialogs": 0, "containers": 0, "jarvisTextMatches": 0,
+                              "fixtureTextMatches": 0,
+                              "jarvisLabelMatches": 0, "jarvisTitleMatches": 0, "jarvisStaticTextMatches": 0,
                               "microphoneMatches": 0, "audioMatches": 0, "screenMatches": 0,
                               "allowButtons": 0, "openSettingsButtons": 0]
                 discovery[identifier] = counts
@@ -173,10 +177,20 @@ final class ReleaseReadinessTests: XCTestCase {
                 counts["dialogs"] = dialogs.count
                 counts["containers"] = containers.count
                 for container in containers {
-                    let text = container.staticTexts.allElementsBoundByIndex.map {
+                    let staticText = container.staticTexts.allElementsBoundByIndex.map {
                         $0.label + " " + ($0.value as? String ?? "")
                     }.joined(separator: "\n")
+                    let label = container.label
+                    let title = container.title
+                    let text = [label, title, staticText].joined(separator: "\n")
                     guard text.localizedCaseInsensitiveContains("Jarvis") else { continue }
+                    if text.localizedCaseInsensitiveContains("Jarvis Route Fixture") {
+                        counts["fixtureTextMatches", default: 0] += 1
+                        continue
+                    }
+                    if label.localizedCaseInsensitiveContains("Jarvis") { counts["jarvisLabelMatches", default: 0] += 1 }
+                    if title.localizedCaseInsensitiveContains("Jarvis") { counts["jarvisTitleMatches", default: 0] += 1 }
+                    if staticText.localizedCaseInsensitiveContains("Jarvis") { counts["jarvisStaticTextMatches", default: 0] += 1 }
                     counts["jarvisTextMatches", default: 0] += 1
                     let permissions = Set(["microphone", "audio", "screen"].filter {
                         text.localizedCaseInsensitiveContains($0)
@@ -207,7 +221,9 @@ final class ReleaseReadinessTests: XCTestCase {
             }
             guard matches.isEmpty, !hasConsentPrompt else { return false }
             let titles = ["Grant Access", "Open System Settings", "Quit & Reopen", "I’m Ready"].filter {
-                guard $0 == "Grant Access" || acceptedConsents.contains("screen") else { return false }
+                let pendingScreenRelaunch = $0 == "Quit & Reopen" && self.grantedPermissionCount(in: onboarding) == 2
+                    && onboarding.staticTexts.matching(identifier: "Reopen to finish").count == 1
+                guard $0 == "Grant Access" || acceptedConsents.contains("screen") || pendingScreenRelaunch else { return false }
                 let button = onboarding.buttons[$0]
                 return button.exists && button.isEnabled
             }
