@@ -111,12 +111,19 @@ extension ReleaseReadinessTests {
         try audioDevices?.verify()
         let environment = ProcessInfo.processInfo.environment
         let source = URL(fileURLWithPath: try XCTUnwrap(environment["JARVIS_READINESS_SPEECH_FILE"]))
-        let player = try AVAudioPlayer(contentsOf: source)
-        defer { player.stop() }
-        XCTAssertTrue(player.duration.isFinite && player.duration > 1 && player.duration < 30)
+        let file = try AVAudioFile(forReading: source)
+        let duration = Double(file.length) / file.processingFormat.sampleRate
+        XCTAssertTrue(duration.isFinite && duration > 1 && duration < 30)
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: file.processingFormat)
+        let played = XCTestExpectation(description: "The fixed system question must finish playback")
+        player.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { _ in played.fulfill() }
+        defer { player.stop(); engine.stop() }
         attachEvidence(app, name: "journey-playback-prepare")
-        // Preparing before the tap registers the playback process with Core Audio.
-        XCTAssertTrue(player.prepareToPlay(), "System playback must prepare before capture starts")
+        try engine.start()
+        XCTAssertTrue(engine.isRunning, "System playback must prepare before capture starts")
         let previous = try sessionDirectories()
         let started = Date().timeIntervalSince1970
         app.statusItems["Jarvis is stopped"].click()
@@ -129,7 +136,7 @@ extension ReleaseReadinessTests {
         XCTAssertEqual(fresh.count, 1, "Start must create one fresh production session")
         let directory = try XCTUnwrap(fresh.first)
         attachEvidence(app, name: "journey-transcript")
-        XCTAssertTrue(player.play(), "Ordinary system playback must start")
+        player.play() // ghost-mode-allowed: external runner plays the fixed fixture through the selected virtual output
         try waitUntil("The fixed system question must produce a fresh finalized transcript", timeout: 60) {
             guard let rows = try? self.activity(directory) else { return false }
             return rows.contains { row in
@@ -138,7 +145,7 @@ extension ReleaseReadinessTests {
                     && text.contains("binary search") && text.contains("sorted list")
             }
         }
-        try waitUntil("Synthetic playback must finish", timeout: 30) { !player.isPlaying }
+        XCTAssertEqual(XCTWaiter.wait(for: [played], timeout: 30), .completed, "Synthetic playback must finish")
         try audioDevices?.verify()
         let boundary = try activity(directory).map(\.order).max() ?? -1
         let shortcutAt = Date().timeIntervalSince1970

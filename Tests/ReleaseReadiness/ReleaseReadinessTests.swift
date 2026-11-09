@@ -8,7 +8,7 @@ final class ReleaseReadinessTests: XCTestCase {
     var application: XCUIApplication?
     var installedURL: URL?
     var audioDevices: ReleaseAudioDevices?
-    private nonisolated let pendingRelaunch = OSAllocatedUnfairLock<(pid: pid_t, installedURL: URL)?>(initialState: nil)
+    private nonisolated let pendingRelaunch = OSAllocatedUnfairLock<(pid: pid_t, installedURL: URL, operation: String)?>(initialState: nil)
 
     override func record(_ issue: XCTIssue) {
         UIIssueEvidence.record(issue, firstFilename: "ui-issue.json", failureFilename: "ui-failure.json")
@@ -32,7 +32,7 @@ final class ReleaseReadinessTests: XCTestCase {
                 && $0.executableArchitecture == NSRunningApplication.current.executableArchitecture
         }
         let replacement = replacements.count == 1 ? replacements.first : nil
-        let state: [String: Any] = ["previousPID": previousPID,
+        let state: [String: Any] = ["previousPID": previousPID, "operation": pending.operation,
                                    "oldProcessPresent": running.contains { $0.processIdentifier == previousPID },
                                    "replacementCount": replacements.count,
                                    "replacementActive": replacement?.isActive ?? false,
@@ -104,17 +104,21 @@ final class ReleaseReadinessTests: XCTestCase {
                     app.activate()
                 case "Quit & Reopen":
                     let previousPID = try candidateProcessID()
-                    let relaunch = (pid: previousPID, installedURL: try XCTUnwrap(installedURL))
+                    let relaunch = (pid: previousPID, installedURL: try XCTUnwrap(installedURL), operation: "validation")
                     pendingRelaunch.withLock { $0 = relaunch }
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 2,
                                    "Relaunch requires microphone and system audio proof")
                     XCTAssertEqual(welcome.staticTexts.matching(identifier: "Reopen to finish").count, 1,
                                    "The ordinary relaunch must be offered for the pending screen grant")
+                    pendingRelaunch.withLock { $0?.operation = "click" }
                     welcome.buttons[title].click()
+                    pendingRelaunch.withLock { $0?.operation = "replacement" }
                     app = try waitForReplacement(of: previousPID)
                     welcome = app.windows["Welcome to Jarvis"]
-                    replacementPID = try candidateProcessID()
-                    app.activate()
+                    let currentPID = try candidateProcessID()
+                    replacementPID = currentPID
+                    pendingRelaunch.withLock { $0?.operation = "activation" }
+                    if NSRunningApplication(processIdentifier: currentPID)?.isActive != true { app.activate() }
                     pendingRelaunch.withLock { $0 = nil }
                 case "I’m Ready":
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 3, "Every permission must be positively granted")
