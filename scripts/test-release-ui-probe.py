@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import contextlib
+from datetime import datetime, timezone
 import io
 import hashlib
 import http.client
@@ -13,6 +14,7 @@ import runpy
 import subprocess
 import ssl
 import sys
+import tarfile
 import tempfile
 import unittest
 import urllib.error
@@ -24,6 +26,8 @@ ACCOUNT = runpy.run_path(str(Path(__file__).with_name("prepare-release-ui-accoun
 ACCOUNT_GLOBALS = ACCOUNT["prepare"].__globals__
 INPUT = runpy.run_path(str(Path(__file__).with_name("release-input-fixture.py")))
 INPUT_GLOBALS = INPUT["teardown"].__globals__
+SERVICE = runpy.run_path(str(Path(__file__).resolve().parent.parent / "Tests/ReleaseReadiness/AudioServiceEvidence.py"))
+SERVICE_GLOBALS = SERVICE["collect"].__globals__
 
 
 class ProbeResultsTests(unittest.TestCase):
@@ -486,6 +490,199 @@ class InputFixtureDownloadTests(unittest.TestCase):
                 self.assertEqual(opened.call_count, 1)
                 delay.assert_not_called()
         self.exporter.assert_not_called()
+
+
+class AudioServiceEvidenceTests(unittest.TestCase):
+    start = 1_800_000_000
+    end = start + 60
+
+    def report(self, **changes):
+        body = {"procName": "coreaudiod", "procPath": "/usr/sbin/coreaudiod",
+                "captureTime": datetime.fromtimestamp(self.start + 10, timezone.utc).isoformat(),
+                "exception": {"type": "EXC_BAD_ACCESS", "signal": "SIGSEGV", "private": "secret"},
+                "faultingThread": 0,
+                "usedImages": [{"path": "/Library/Audio/Plug-Ins/HAL/roc_vad.driver/Contents/MacOS/roc_vad"}],
+                "threads": [{"frames": [{"imageIndex": 0, "symbol": "roc::RingBuffer::read(private-secret)"},
+                                        {"imageIndex": 0, "symbol": "roc::RequestHandler::OnReadClientInput"},
+                                        {"imageIndex": 0, "symbol": "std::__1::fill_n"}]}],
+                "privatePath": "/Users/private-person/secret"}
+        body.update(changes)
+        return json.dumps({"bug_type": "309", "private": "secret"}).encode() + b"\n" + json.dumps(body).encode()
+
+    def summarize(self, raw):
+        return SERVICE["summarize_report"](raw, self.start, self.end)
+
+    def baseline(self):
+        return {"schemaVersion": 1, "wallTime": self.start, "reportIDs": [],
+                "inventoryUnavailable": False, "daemonUnavailable": False,
+                "daemon": {"pid": 42, "start": [self.start - 10, 1]}}
+
+    def test_only_closed_crashed_thread_categories_leave_report_parser(self):
+        result = self.summarize(self.report())
+        self.assertEqual(result, {"rocImageLoaded": True, "rocFrameCount": 3, "ringBufferFrame": True,
+                                  "requestHandlerFrame": True, "memoryFillCopyFrame": True,
+                                  "exception": "EXC_BAD_ACCESS", "signal": "SIGSEGV"})
+        self.assertNotIn("secret", json.dumps(result))
+        self.assertNotIn("/", json.dumps(result))
+        unknown = self.summarize(self.report(exception={"type": "secret", "signal": "private"}))
+        self.assertEqual((unknown["exception"], unknown["signal"]), ("other", "other"))
+
+    def test_wrong_process_report_type_or_time_window_cannot_match(self):
+        for changes in ({"procName": "unrelated"}, {"procPath": "/private/coreaudiod"},
+                        {"captureTime": datetime.fromtimestamp(self.start - 1, timezone.utc).isoformat()},
+                        {"captureTime": datetime.fromtimestamp(self.end + 1, timezone.utc).isoformat()},
+                        {"captureTime": "2027-01-01T00:00:00"}):
+            self.assertIsNone(self.summarize(self.report(**changes)))
+        self.assertIsNone(self.summarize(self.report().replace(b'"309"', b'"288"', 1)))
+
+    def test_malformed_oversize_and_invalid_frame_indexes_refuse(self):
+        for raw in (b"private malformed", self.report() + b"trailing-private-data",
+                    b"x" * (SERVICE["MAX_REPORT_BYTES"] + 1), self.report(faultingThread=True),
+                    self.report(threads=[{"frames": [{"imageIndex": 12, "symbol": "secret"}]}])):
+            with self.assertRaises((ValueError, KeyError, TypeError)):
+                self.summarize(raw)
+
+    def test_report_symlink_fifo_and_oversize_are_never_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            target = directory / "private"
+            target.write_bytes(self.report())
+            path = directory / "coreaudiod.ips"
+            path.symlink_to(target)
+            with self.assertRaises(OSError):
+                SERVICE["read_report"](path)
+            path.unlink()
+            os.mkfifo(path, 0o600)
+            with self.assertRaises(ValueError):
+                SERVICE["read_report"](path)
+            path.unlink()
+            with path.open("wb") as output:
+                output.truncate(SERVICE["MAX_REPORT_BYTES"] + 1)
+            with self.assertRaises(ValueError):
+                SERVICE["read_report"](path)
+
+    def test_only_new_reports_are_collected_and_daemon_birth_change_is_explicit(self):
+        before = self.baseline()
+        before["reportIDs"] = ["a" * 64]
+        after = {**before, "wallTime": self.end, "daemon": {"pid": 43, "start": [self.start + 20, 2]}}
+        reports = {"a" * 64: Path("old"), "b" * 64: Path("new")}
+        with mock.patch.dict(SERVICE_GLOBALS, snapshot=mock.Mock(return_value=after),
+                             inventory=mock.Mock(return_value=(reports, False)),
+                             read_report=mock.Mock(return_value=self.report())) as values:
+            result = SERVICE["collect"](before)
+            values["read_report"].assert_called_once_with(Path("new"))
+        self.assertIs(result["daemonChanged"], True)
+        self.assertEqual(len(result["matchedReports"]), 1)
+        with mock.patch.dict(SERVICE_GLOBALS, snapshot=mock.Mock(return_value=after),
+                             inventory=mock.Mock(return_value=(reports, True)),
+                             read_report=mock.Mock(side_effect=PermissionError("private detail"))):
+            unavailable = SERVICE["collect"](before)
+        self.assertIs(unavailable["reportCollectionUnavailable"], True)
+        self.assertEqual(unavailable["unreadableReports"], 1)
+        self.assertNotIn("private", json.dumps(unavailable))
+
+    def test_baseline_and_export_schema_reject_private_extra_data(self):
+        for changes in ({"daemon": {"pid": 1, "start": [1, 0], "secret": "private"}},
+                        {"wallTime": float("nan")}, {"reportIDs": ["private-path"]}, {"unknown": "private"}):
+            with self.assertRaises(ValueError):
+                SERVICE["validate_snapshot"]({**self.baseline(), **changes})
+
+    def test_diagnostic_failure_cannot_replace_original_ui_cleanup_failure(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             mock.patch.dict(PROBE["export_audio_service_evidence"].__globals__,
+                             audio_service_evidence=mock.Mock(side_effect=ValueError("private report"))):
+            evidence = Path(temporary)
+            with self.assertRaisesRegex(ValueError, "original cleanup failure"):
+                try:
+                    raise ValueError("original cleanup failure")
+                finally:
+                    PROBE["export_audio_service_evidence"](evidence, self.baseline())
+            self.assertEqual(json.loads((evidence / "audio-service.json").read_text()),
+                             {"schemaVersion": 1, "collectionUnavailable": True})
+
+
+class InputFixtureArchiveTests(unittest.TestCase):
+    payload = b"pinned public dependency"
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name).resolve() / "archives"
+        self.digest = hashlib.sha256(self.payload).hexdigest()
+        patch = mock.patch.dict(INPUT_GLOBALS, ARCHIVES=self.directory, FFMPEG_SHA=self.digest)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.path = self.directory / "ffmpeg-8.0.1.tar.xz"
+
+    def fetch(self):
+        return INPUT["cached_archive"](INPUT["FFMPEG_URL"], self.digest)
+
+    def seed(self, data=None):
+        self.directory.mkdir(mode=0o700)
+        INPUT["create"](self.path, self.payload if data is None else data)
+
+    def test_miss_downloads_once_and_hit_rehashes_without_network(self):
+        with mock.patch.dict(INPUT_GLOBALS, download=mock.Mock(return_value=self.payload)):
+            self.assertEqual(self.fetch(), self.payload)
+            self.assertEqual(self.fetch(), self.payload)
+            INPUT_GLOBALS["download"].assert_called_once_with(INPUT["FFMPEG_URL"], self.digest)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.directory.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(list(self.directory.iterdir()), [self.path])
+        self.path.write_bytes(b"substituted after a successful hit")
+        with mock.patch.dict(INPUT_GLOBALS, download=mock.Mock()) as values:
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                self.fetch()
+            values["download"].assert_not_called()
+
+    def test_corrupt_restored_bytes_never_fall_back_to_download(self):
+        self.seed(b"private corrupted contents")
+        with mock.patch.dict(INPUT_GLOBALS, download=mock.Mock()) as values:
+            with self.assertRaisesRegex(ValueError, "^Cached fixture archive checksum mismatch$"):
+                self.fetch()
+            values["download"].assert_not_called()
+
+    def test_symlinks_hardlinks_fifo_permissions_and_oversize_refuse(self):
+        self.directory.mkdir(mode=0o700)
+        target = self.directory / "private-unrelated"
+        INPUT["create"](target, self.payload)
+        variants = [lambda: self.path.symlink_to(target), lambda: os.link(target, self.path),
+                    lambda: os.mkfifo(self.path, 0o600), lambda: self.path.mkdir(),
+                    lambda: INPUT["create"](self.path, self.payload, 0o644)]
+        for variant in variants:
+            with self.subTest(variant=variant), mock.patch.dict(INPUT_GLOBALS, download=mock.Mock()) as values:
+                variant()
+                with self.assertRaises((ValueError, OSError)):
+                    self.fetch()
+                values["download"].assert_not_called()
+                self.path.rmdir() if self.path.is_dir() else self.path.unlink()
+        with self.path.open("wb") as output:
+            output.truncate(30_000_001)
+        self.path.chmod(0o600)
+        with self.assertRaisesRegex(ValueError, "bounded private regular file"):
+            self.fetch()
+
+    def test_cache_directory_and_unpinned_request_refuse(self):
+        self.seed()
+        self.directory.chmod(0o755)
+        with self.assertRaisesRegex(ValueError, "owned and private"):
+            self.fetch()
+        with self.assertRaisesRegex(ValueError, "pinned dependency checksum"):
+            INPUT["cached_archive"](INPUT["FFMPEG_URL"], "0" * 64)
+
+    def test_cached_archive_still_requires_safe_extraction(self):
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:xz") as output:
+            member = tarfile.TarInfo("ffmpeg-8.0.1/private-link")
+            member.type = tarfile.SYMTYPE
+            member.linkname = "/private-unrelated"
+            output.addfile(member)
+        data = archive.getvalue()
+        self.seed(data)
+        with mock.patch.dict(INPUT_GLOBALS, FFMPEG_SHA=hashlib.sha256(data).hexdigest(), run=mock.Mock()) as values:
+            with self.assertRaisesRegex(ValueError, "Unexpected FFmpeg source archive contents"):
+                INPUT["build_ffmpeg"]()
+            values["run"].assert_not_called()
 
 
 class InputFixtureOwnershipTests(unittest.TestCase):

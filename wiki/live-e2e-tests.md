@@ -116,6 +116,9 @@ scenario machinery and ownership reporting out of release execution.
 The external `ReleaseReadiness` target is an Xcode UI-test boundary because it drives the ordinary
 installed app through Accessibility and native consent controls. Its setup-feasibility workflow
 uses a checksum-pinned public signed release on disposable hosted Macs, without provider credentials.
+The required setup matrix is Apple silicon on macOS 15 and 26, and Intel on macOS 15. Intel macOS 26
+retains ordinary source-Gate coverage; the full normal installed-app release journey has no Intel
+macOS 26 coverage. The product minimum remains macOS 15.
 Only allowlisted scalar setup receipts are uploaded; private XCTest results and UI logs stay on the
 disposable runner. This setup check does not establish a full coaching journey or final candidate
 readiness. It does not replace the existing source or release checks.
@@ -131,6 +134,14 @@ sender does not establish quiet because a receiver can buffer or conceal missing
 sender stays inside the fixture's exact process-ownership root, and teardown removes only the owned
 receiver. Pins and transport settings live in the setup script. Scalar evidence establishes external
 capture routing only; Jarvis's own capture grant and speech-to-hint journey remain separate requirements.
+The setup workflow caches only the two pinned public dependency archives under an exact checksum key.
+Every use checks the file type, ownership, size and checksum before the existing archive-content checks.
+Invalid cached bytes fail without a download fallback. The cache is saved after successful dependency
+setup, before UI execution, and contains no locally built binaries, app bundles, logs or synthetic audio.
+`AudioServiceEvidence.py` reads only new Core Audio daemon crash reports during the hosted route test
+window. It exports daemon birth-identity changes and closed crash categories; raw reports stay in memory
+on the disposable runner. Missing or unavailable crash evidence does not establish that no crash occurred,
+and this diagnostic never changes the route verdict or restarts a service.
 
 An ordinary new eval adds scenarios and a manifest entry under
 [`Scenarios/`](../Tests/JarvisLiveTests/Scenarios), using an existing executor and acceptance contract.

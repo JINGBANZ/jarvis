@@ -24,6 +24,7 @@ import wave
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = ROOT / ".jarvis/release-input-fixture"
+ARCHIVES = ROOT / ".jarvis/release-input-archives"
 UID = "com.jarvis.release-input"
 NAME = "Jarvis Synthetic Microphone"
 ROC_URL = "https://github.com/roc-streaming/roc-vad/releases/download/v0.0.4/roc-vad.tar.bz2"
@@ -176,6 +177,32 @@ def download(url, expected):
         return data
 
 
+def cached_archive(url, expected):
+    filename, pinned = {ROC_URL: ("roc-vad-0.0.4.tar.bz2", ROC_SHA),
+                        FFMPEG_URL: ("ffmpeg-8.0.1.tar.xz", FFMPEG_SHA)}[url]
+    if expected != pinned:
+        raise ValueError("Archive cache requires the pinned dependency checksum")
+    ARCHIVES.mkdir(mode=0o700, parents=True, exist_ok=True)
+    private_directory(ARCHIVES)
+    path = ARCHIVES / filename
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        data = download(url, expected)
+        create(path, data)
+        return data
+    with os.fdopen(descriptor, "rb") as source:
+        info = os.fstat(source.fileno())
+        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.getuid() or info.st_nlink != 1
+                or not 0 < info.st_size <= 30_000_000):
+            raise ValueError("Cached fixture archive must be a bounded private regular file")
+        data = source.read(30_000_001)
+    if len(data) != info.st_size or hashlib.sha256(data).hexdigest() != expected:
+        raise ValueError("Cached fixture archive checksum mismatch")
+    return data
+
+
 def install_roc():
     if DRIVER.exists() or DRIVER.is_symlink() or ROC.exists() or ROC.is_symlink():
         raise ValueError("Refusing to replace an existing Roc installation")
@@ -186,7 +213,7 @@ def install_roc():
         "/Library/Audio/Plug-Ins/HAL/roc_vad.driver/Contents/MacOS/roc_vad":
             (BASE / "roc_vad.driver/Contents/MacOS/roc_vad", 0o755),
     }
-    with tarfile.open(fileobj=io.BytesIO(download(ROC_URL, ROC_SHA)), mode="r:bz2") as archive:
+    with tarfile.open(fileobj=io.BytesIO(cached_archive(ROC_URL, ROC_SHA)), mode="r:bz2") as archive:
         files = [entry for entry in archive.getmembers() if not entry.isdir()]
         if {entry.name for entry in files} != paths.keys() or len(files) != len(paths):
             raise ValueError("Unexpected Roc release archive contents")
@@ -221,7 +248,7 @@ def install_roc():
 
 
 def build_ffmpeg():
-    with tarfile.open(fileobj=io.BytesIO(download(FFMPEG_URL, FFMPEG_SHA)), mode="r:xz") as archive:
+    with tarfile.open(fileobj=io.BytesIO(cached_archive(FFMPEG_URL, FFMPEG_SHA)), mode="r:xz") as archive:
         members = archive.getmembers()
         if any(not Path(entry.name).parts or Path(entry.name).parts[0] != "ffmpeg-8.0.1" or ".." in Path(entry.name).parts
                or not (entry.isdir() or entry.isfile()) for entry in members):

@@ -533,6 +533,32 @@ def build_ui(evidence, architecture, environment):
     return derived, configured
 
 
+def audio_service_evidence(before=None):
+    helper = ROOT / "Tests/ReleaseReadiness/AudioServiceEvidence.py"
+    schema = runpy.run_path(str(helper))
+    result = subprocess.run(["/usr/bin/sudo", "-n",
+                             "--preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_WORKSPACE",
+                             sys.executable, "-I", str(helper), "before" if before is None else "after"],
+                            input="" if before is None else json.dumps(before),
+                            capture_output=True, text=True, timeout=20, check=True)
+    if len(result.stdout) > 16_384 or result.stderr:
+        raise ValueError("Audio service evidence unavailable")
+    value = json.loads(result.stdout)
+    return schema["validate_snapshot" if before is None else "validate_result"](value)
+
+
+def export_audio_service_evidence(evidence, before):
+    try:
+        value = audio_service_evidence(before) if before is not None else {
+            "schemaVersion": 1, "collectionUnavailable": True}
+        (evidence / "audio-service.json").write_text(json.dumps(value, indent=2) + "\n")
+    except Exception:
+        try:
+            (evidence / "audio-service.json").write_text('{"schemaVersion":1,"collectionUnavailable":true}\n')
+        except OSError:
+            print("Audio service evidence could not be retained.", flush=True)
+
+
 def audio_routes(evidence, architecture):
     fixture = evidence / "derived/Jarvis Route Fixture.app"
     executable = fixture / "Contents/MacOS/AudioRouteProbe"
@@ -558,12 +584,17 @@ def audio_routes(evidence, architecture):
               ("emit", "mic", "mic-emit"), ("capture", "system-only", "system-capture"),
               ("emit", "mic-quiet", "mic-quiet-emit"), ("emit", "system", "system-emit")]
     try:
+        before = audio_service_evidence()
+    except Exception:
+        before = None
+    try:
         run_ui(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", str(configured),
                 "-destination", f"platform=macOS,arch={architecture}", "-resultBundlePath", str(result),
                 "-only-testing:ReleaseReadiness/AudioFixtureTests", "-parallel-testing-enabled", "NO",
                 "-maximum-test-execution-time-allowance", "120"],
                timeout=240, log=evidence / "test.log", roots=[derived], evidence=evidence)
     finally:
+        export_audio_service_evidence(evidence, before)
         for mode, phase, name in phases:
             path = evidence / f"private-{name}.json"
             if path.exists() and 0 < path.stat().st_size <= 8_192:
