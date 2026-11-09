@@ -235,7 +235,19 @@ function run() {
         function requireFocus(field) {
             stage = "focus-verify";
             publish();
-            if (scalar(field, "AXFocused") !== true || !same(attribute(system, "AXFocusedUIElement"), field)) { fail(); }
+            const focusDeadline = Date.now() + 5000;
+            while (Date.now() < focusDeadline) {
+                try {
+                    if (scalar(field, "AXFocused") === true && same(attribute(system, "AXFocusedUIElement"), field)) {
+                        diagnostics.focusError = 0;
+                        return;
+                    }
+                } catch (error) {
+                    if (error.axError !== -25204) { throw error; }
+                }
+                $.NSThread.sleepForTimeInterval(0.05);
+            }
+            fail();
         }
         function fill(field, value, secure) {
             revalidate();

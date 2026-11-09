@@ -470,8 +470,10 @@ final class ReleaseReadinessTests: XCTestCase {
         let initialEnabled = try XCTUnwrap(recordingToggleEnabled(toggle.value),
                                            "The native recording switch must expose a known Boolean value")
         if !initialEnabled { toggle.click() }
+        // The switch turns on before macOS finishes administrator authorization.
         let authorized = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            self.recordingToggleEnabled(toggle.value) == true || settings.buttons["Quit & Reopen"].exists
+            settings.buttons["Quit & Reopen"].exists
+                || (initialEnabled && self.recordingToggleEnabled(toggle.value) == true)
         }, object: nil)
         let authorizationResult = XCTWaiter.wait(for: [authorized], timeout: 45)
         attachEvidence(settings, name: "system-screen-recording-authorization-outcome")
