@@ -121,9 +121,16 @@ disposable runner. This setup check does not establish a full coaching journey o
 readiness. It does not replace the existing source or release checks.
 The standalone route fixture has its own native consent identity. It measures microphone-only and
 system-only synthetic tones through the production-shaped unexcluded global tap and default-input
-aggregate, rejects cross-route tone and RMS energy, and restores device defaults. Its scalar evidence
-establishes external capture routing only; Jarvis's own capture grant and speech-to-hint journey remain
-separate requirements.
+aggregate, rejects cross-route tone and RMS energy, and restores device defaults.
+[`release-input-fixture.py`](../scripts/release-input-fixture.py) owns the checksum-pinned Roc input-only
+receiver and minimal FFmpeg file-to-RTP sender on disposable hosted Macs. The sender has no audio-device
+output backend: ordinary app playback enters the global system tap even when routed to a second
+loopback device. Synthetic PCM files stay owner-only inside the run directory and travel only over
+loopback. System-only measurement actively streams a separate silent microphone file; stopping a
+sender does not establish quiet because a receiver can buffer or conceal missing packets. The bundled
+sender stays inside the fixture's exact process-ownership root, and teardown removes only the owned
+receiver. Pins and transport settings live in the setup script. Scalar evidence establishes external
+capture routing only; Jarvis's own capture grant and speech-to-hint journey remain separate requirements.
 
 An ordinary new eval adds scenarios and a manifest entry under
 [`Scenarios/`](../Tests/JarvisLiveTests/Scenarios), using an existing executor and acceptance contract.

@@ -146,9 +146,23 @@ final class ReleaseReadinessTests: XCTestCase {
         var action: PermissionAction?
         var consentOwner: String?
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            if acceptedConsents.isEmpty, onboarding.staticTexts.matching(identifier: "Needed").count == 3 {
+                let grants = onboarding.buttons.matching(identifier: "Grant Access")
+                if grants.count == 1, grants.element.isEnabled, grants.element.isHittable {
+                    action = .onboarding("Grant Access")
+                    return true
+                }
+            }
             var matches: [(String, Set<String>, XCUIElement)] = []
             var hasConsentPrompt = false
             var discovery: [String: [String: Int]] = [:]
+            func recordDiscovery() {
+                guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
+                do {
+                    try JSONSerialization.data(withJSONObject: discovery).write(
+                        to: URL(fileURLWithPath: path).appendingPathComponent("permission-discovery.json"), options: .atomic)
+                } catch { XCTFail("Could not record scalar native-dialog discovery") }
+            }
             for identifier in owners {
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).count
                 var counts = ["running": running, "dialogs": 0, "containers": 0, "jarvisTextMatches": 0,
@@ -158,6 +172,9 @@ final class ReleaseReadinessTests: XCTestCase {
                               "allowButtons": 0, "openSettingsButtons": 0]
                 discovery[identifier] = counts
                 guard running > 0 else { continue }
+                counts["queryStartedMilliseconds"] = Int(ProcessInfo.processInfo.systemUptime * 1_000)
+                discovery[identifier] = counts
+                recordDiscovery()
                 let candidate = XCUIApplication(bundleIdentifier: identifier)
                 if captured.insert(identifier).inserted {
                     self.attachEvidence(candidate, name: "permission-owner-first-\(identifier)")
@@ -195,14 +212,11 @@ final class ReleaseReadinessTests: XCTestCase {
                         && container.buttons.matching(identifier: "Open System Settings").count == 1
                     if allow.count == 1 || opensSettings { matches.append((identifier, permissions, container)) }
                 }
+                counts["queryFinishedMilliseconds"] = Int(ProcessInfo.processInfo.systemUptime * 1_000)
                 discovery[identifier] = counts
+                recordDiscovery()
             }
-            if let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] {
-                do {
-                    try JSONSerialization.data(withJSONObject: discovery).write(
-                        to: URL(fileURLWithPath: path).appendingPathComponent("permission-discovery.json"), options: .atomic)
-                } catch { XCTFail("Could not record scalar native-dialog discovery") }
-            }
+            recordDiscovery()
             if matches.count == 1 {
                 let (owner, permissions, dialog) = matches[0]
                 action = .consent(permissions, dialog)
@@ -224,7 +238,9 @@ final class ReleaseReadinessTests: XCTestCase {
             action = .onboarding(titles[0])
             return true
         }, object: nil)
+        let waitStarted = ProcessInfo.processInfo.systemUptime
         let result = XCTWaiter.wait(for: [visible], timeout: 20)
+        recordPermissionWait(result, started: waitStarted, filename: "permission-wait.json")
         guard result == .completed, let action else {
             let path = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
             try PermissionOwnerEvidence.record(directory: URL(fileURLWithPath: path), filename: "permission-owner.json")
@@ -236,6 +252,24 @@ final class ReleaseReadinessTests: XCTestCase {
             print("nativeConsent=\(permissions.sorted().joined(separator: ",")) owner=\(owner)")
         }
         return action
+    }
+
+    private func recordPermissionWait(_ result: XCTWaiter.Result, started: TimeInterval, filename: String) {
+        let outcome: String
+        switch result {
+        case .completed: outcome = "completed"
+        case .timedOut: outcome = "timed-out"
+        case .incorrectOrder: outcome = "incorrect-order"
+        case .invertedFulfillment: outcome = "inverted-fulfillment"
+        case .interrupted: outcome = "interrupted"
+        @unknown default: outcome = "unknown"
+        }
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
+        let receipt: [String: Any] = ["result": outcome, "elapsedSeconds": ProcessInfo.processInfo.systemUptime - started]
+        do {
+            try JSONSerialization.data(withJSONObject: receipt).write(
+                to: URL(fileURLWithPath: path).appendingPathComponent(filename), options: .atomic)
+        } catch { XCTFail("Could not record the scalar native-permission wait result") }
     }
 
     private enum PermissionStateReason: String {
@@ -329,9 +363,11 @@ final class ReleaseReadinessTests: XCTestCase {
         let evidence = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
         try JSONSerialization.data(withJSONObject: recordingToggleValue(toggle.value)).write(
             to: URL(fileURLWithPath: evidence).appendingPathComponent("recording-initial.json"), options: .atomic)
-        if toggle.value as? String != "1" { toggle.click() }
+        let initialEnabled = try XCTUnwrap(recordingToggleEnabled(toggle.value),
+                                           "The native recording switch must expose a known Boolean value")
+        if !initialEnabled { toggle.click() }
         let authorized = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            toggle.value as? String == "1" || settings.buttons["Quit & Reopen"].exists
+            self.recordingToggleEnabled(toggle.value) == true || settings.buttons["Quit & Reopen"].exists
         }, object: nil)
         let authorizationResult = XCTWaiter.wait(for: [authorized], timeout: 45)
         attachEvidence(settings, name: "system-screen-recording-authorization-outcome")
@@ -361,7 +397,9 @@ final class ReleaseReadinessTests: XCTestCase {
             confirm.click()
             attachEvidence(settings, name: "recording-relaunch-clicked")
         }
-        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '1'"), object: toggle)
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.recordingToggleEnabled(toggle.value) == true
+        }, object: nil)
         let enabledResult = XCTWaiter.wait(for: [enabled], timeout: 5)
         attachEvidence(settings, name: "system-screen-recording-settings-final")
         let currentPanes = settings.scrollViews.containing(.staticText, identifier: "Screen & System Audio Recording")
@@ -387,14 +425,16 @@ final class ReleaseReadinessTests: XCTestCase {
         return relaunches
     }
 
+    private func recordingToggleEnabled(_ value: Any?) -> Bool? {
+        if let value = value as? String, ["0", "1"].contains(value) { return value == "1" }
+        if let value = value as? NSNumber, value == 0 || value == 1 { return value == 1 }
+        return nil
+    }
+
     private func recordingToggleValue(_ value: Any?) -> [String: Any] {
-        if let value = value as? String {
-            return ["kind": "string", "knownBoolean": ["0", "1"].contains(value), "enabled": value == "1"]
-        }
-        if let value = value as? NSNumber {
-            return ["kind": "number", "knownBoolean": value == 0 || value == 1, "enabled": value == 1]
-        }
-        return ["kind": value == nil ? "absent" : "other", "knownBoolean": false, "enabled": false]
+        let enabled = recordingToggleEnabled(value)
+        let kind = value is String ? "string" : value is NSNumber ? "number" : value == nil ? "absent" : "other"
+        return ["kind": kind, "knownBoolean": enabled != nil, "enabled": enabled == true]
     }
 
     private func prepareProfile(completed: Bool, placeholderCredential: Bool = false) throws {

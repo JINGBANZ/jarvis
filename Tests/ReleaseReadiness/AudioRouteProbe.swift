@@ -8,6 +8,7 @@ import os
 @main
 struct AudioRouteProbe {
     private static let systemUID = "BlackHole2ch_UID"
+    private static let inputUID = "com.jarvis.release-input"
     private static let micFrequency = 997.0
     private static let systemFrequency = 1_601.0
     private static let captureSeconds = 4.0
@@ -39,6 +40,8 @@ struct AudioRouteProbe {
         let deviceUID: String
         let receipt: URL
         let acknowledgement: URL?
+        let input: URL?
+        let start: URL?
 
         init() throws {
             let arguments = Array(CommandLine.arguments.dropFirst())
@@ -53,15 +56,17 @@ struct AudioRouteProbe {
                 micUID = nil
                 deviceUID = ""
                 acknowledgement = URL(fileURLWithPath: arguments[2]).standardizedFileURL
+                input = nil
+                start = nil
                 receipt = URL(fileURLWithPath: arguments[4]).standardizedFileURL
                 return
             }
             acknowledgement = nil
             phase = arguments[1]
-            let expected = mode == "--capture" ? ["--mic-uid", "--system-uid", "--receipt"]
-                : ["--device-uid", "--receipt"]
+            let expected = mode == "--capture" ? ["--mic-uid", "--system-uid", "--start", "--receipt"]
+                : phase == "system" ? ["--device-uid", "--start", "--receipt"] : ["--device-uid", "--input", "--start", "--receipt"]
             guard (mode == "--capture" && ["mic-only", "system-only"].contains(phase))
-                || (mode == "--emit" && ["mic", "system"].contains(phase)),
+                || (mode == "--emit" && ["mic", "mic-quiet", "system"].contains(phase)),
                   arguments.count == 2 + expected.count * 2 else { throw Failure("invalid mode arguments") }
             var values: [String: String] = [:]
             for (index, key) in expected.enumerated() {
@@ -76,14 +81,20 @@ struct AudioRouteProbe {
                     throw Failure("invalid device UID")
                 }
             }
-            guard (mode != "--capture" || (deviceUID == systemUID && micUID != deviceUID)),
+            guard (mode != "--capture" || (deviceUID == systemUID && micUID == inputUID)),
                   (mode != "--emit" || phase != "system" || deviceUID == systemUID),
-                  (mode != "--emit" || phase != "mic" || deviceUID != systemUID) else {
+                  (mode != "--emit" || phase == "system" || deviceUID == inputUID) else {
                 throw Failure("microphone and system routes must use distinct devices")
             }
             let path = values["--receipt"]!
             guard path.hasPrefix("/") else { throw Failure("receipt path must be absolute") }
             receipt = URL(fileURLWithPath: path).standardizedFileURL
+            guard let startPath = values["--start"], startPath.hasPrefix("/") else { throw Failure("start path must be absolute") }
+            start = URL(fileURLWithPath: startPath).standardizedFileURL
+            if let path = values["--input"] {
+                guard path.hasPrefix("/") else { throw Failure("input path must be absolute") }
+                input = URL(fileURLWithPath: path).standardizedFileURL
+            } else { input = nil }
         }
     }
 
@@ -115,6 +126,17 @@ struct AudioRouteProbe {
         var sampleRate: Double?
         var micChannels: Int?
         var outputFrames = 0
+        var transport: String?
+        var wireSampleRate: Int?
+        var sourceDurationSeconds: Double?
+        var outputDurationSeconds: Double?
+        var senderElapsedSeconds: Double?
+        var senderExitCode: Int32?
+        var senderReaped: Bool?
+        var senderStartUptime: Double?
+        var senderEndUptime: Double?
+        var measurementStartUptime: Double?
+        var measurementEndUptime: Double?
         var rawMic = Metric()
         var globalTap = Metric()
         var defaultsRestored = true
@@ -139,6 +161,65 @@ struct AudioRouteProbe {
         var microphoneResult: Bool?
         var microphoneCompletionUptime: Double?
         var interrupted = false
+    }
+
+    private struct SenderProgress {
+        var pending = Data()
+        var bytesRead = 0
+        var recordMicroseconds: Int64?
+        var recordHasTimestamp = false
+        var outputMicroseconds: Int64 = 0
+        var firstOutputUptime: Double?
+        var lastOutputUptime: Double?
+        var ended = false
+
+        mutating func read(_ input: FileHandle) throws {
+            let data = try input.read(upToCount: 131_073 - bytesRead) ?? Data()
+            bytesRead += data.count
+            guard bytesRead <= 131_072 else { throw Failure("RTP sender progress exceeds bound") }
+            pending.append(data)
+            while let newline = pending.firstIndex(of: 0x0A) {
+                guard !ended, let line = String(data: pending[..<newline], encoding: .ascii) else {
+                    throw Failure("invalid RTP sender progress record")
+                }
+                pending.removeSubrange(...newline)
+                if line.hasPrefix("out_time_us=") {
+                    guard !recordHasTimestamp else { throw Failure("duplicate RTP sender output timestamp") }
+                    recordHasTimestamp = true
+                    let timestamp = line.dropFirst("out_time_us=".count)
+                    if timestamp != "N/A" {
+                        guard let value = Int64(timestamp), value >= 0 else {
+                            throw Failure("invalid RTP sender output timestamp")
+                        }
+                        recordMicroseconds = value
+                    }
+                } else if line.hasPrefix("progress=") {
+                    guard line == "progress=continue" || line == "progress=end",
+                          recordHasTimestamp else {
+                        throw Failure("incomplete RTP sender progress")
+                    }
+                    guard let value = recordMicroseconds else {
+                        guard line == "progress=continue", outputMicroseconds == 0 else {
+                            throw Failure("RTP sender output timestamp disappeared")
+                        }
+                        recordHasTimestamp = false
+                        continue
+                    }
+                    guard value >= outputMicroseconds else {
+                        throw Failure("incomplete or regressing RTP sender progress")
+                    }
+                    if value > outputMicroseconds {
+                        let now = ProcessInfo.processInfo.systemUptime
+                        if firstOutputUptime == nil { firstOutputUptime = now }
+                        lastOutputUptime = now
+                        outputMicroseconds = value
+                    }
+                    recordMicroseconds = nil
+                    recordHasTimestamp = false
+                    ended = line == "progress=end"
+                }
+            }
+        }
     }
 
     private struct Accumulator: Sendable {
@@ -180,6 +261,8 @@ struct AudioRouteProbe {
         var mic = Accumulator()
         var tap = Accumulator()
         var outputFrames = 0
+        var firstFrameUptime: Double?
+        var lastFrameUptime: Double?
     }
 
     private final class Stream: Sendable {
@@ -201,6 +284,13 @@ struct AudioRouteProbe {
                     if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
                 }
                 guard current.collecting else { return }
+                let measuring = current.mic.frames < Int(sampleRate * captureSeconds)
+                    || current.tap.frames < Int(sampleRate * captureSeconds)
+                if measuring {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if current.firstFrameUptime == nil { current.firstFrameUptime = now }
+                    current.lastFrameUptime = now
+                }
                 let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
                 guard buffers.count == 2 else { current.invalid = true; return }
                 for index in 0..<2 {
@@ -240,6 +330,11 @@ struct AudioRouteProbe {
                     return
                 }
                 let frames = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / channels
+                if current.outputFrames < Int(sampleRate * emitSeconds) {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if current.firstFrameUptime == nil { current.firstFrameUptime = now }
+                    current.lastFrameUptime = now
+                }
                 let values = data.assumingMemoryBound(to: Float.self)
                 for frame in 0..<frames {
                     let index = current.outputFrames + frame
@@ -278,11 +373,17 @@ struct AudioRouteProbe {
             receipt.mode = String(options.mode.dropFirst(2))
             switch options.mode {
             case "--capture": receipt.check = "production-aggregate-route-isolation"
-            case "--emit": receipt.check = "virtual-device-tone-emission"
+            case "--emit": receipt.check = options.phase == "system" ? "virtual-device-tone-emission" : "synthetic-microphone-rtp"
             default: receipt.check = "fixture-capture-consent-bootstrap"
             }
             receipt.phase = options.phase
             destination = try openReceipt(options.receipt)
+            if let start = options.start {
+                try validatePrivateParent(start)
+                guard start.deletingLastPathComponent() == options.receipt.deletingLastPathComponent(),
+                      start != options.receipt, start != options.input,
+                      !FileManager.default.fileExists(atPath: start.path) else { throw Failure("phase start must be new and private") }
+            }
             try checkQuitRequest()
             if options.mode == "--capture" { try capture(options, receipt: &receipt) }
             else if options.mode == "--emit" { try emit(options, receipt: &receipt) }
@@ -483,13 +584,13 @@ struct AudioRouteProbe {
         guard !state.withLock({ $0.interrupted }) else { throw Failure("interrupted") }
     }
 
-    private static func consentAcknowledged(_ url: URL) throws -> Bool {
+    private static func consentAcknowledged(_ url: URL, content: String = "fixture-native-consents-accepted-v1\n") throws -> Bool {
         let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
         if descriptor < 0, errno == ENOENT { return false }
         guard descriptor >= 0 else { throw Failure("cannot open native consent acknowledgement") }
         let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? file.close() }
-        let expected = Data("fixture-native-consents-accepted-v1\n".utf8)
+        let expected = Data(content.utf8)
         var info = stat()
         guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
               info.st_mode & 0o777 == 0o600, info.st_uid == getuid(), info.st_nlink == 1,
@@ -498,6 +599,17 @@ struct AudioRouteProbe {
             throw Failure("invalid native consent acknowledgement content")
         }
         return true
+    }
+
+    private static func awaitStart(_ options: Options, interrupted: () -> Bool) throws {
+        let beginning = ProcessInfo.processInfo.systemUptime
+        while ProcessInfo.processInfo.systemUptime - beginning < 45 {
+            try checkQuitRequest()
+            if interrupted() { throw Failure("interrupted") }
+            if try consentAcknowledged(options.start!, content: "fixture-phase-start-v1\n") { return }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        throw Failure("phase start acknowledgement timed out")
     }
 
     private static func ready(_ options: Options, stage: String = "ready") throws {
@@ -517,14 +629,11 @@ struct AudioRouteProbe {
         let mic = try device(uid: options.micUID!)
         let system = try device(uid: options.deviceUID)
         guard mic != system else { throw Failure("routes resolve to the same device") }
-        let micFormat = try format(mic, scope: kAudioObjectPropertyScopeInput)
-        let micOutputFormat = try format(mic, scope: kAudioObjectPropertyScopeOutput)
-        guard micOutputFormat.mSampleRate == micFormat.mSampleRate,
-              micOutputFormat.mChannelsPerFrame == micFormat.mChannelsPerFrame else {
-            throw Failure("microphone fixture input and output formats differ")
-        }
+        let micFormat = try microphoneFormat(mic)
         let outputFormat = try format(system, scope: kAudioObjectPropertyScopeOutput)
-        guard outputFormat.mChannelsPerFrame == 2 else { throw Failure("system route must be BlackHole 2ch") }
+        guard outputFormat.mChannelsPerFrame == 2, outputFormat.mSampleRate == 48_000 else {
+            throw Failure("system route must be BlackHole 2ch at 48000 Hz")
+        }
         receipt.micUID = options.micUID
         receipt.systemUID = options.deviceUID
         receipt.micChannels = Int(micFormat.mChannelsPerFrame)
@@ -557,7 +666,9 @@ struct AudioRouteProbe {
             guard tap != kAudioObjectUnknown else { throw Failure("missing process tap") }
             let tapFormat: AudioStreamBasicDescription = try property(tap, kAudioTapPropertyFormat, initial: AudioStreamBasicDescription())
             try validateFormat(tapFormat)
-            guard tapFormat.mChannelsPerFrame == 1 else { throw Failure("tap is not mono") }
+            guard tapFormat.mChannelsPerFrame == 1, tapFormat.mSampleRate == micFormat.mSampleRate else {
+                throw Failure("tap must be mono at the microphone sample rate")
+            }
             let description: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "Jarvis Route Probe",
                 kAudioAggregateDeviceUIDKey: "com.jarvis.release-route.\(UUID().uuidString)",
@@ -576,10 +687,11 @@ struct AudioRouteProbe {
                 stream.capture(input, output: output)
             }, "create aggregate IOProc")
             guard let proc else { throw Failure("missing aggregate IOProc") }
+            try ready(options)
+            try awaitStart(options, interrupted: { stream.state.withLock { $0.interrupted } })
             try checkQuitRequest()
             try check(AudioDeviceStart(aggregate, proc), "start aggregate IOProc")
             started = true
-            try ready(options)
             let beginning = ProcessInfo.processInfo.systemUptime
             while ProcessInfo.processInfo.systemUptime - beginning < 12 {
                 try checkQuitRequest()
@@ -596,6 +708,8 @@ struct AudioRouteProbe {
             let state = stream.state.withLock { $0 }
             receipt.rawMic = state.mic.metric
             receipt.globalTap = state.tap.metric
+            receipt.measurementStartUptime = state.firstFrameUptime
+            receipt.measurementEndUptime = state.lastFrameUptime
             guard state.mic.frames >= Int(rate * captureSeconds), state.tap.frames >= Int(rate * captureSeconds) else {
                 throw Failure("timed out waiting for both aggregate routes")
             }
@@ -640,12 +754,16 @@ struct AudioRouteProbe {
     }
 
     private static func emit(_ options: Options, receipt: inout Receipt) throws {
+        if options.phase != "system" {
+            try emitMicrophone(options, receipt: &receipt)
+            return
+        }
         let selected = try device(uid: options.deviceUID)
         let outputFormat = try format(selected, scope: kAudioObjectPropertyScopeOutput)
         receipt.emitterUID = options.deviceUID
         receipt.sampleRate = outputFormat.mSampleRate
         let stream = Stream(sampleRate: outputFormat.mSampleRate, channels: Int(outputFormat.mChannelsPerFrame),
-                            frequency: options.phase == "mic" ? micFrequency : systemFrequency)
+                            frequency: systemFrequency)
         let sources = signalSources { stream.state.withLock { $0.interrupted = true } }
         defer { for source in sources { source.cancel() } }
         var proc: AudioDeviceIOProcID?
@@ -657,10 +775,11 @@ struct AudioRouteProbe {
                 stream.emit(output)
             }, "create emitter IOProc")
             guard let proc else { throw Failure("missing emitter IOProc") }
+            try ready(options)
+            try awaitStart(options, interrupted: { stream.state.withLock { $0.interrupted } })
             try checkQuitRequest()
             try check(AudioDeviceStart(selected, proc), "start emitter IOProc")
             started = true
-            try ready(options)
             let beginning = ProcessInfo.processInfo.systemUptime
             while ProcessInfo.processInfo.systemUptime - beginning < 12 {
                 try checkQuitRequest()
@@ -671,6 +790,8 @@ struct AudioRouteProbe {
                 Thread.sleep(forTimeInterval: 0.02)
             }
             receipt.outputFrames = stream.state.withLock { $0.outputFrames }
+            receipt.senderStartUptime = stream.state.withLock { $0.firstFrameUptime }
+            receipt.senderEndUptime = stream.state.withLock { $0.lastFrameUptime }
             guard receipt.outputFrames >= Int(stream.sampleRate * emitSeconds) else { throw Failure("emitter callbacks timed out") }
         } catch { failure = error }
         var cleanup: [String] = []
@@ -681,6 +802,172 @@ struct AudioRouteProbe {
         receipt.resourcesReleased = cleanup.isEmpty
         if let failure { cleanup.insert(String(describing: failure), at: 0) }
         if !cleanup.isEmpty { throw Failure(cleanup.joined(separator: "; ")) }
+    }
+
+    private static func emitMicrophone(_ options: Options, receipt: inout Receipt) throws {
+        let selected = try device(uid: options.deviceUID)
+        let inputFormat = try microphoneFormat(selected)
+        receipt.emitterUID = options.deviceUID
+        receipt.sampleRate = inputFormat.mSampleRate
+        receipt.micChannels = Int(inputFormat.mChannelsPerFrame)
+        receipt.transport = "rtp"
+        receipt.wireSampleRate = 44_100
+        receipt.senderReaped = false
+        guard let inputURL = options.input,
+              inputURL.deletingLastPathComponent() == options.receipt.deletingLastPathComponent() else {
+            throw Failure("synthetic input must belong to this private run")
+        }
+        let input = try privateInput(inputURL, maximumBytes: 22_000_000)
+        defer { try? input.close() }
+        let data = try input.readToEnd() ?? Data()
+        let duration = try waveDuration(data, quiet: options.phase == "mic-quiet")
+        try input.seek(toOffset: 0)
+        receipt.sourceDurationSeconds = duration
+        let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/ffmpeg")
+        var info = stat()
+        guard executable.resolvingSymlinksInPath().path == executable.path,
+              lstat(executable.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_uid == getuid(), info.st_mode & 0o022 == 0, info.st_mode & 0o100 != 0 else {
+            throw Failure("missing owned bundled RTP sender")
+        }
+        let progressURL = options.receipt.deletingPathExtension().appendingPathExtension("progress")
+        let progress = try openReceipt(progressURL)
+        defer { try? progress.close() }
+        let progressInput = try privateInput(progressURL, maximumBytes: 131_072, allowEmpty: true)
+        defer { try? progressInput.close() }
+        var observedProgress = SenderProgress()
+        let errors = try openReceipt(options.receipt.deletingPathExtension().appendingPathExtension("stderr"))
+        defer { try? errors.close() }
+        let child = Process()
+        child.executableURL = executable
+        child.environment = ["PATH": "/usr/bin:/bin", "LC_ALL": "C"]
+        child.arguments = ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-re", "-i", "pipe:0",
+                           "-map", "0:a:0", "-c:a", "pcm_s16be", "-ar", "44100", "-ac", "2",
+                           "-f", "rtp", "-payload_type", "10", "-sdp_file", "/dev/null", "-progress", "pipe:1",
+                           "rtp://127.0.0.1:10001?rtcpport=10002&pkt_size=1200&connect=1"]
+        child.standardInput = input
+        child.standardOutput = progress
+        child.standardError = errors
+        let interrupted = OSAllocatedUnfairLock(initialState: false)
+        let sources = signalSources { interrupted.withLock { $0 = true } }
+        defer { for source in sources { source.cancel() } }
+        var launched = false
+        var failure: Error?
+        do {
+            try ready(options)
+            try awaitStart(options, interrupted: { interrupted.withLock { $0 } })
+            try child.run()
+            launched = true
+            let beginning = ProcessInfo.processInfo.systemUptime
+            while child.isRunning, ProcessInfo.processInfo.systemUptime - beginning < duration + 5 {
+                try checkQuitRequest()
+                if interrupted.withLock({ $0 }) { throw Failure("interrupted") }
+                try observedProgress.read(progressInput)
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            guard !child.isRunning else { throw Failure("RTP sender timed out") }
+            receipt.senderElapsedSeconds = ProcessInfo.processInfo.systemUptime - beginning
+            try observedProgress.read(progressInput)
+        } catch { failure = error }
+        receipt.senderStartUptime = observedProgress.firstOutputUptime
+        receipt.senderEndUptime = observedProgress.lastOutputUptime
+        if launched {
+            if child.isRunning {
+                child.terminate()
+                let deadline = ProcessInfo.processInfo.systemUptime + 2
+                while child.isRunning, ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            }
+            if child.isRunning {
+                // Process retains ownership of this direct child; never signal a name or process group.
+                _ = kill(child.processIdentifier, SIGKILL)
+                let deadline = ProcessInfo.processInfo.systemUptime + 2
+                while child.isRunning, ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            }
+            receipt.senderReaped = !child.isRunning
+            receipt.resourcesReleased = !child.isRunning
+            if !child.isRunning {
+                child.waitUntilExit()
+                receipt.senderExitCode = child.terminationStatus
+            }
+        } else { receipt.senderReaped = true }
+        guard receipt.resourcesReleased else { throw Failure("RTP sender cleanup did not complete") }
+        if let failure { throw failure }
+        guard child.terminationReason == .exit, receipt.senderExitCode == 0 else { throw Failure("RTP sender failed") }
+        guard observedProgress.ended, observedProgress.pending.isEmpty,
+              !observedProgress.recordHasTimestamp, observedProgress.outputMicroseconds > 0 else {
+            throw Failure("RTP sender did not finish its bounded input")
+        }
+        let outputDuration = Double(observedProgress.outputMicroseconds) / 1_000_000
+        receipt.outputDurationSeconds = outputDuration
+        guard outputDuration >= duration, outputDuration <= duration + 0.1,
+              let elapsed = receipt.senderElapsedSeconds, elapsed >= duration - 1, elapsed <= duration + 5 else {
+            throw Failure("RTP sender duration or pacing mismatch")
+        }
+    }
+
+    private static func privateInput(_ url: URL, maximumBytes: Int, allowEmpty: Bool = false) throws -> FileHandle {
+        try validatePrivateParent(url)
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard descriptor >= 0 else { throw Failure("cannot open private synthetic input") }
+        let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_uid == getuid(), info.st_mode & 0o777 == 0o600, info.st_nlink == 1,
+              info.st_size >= (allowEmpty ? 0 : 1), info.st_size <= maximumBytes else {
+            try file.close()
+            throw Failure("synthetic input must be a bounded owner-only regular file")
+        }
+        return file
+    }
+
+    private static func waveDuration(_ data: Data, quiet: Bool) throws -> Double {
+        let bytes = [UInt8](data)
+        func number(_ offset: Int, _ length: Int) -> Int {
+            (0..<length).reduce(0) { $0 | Int(bytes[offset + $1]) << ($1 * 8) }
+        }
+        guard bytes.count >= 44, String(bytes: bytes[0..<4], encoding: .ascii) == "RIFF",
+              String(bytes: bytes[8..<12], encoding: .ascii) == "WAVE", number(4, 4) + 8 == bytes.count else {
+            throw Failure("synthetic input must be a complete PCM WAV")
+        }
+        var offset = 12
+        var validatedFormat = false
+        var audio: Range<Int>?
+        while offset + 8 <= bytes.count {
+            let name = String(bytes: bytes[offset..<offset + 4], encoding: .ascii)
+            let size = number(offset + 4, 4)
+            let begin = offset + 8
+            guard size <= bytes.count - begin else { throw Failure("invalid WAV chunk bound") }
+            if name == "fmt " {
+                guard !validatedFormat, size == 16, number(begin, 2) == 1, number(begin + 2, 2) == 2,
+                      number(begin + 4, 4) == 44_100, number(begin + 8, 4) == 176_400,
+                      number(begin + 12, 2) == 4, number(begin + 14, 2) == 16 else {
+                    throw Failure("synthetic WAV must use stereo PCM16 at 44100 Hz")
+                }
+                validatedFormat = true
+            } else if name == "data" {
+                guard audio == nil, size > 0, size % 4 == 0 else { throw Failure("invalid WAV audio chunk") }
+                audio = begin..<begin + size
+            }
+            offset = begin + size + size % 2
+        }
+        guard offset == bytes.count, validatedFormat, let audio else { throw Failure("incomplete WAV input") }
+        let duration = Double(audio.count) / 176_400
+        guard duration >= 1, duration <= 120 else { throw Failure("synthetic WAV duration exceeds bounds") }
+        if quiet, !bytes[audio].allSatisfy({ $0 == 0 }) { throw Failure("quiet microphone phase requires explicit zero PCM") }
+        return duration
+    }
+
+    private static func microphoneFormat(_ device: AudioObjectID) throws -> AudioStreamBasicDescription {
+        let value = try format(device, scope: kAudioObjectPropertyScopeInput)
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
+                                                mScope: kAudioObjectPropertyScopeOutput,
+                                                mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        try check(AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size), "read microphone output streams")
+        guard size == 0, value.mChannelsPerFrame == 2, value.mSampleRate == 48_000 else {
+            throw Failure("synthetic microphone must be input-only stereo at 48000 Hz")
+        }
+        return value
     }
 
     private static func device(uid: String) throws -> AudioObjectID {

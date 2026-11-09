@@ -172,9 +172,12 @@ class GuardTests(ScriptTests):
             guard['check_boundary'](self.root, package)
         external.write_text('import XCTest')
         product = self.root / 'Sources/JarvisApp/Fixture.swift'
-        product.write_text('let mode = environment["JARVIS_READINESS_MODE"]')
-        with self.assertRaisesRegex(ValueError, 'must remain external'):
-            guard['check_boundary'](self.root, package)
+        for source in ('let mode = environment["JARVIS_READINESS_MODE"]',
+                       'let helper = "scripts/release-input-fixture.py"',
+                       'let helper = "scripts/probe-release-ui.py"'):
+            product.write_text(source)
+            with self.assertRaisesRegex(ValueError, 'must remain external'):
+                guard['check_boundary'](self.root, package)
 
     def test_process_boundary_guard_rejects_context_import_and_transitive_dependency(self):
         guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))

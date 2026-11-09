@@ -18,6 +18,8 @@ from unittest import mock
 PROBE = runpy.run_path(str(Path(__file__).with_name("probe-release-ui.py")))
 ACCOUNT = runpy.run_path(str(Path(__file__).with_name("prepare-release-ui-account.py")))
 ACCOUNT_GLOBALS = ACCOUNT["prepare"].__globals__
+INPUT = runpy.run_path(str(Path(__file__).with_name("release-input-fixture.py")))
+INPUT_GLOBALS = INPUT["teardown"].__globals__
 
 
 class ProbeResultsTests(unittest.TestCase):
@@ -366,6 +368,76 @@ class TemporaryAccountSafetyTests(unittest.TestCase):
             self.assertEqual(str(error.exception), "account-creation")
 
 
+class InputFixtureOwnershipTests(unittest.TestCase):
+    header = "index type state uid name\n"
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name).resolve()
+        self.command = mock.Mock()
+        patcher = mock.patch.dict(INPUT_GLOBALS, BASE=self.directory, run=self.command)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.owned = self.header + "1 receiver on com.jarvis.release-input Jarvis Synthetic Microphone\n"
+
+    def claim(self):
+        self.command.return_value = self.header
+        INPUT["claim_receiver"]()
+        self.command.reset_mock()
+
+    def test_no_ownership_never_deletes_and_preexisting_uid_refuses_claim(self):
+        INPUT["teardown"]()
+        self.command.assert_not_called()
+        self.command.return_value = self.owned
+        with self.assertRaisesRegex(ValueError, "preexisting"):
+            INPUT["claim_receiver"]()
+        self.assertFalse((self.directory / "ownership.json").exists())
+        self.assertEqual(self.command.call_count, 1)
+
+    def test_cancelled_setup_without_success_receipt_cleans_exact_owned_receiver(self):
+        self.claim()
+        self.assertFalse((self.directory / "setup.json").exists())
+        self.assertEqual((self.directory / "ownership.json").stat().st_mode & 0o777, 0o600)
+        self.command.side_effect = [self.owned, "", self.header]
+        INPUT["teardown"]()
+        self.assertEqual(self.command.call_args_list[1].args[0],
+                         [str(INPUT["ROC"]), "device", "del", "--uid", INPUT["UID"]])
+        receipt = json.loads((self.directory / "teardown.json").read_text())
+        self.assertIs(receipt["receiverRemoved"], True)
+        self.assertIs(receipt["receiverAbsent"], True)
+
+    def test_already_absent_owned_receiver_requires_successful_inventory(self):
+        self.claim()
+        self.command.return_value = self.header
+        INPUT["teardown"]()
+        self.assertEqual(self.command.call_count, 2)
+        receipt = json.loads((self.directory / "teardown.json").read_text())
+        self.assertIs(receipt["receiverRemoved"], False)
+        self.assertIs(receipt["receiverAbsent"], True)
+
+    def test_changed_receiver_identity_or_inventory_failure_never_implies_absence(self):
+        self.claim()
+        for output in (self.owned.replace("Jarvis Synthetic Microphone", "Unrelated Receiver"),
+                       "not an inventory\n"):
+            self.command.reset_mock()
+            self.command.return_value = output
+            with self.assertRaises(ValueError):
+                INPUT["remove_owned_receiver"]()
+            self.assertEqual(self.command.call_count, 1)
+        self.command.side_effect = RuntimeError("RPC unavailable")
+        with self.assertRaisesRegex(RuntimeError, "RPC unavailable"):
+            INPUT["remove_owned_receiver"]()
+        self.assertFalse((self.directory / "teardown.json").exists())
+
+    def test_post_delete_presence_is_failure(self):
+        self.claim()
+        self.command.side_effect = [self.owned, "", self.owned]
+        with self.assertRaisesRegex(RuntimeError, "remains after cleanup"):
+            INPUT["teardown"]()
+        self.assertFalse((self.directory / "teardown.json").exists())
+
+
 class AudioRouteTests(unittest.TestCase):
     def receipt(self, phase="mic-only"):
         empty = {"frames": 192_000, "rms": 0.0, "micToneAmplitude": 0.0, "systemToneAmplitude": 0.0,
@@ -377,8 +449,9 @@ class AudioRouteTests(unittest.TestCase):
                 "phase": phase, "stage": "complete", "passed": True, "outputFrames": 0,
                 "rawMic": active if phase == "mic-only" else empty,
                 "globalTap": empty if phase == "mic-only" else active,
-                "micUID": "BlackHole16ch_UID", "systemUID": "BlackHole2ch_UID", "micChannels": 16,
-                "sampleRate": 48_000, "defaultsRestored": True, "resourcesReleased": True}
+                "micUID": "com.jarvis.release-input", "systemUID": "BlackHole2ch_UID", "micChannels": 2,
+                "sampleRate": 48_000, "defaultsRestored": True, "resourcesReleased": True,
+                "measurementStartUptime": 102.0, "measurementEndUptime": 106.0}
 
     def test_both_independent_phases_pass(self):
         for phase in ("mic-only", "system-only"):
@@ -386,7 +459,7 @@ class AudioRouteTests(unittest.TestCase):
 
     def test_bootstrap_requires_observed_acknowledgement_without_claiming_capture(self):
         receipt = self.receipt()
-        for key in ("micUID", "systemUID", "micChannels", "sampleRate"):
+        for key in ("micUID", "systemUID", "micChannels", "sampleRate", "measurementStartUptime", "measurementEndUptime"):
             del receipt[key]
         receipt.update(check="fixture-capture-consent-bootstrap", mode="authorize", phase="consent",
                        microphoneAuthorized=True, tapCreated=True, nativeConsentAcknowledged=True, captureGrantProven=False,
@@ -403,7 +476,7 @@ class AudioRouteTests(unittest.TestCase):
 
     def test_microphone_diagnostics_reject_malformed_status_or_clock(self):
         receipt = self.receipt()
-        for key in ("micUID", "systemUID", "micChannels", "sampleRate"):
+        for key in ("micUID", "systemUID", "micChannels", "sampleRate", "measurementStartUptime", "measurementEndUptime"):
             del receipt[key]
         receipt.update(check="fixture-capture-consent-bootstrap", mode="authorize", phase="consent", passed=False,
                        microphoneRequestUptime=100.0, microphoneFinishedUptime=130.0,
@@ -416,14 +489,49 @@ class AudioRouteTests(unittest.TestCase):
 
     def test_emitter_requires_matching_device_complete_tone_and_cleanup(self):
         receipt = self.receipt()
-        for key in ("micUID", "systemUID", "micChannels"):
+        for key in ("micUID", "systemUID", "micChannels", "measurementStartUptime", "measurementEndUptime"):
             del receipt[key]
         receipt.update(check="virtual-device-tone-emission", mode="emit", phase="system",
-                       emitterUID="BlackHole2ch_UID", outputFrames=384_000)
+                       emitterUID="BlackHole2ch_UID", outputFrames=384_000, senderStartUptime=100.0, senderEndUptime=108.0)
         PROBE["validate_audio_receipt"](receipt, "emit", "system")
         for key, value in (("outputFrames", 0), ("emitterUID", "BlackHole16ch_UID"), ("resourcesReleased", False)):
             with self.assertRaises(ValueError):
                 PROBE["validate_audio_receipt"]({**receipt, key: value}, "emit", "system")
+
+    def test_rtp_active_and_quiet_senders_require_transport_completion_and_exact_reaping(self):
+        receipt = self.receipt()
+        for key in ("micUID", "systemUID", "micChannels", "measurementStartUptime", "measurementEndUptime"):
+            del receipt[key]
+        receipt.update(check="synthetic-microphone-rtp", mode="emit", emitterUID="com.jarvis.release-input",
+                       micChannels=2, transport="rtp", wireSampleRate=44_100, outputDurationSeconds=8, sourceDurationSeconds=8,
+                       senderElapsedSeconds=8.1, senderExitCode=0, senderReaped=True,
+                       senderStartUptime=100.0, senderEndUptime=108.1)
+        for phase in ("mic", "mic-quiet"):
+            receipt["phase"] = phase
+            PROBE["validate_audio_receipt"](receipt, "emit", phase)
+            for key, value in (("outputDurationSeconds", 0), ("outputDurationSeconds", 8.2), ("outputDurationSeconds", float("nan")),
+                               ("sourceDurationSeconds", 7), ("senderExitCode", 1), ("senderExitCode", False),
+                               ("senderReaped", False), ("senderElapsedSeconds", 6.9), ("senderElapsedSeconds", 13.1), ("transport", "hal"),
+                               ("wireSampleRate", 48_000), ("outputFrames", 384_000)):
+                with self.assertRaises(ValueError):
+                    PROBE["validate_audio_receipt"]({**receipt, key: value}, "emit", phase)
+            for missing in ("senderReaped", "outputDurationSeconds", "senderExitCode"):
+                with self.assertRaises(ValueError):
+                    PROBE["validate_audio_receipt"]({k: v for k, v in receipt.items() if k != missing}, "emit", phase)
+
+    def test_measurement_requires_all_producers_to_cover_the_scored_interval(self):
+        for phase, producers in (("mic-only", ["mic"]), ("system-only", ["system", "mic-quiet"])):
+            capture = self.receipt(phase)
+            emitters = [{"phase": name, "senderStartUptime": 100.0, "senderEndUptime": 108.0} for name in producers]
+            PROBE["validate_audio_coverage"](capture, emitters)
+            with self.assertRaisesRegex(ValueError, "every active and quiet producer"):
+                PROBE["validate_audio_coverage"](capture, emitters[:-1])
+            for index in range(len(emitters)):
+                for key, value in (("senderStartUptime", 102.1), ("senderEndUptime", 105.9)):
+                    invalid = [dict(emitter) for emitter in emitters]
+                    invalid[index][key] = value
+                    with self.assertRaisesRegex(ValueError, "complete measurement"):
+                        PROBE["validate_audio_coverage"](capture, invalid)
 
     def test_phase_cancelled_leak_is_rejected_by_inactive_rms(self):
         for phase in ("mic-only", "system-only"):
@@ -439,7 +547,8 @@ class AudioRouteTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")
         for key, value in (("passed", False), ("defaultsRestored", False), ("resourcesReleased", False),
-                           ("micUID", "physical-device"), ("mode", "emit"), ("sampleRate", True)):
+                           ("micUID", "physical-device"), ("mode", "emit"), ("sampleRate", True),
+                           ("measurementStartUptime", float("nan")), ("measurementEndUptime", 101)):
             receipt = {**self.receipt(), key: value}
             with self.assertRaises(ValueError):
                 PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")

@@ -64,27 +64,51 @@ final class AudioFixtureTests: XCTestCase {
 
         for phase in ["mic", "system"] {
             try stage("\(phase)-route")
-            let capture = try await launch(["--capture", "\(phase)-only", "--mic-uid", "BlackHole16ch_UID",
-                                      "--system-uid", "BlackHole2ch_UID", "--receipt",
+            let start = directory.appendingPathComponent("\(phase)-route.start")
+            let capture = try await launch(["--capture", "\(phase)-only", "--mic-uid", "com.jarvis.release-input",
+                                      "--system-uid", "BlackHole2ch_UID", "--start", start.path, "--receipt",
                                       directory.appendingPathComponent("private-\(phase)-capture.json").path])
             try waitForReady(name: "\(phase)-capture", mode: "capture", phase: "\(phase)-only", stage: "ready", timeout: 15)
-            let emitter = try await launch(["--emit", phase, "--device-uid", phase == "mic" ? "BlackHole16ch_UID" : "BlackHole2ch_UID",
-                                      "--receipt", directory.appendingPathComponent("private-\(phase)-emit.json").path])
+            var quiet: NSRunningApplication?
+            if phase == "system" {
+                quiet = try await launch(["--emit", "mic-quiet", "--device-uid", "com.jarvis.release-input",
+                                          "--input", directory.appendingPathComponent("private-mic-silence.wav").path,
+                                          "--start", start.path, "--receipt", directory.appendingPathComponent("private-mic-quiet-emit.json").path])
+                try waitForReady(name: "mic-quiet-emit", mode: "emit", phase: "mic-quiet", stage: "ready", timeout: 5)
+            }
+            var emission = ["--emit", phase, "--device-uid", phase == "mic" ? "com.jarvis.release-input" : "BlackHole2ch_UID"]
+            if phase == "mic" {
+                emission += ["--input", directory.appendingPathComponent("private-mic-input.wav").path]
+            }
+            emission += ["--start", start.path, "--receipt", directory.appendingPathComponent("private-\(phase)-emit.json").path]
+            let emitter = try await launch(emission)
             try waitForReady(name: "\(phase)-emit", mode: "emit", phase: phase, stage: "ready", timeout: 5)
+            let pending = directory.appendingPathComponent("\(phase)-route.pending")
+            XCTAssertTrue(FileManager.default.createFile(atPath: pending.path, contents: Data("fixture-phase-start-v1\n".utf8),
+                                                         attributes: [.posixPermissions: 0o600]))
+            try FileManager.default.moveItem(at: pending, to: start)
             try waitForExit(capture, timeout: 15)
             try waitForExit(emitter, timeout: 10)
+            if let quiet { try waitForExit(quiet, timeout: 10) }
             XCTAssertTrue(NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty)
         }
         try stage("measurements-complete")
     }
 
     private func nextConsent(excluding accepted: Set<String>) throws -> (String, XCUIElement) {
+        let directory = try XCTUnwrap(evidence)
         var found: (String, XCUIElement)?
         let owners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent",
                       "com.apple.accessibility.universalAccessAuthWarn", "com.apple.AccessibilityUIServer"]
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             var matches: [(String, XCUIElement)] = []
             var discovery: [String: [String: Int]] = [:]
+            func recordDiscovery() {
+                do {
+                    try JSONSerialization.data(withJSONObject: discovery).write(
+                        to: directory.appendingPathComponent("audio-permission-discovery.json"), options: .atomic)
+                } catch { XCTFail("Could not record scalar fixture dialog discovery") }
+            }
             for owner in owners {
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: owner).count
                 var counts = ["running": running, "dialogs": 0, "containers": 0, "fixtureMatches": 0,
@@ -93,6 +117,9 @@ final class AudioFixtureTests: XCTestCase {
                               "allowPrefixButtons": 0, "okButtons": 0, "openSettingsButtons": 0]
                 discovery[owner] = counts
                 guard running > 0 else { continue }
+                counts["queryStartedMilliseconds"] = Int(ProcessInfo.processInfo.systemUptime * 1_000)
+                discovery[owner] = counts
+                recordDiscovery()
                 let app = XCUIApplication(bundleIdentifier: owner)
                 let dialogs = app.dialogs.allElementsBoundByIndex
                 let containers = dialogs.isEmpty ? app.windows.allElementsBoundByIndex : dialogs
@@ -123,23 +150,42 @@ final class AudioFixtureTests: XCTestCase {
                         matches.append((permission, buttons.element))
                     }
                 }
+                counts["queryFinishedMilliseconds"] = Int(ProcessInfo.processInfo.systemUptime * 1_000)
                 discovery[owner] = counts
+                recordDiscovery()
             }
-            do {
-                try JSONSerialization.data(withJSONObject: discovery).write(
-                    to: XCTUnwrap(self.evidence).appendingPathComponent("audio-permission-discovery.json"), options: .atomic)
-            } catch { XCTFail("Could not record scalar fixture dialog discovery") }
+            recordDiscovery()
             guard matches.count == 1 else { return false }
             found = matches[0]
             return true
         }, object: nil)
+        let waitStarted = ProcessInfo.processInfo.systemUptime
         let outcome = XCTWaiter.wait(for: [ready], timeout: 25)
+        recordPermissionWait(outcome, started: waitStarted, filename: "audio-permission-wait.json")
         if outcome != .completed {
             try PermissionOwnerEvidence.record(directory: XCTUnwrap(evidence), filename: "audio-permission-owner.json")
         }
         XCTAssertEqual(outcome, .completed,
                        "The fixture requires its own unique native Allow action")
         return try XCTUnwrap(found)
+    }
+
+    private func recordPermissionWait(_ result: XCTWaiter.Result, started: TimeInterval, filename: String) {
+        let outcome: String
+        switch result {
+        case .completed: outcome = "completed"
+        case .timedOut: outcome = "timed-out"
+        case .incorrectOrder: outcome = "incorrect-order"
+        case .invertedFulfillment: outcome = "inverted-fulfillment"
+        case .interrupted: outcome = "interrupted"
+        @unknown default: outcome = "unknown"
+        }
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
+        let receipt: [String: Any] = ["result": outcome, "elapsedSeconds": ProcessInfo.processInfo.systemUptime - started]
+        do {
+            try JSONSerialization.data(withJSONObject: receipt).write(
+                to: URL(fileURLWithPath: path).appendingPathComponent(filename), options: .atomic)
+        } catch { XCTFail("Could not record the scalar native-permission wait result") }
     }
 
     private func launch(_ arguments: [String]) async throws -> NSRunningApplication {

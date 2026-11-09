@@ -66,7 +66,7 @@ jobs:
           sw_vers
           /usr/bin/automationmodetool
           /usr/bin/automationmodetool | grep -F 'DOES NOT REQUIRE'
-      - name: Install the pinned virtual audio drivers
+      - name: Install the pinned system-playback driver
         run: |
           curl --fail --location --retry 3 \
             https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg \
@@ -75,13 +75,6 @@ jobs:
             57b540f27a3e29c37e310e01bee0fdfab76733087e47f997ef9dccf851400dcf \
             "$RUNNER_TEMP/BlackHole2ch.pkg" | shasum -a 256 -c -
           sudo installer -pkg "$RUNNER_TEMP/BlackHole2ch.pkg" -target /
-          curl --fail --location --retry 3 \
-            https://existential.audio/downloads/BlackHole16ch-0.7.1.pkg \
-            --output "$RUNNER_TEMP/BlackHole16ch.pkg"
-          printf '%s  %s\n' \
-            57254e2f76cd40db7f3f715238b1a2cb2bd08819d38abf4087f2944f71a3641a \
-            "$RUNNER_TEMP/BlackHole16ch.pkg" | shasum -a 256 -c -
-          sudo installer -pkg "$RUNNER_TEMP/BlackHole16ch.pkg" -target /
           sudo killall coreaudiod
           sleep 3
       - name: Verify the raw virtual-audio prerequisite
@@ -100,6 +93,8 @@ jobs:
               subprocess.run([os.environ['RUNNER_TEMP'] + '/AudioProbe', '--verify-blackhole'],
                              stdout=receipt, timeout=30, check=True)
           PY
+      - name: Prepare the pinned input-only microphone fixture
+        run: python3 scripts/release-input-fixture.py setup
       - name: Verify independent external microphone and system routes
         run: python3 scripts/probe-release-ui.py --audio-routes
       - name: Exercise ordinary launch and permissions without provider credentials
@@ -107,6 +102,9 @@ jobs:
         run: |
           python3 scripts/prepare-release-ui-account.py prepare
           python3 scripts/probe-release-ui.py "$HOME/Applications/Jarvis.app"
+      - name: Remove the owned synthetic microphone receiver
+        if: always()
+        run: python3 scripts/release-input-fixture.py teardown
       - name: Remove the temporary authorization account
         if: always()
         run: python3 scripts/prepare-release-ui-account.py cleanup
@@ -144,10 +142,17 @@ jobs:
             .jarvis/release-ui-probe/*/audio-consent-timing.json
             .jarvis/release-ui-probe/*/audio-permission-owner.json
             .jarvis/release-ui-probe/*/audio-permission-discovery.json
+            .jarvis/release-ui-probe/*/audio-permission-wait.json
+            .jarvis/release-ui-probe/*/permission-wait.json
             .jarvis/release-ui-probe/*/fixture-consents.json
             .jarvis/release-ui-probe/*/route-authorize.json
             .jarvis/release-ui-probe/*/route-mic-capture.json
             .jarvis/release-ui-probe/*/route-mic-emit.json
+            .jarvis/release-ui-probe/*/route-mic-quiet-emit.json
+            .jarvis/release-ui-probe/*/input-fixture.json
+            .jarvis/release-input-fixture/setup.json
+            .jarvis/release-input-fixture/ownership.json
+            .jarvis/release-input-fixture/teardown.json
             .jarvis/release-ui-probe/*/route-system-capture.json
             .jarvis/release-ui-probe/*/route-system-emit.json
             .jarvis/release-ui-probe/*/audio-summary.json

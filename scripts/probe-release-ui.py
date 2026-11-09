@@ -288,15 +288,19 @@ def validate_summary(summary, count=3):
 def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
     common = {"schemaVersion", "check", "mode", "phase", "stage", "passed", "outputFrames",
               "rawMic", "globalTap", "defaultsRestored", "resourcesReleased"}
+    rtp = mode == "emit" and phase in {"mic", "mic-quiet"}
     specific = {"authorize": {"microphoneAuthorized", "tapCreated", "ioStarted", "nativeConsentAcknowledged", "captureGrantProven"},
-                "capture": {"micUID", "systemUID", "sampleRate", "micChannels"},
-                "emit": {"emitterUID", "sampleRate"}}[mode]
+                "capture": {"micUID", "systemUID", "sampleRate", "micChannels", "measurementStartUptime", "measurementEndUptime"},
+                "emit": {"emitterUID", "sampleRate", "senderStartUptime", "senderEndUptime"}}[mode]
+    if rtp:
+        specific |= {"micChannels", "transport", "wireSampleRate", "outputDurationSeconds", "sourceDurationSeconds",
+                     "senderElapsedSeconds", "senderExitCode", "senderReaped"}
     timing = {"microphoneRequestUptime", "microphoneFinishedUptime", "microphoneAuthorizationStatus",
               "microphoneCallbackReceived", "microphoneCompletionUptime"} if mode == "authorize" else set()
     io_timing = {"ioStartRequestedUptime", "ioStartReturnedUptime"} if mode == "authorize" else set()
     failure_stages = {"authorizationFailureStage"} if mode == "authorize" else set()
     checks = {"authorize": "fixture-capture-consent-bootstrap", "capture": "production-aggregate-route-isolation",
-              "emit": "virtual-device-tone-emission"}
+              "emit": "synthetic-microphone-rtp" if rtp else "virtual-device-tone-emission"}
     if (not isinstance(receipt, dict) or not common <= receipt.keys()
             or receipt.keys() - common - specific - timing - io_timing - failure_stages - {"error"}
             or type(receipt["schemaVersion"]) is not int or receipt["schemaVersion"] != 1
@@ -321,12 +325,31 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
     if "sampleRate" in receipt and (type(receipt["sampleRate"]) not in (int, float)
                                     or not math.isfinite(receipt["sampleRate"]) or not 8_000 <= receipt["sampleRate"] <= 192_000):
         raise ValueError("Invalid audio sample rate")
-    if "micChannels" in receipt and (type(receipt["micChannels"]) is not int or receipt["micChannels"] != 16):
+    if "micChannels" in receipt and (type(receipt["micChannels"]) is not int or receipt["micChannels"] != 2):
         raise ValueError("Unexpected microphone fixture format")
-    identities = {"micUID": "BlackHole16ch_UID", "systemUID": "BlackHole2ch_UID",
-                  "emitterUID": "BlackHole16ch_UID" if phase == "mic" else "BlackHole2ch_UID"}
+    if "sampleRate" in receipt and receipt["sampleRate"] != 48_000:
+        raise ValueError("Unexpected hosted audio sample rate")
+    identities = {"micUID": "com.jarvis.release-input", "systemUID": "BlackHole2ch_UID",
+                  "emitterUID": "com.jarvis.release-input" if rtp else "BlackHole2ch_UID"}
     if any(key in receipt and receipt[key] != value for key, value in identities.items()):
         raise ValueError("Audio fixture route identity mismatch")
+    if rtp:
+        for key in {"outputDurationSeconds", "sourceDurationSeconds", "senderElapsedSeconds"} & receipt.keys():
+            if type(receipt[key]) not in (int, float) or not math.isfinite(receipt[key]) or not 0 <= receipt[key] <= 60:
+                raise ValueError("Invalid synthetic microphone duration")
+        if ("transport" in receipt and receipt["transport"] != "rtp"
+                or "wireSampleRate" in receipt and (type(receipt["wireSampleRate"]) is not int or receipt["wireSampleRate"] != 44_100)
+                or "senderReaped" in receipt and type(receipt["senderReaped"]) is not bool
+                or "senderExitCode" in receipt and (type(receipt["senderExitCode"]) is not int or not -128 <= receipt["senderExitCode"] <= 255)):
+            raise ValueError("Invalid synthetic microphone transport evidence")
+    interval = {"capture": ("measurementStartUptime", "measurementEndUptime"),
+                "emit": ("senderStartUptime", "senderEndUptime")}.get(mode)
+    if interval:
+        for key in set(interval) & receipt.keys():
+            if type(receipt[key]) not in (int, float) or not math.isfinite(receipt[key]) or not 0 < receipt[key] < 10_000_000_000:
+                raise ValueError("Invalid audio interval time")
+        if interval[1] in receipt and (interval[0] not in receipt or receipt[interval[1]] <= receipt[interval[0]]):
+            raise ValueError("Invalid audio interval order")
     if "error" in receipt and (not isinstance(receipt["error"], str) or len(receipt["error"]) > 1_024):
         raise ValueError("Invalid audio failure metadata")
     if timing & receipt.keys():
@@ -369,7 +392,12 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
                 or receipt.get("ioStartRequestedUptime", 0) < receipt.get("microphoneFinishedUptime", float("inf"))):
             raise ValueError("Fixture consent bootstrap lacks observed acknowledgement")
     elif mode == "emit":
-        if receipt["outputFrames"] < 8 * receipt["sampleRate"]:
+        if rtp:
+            if (receipt["outputFrames"] != 0 or receipt["sourceDurationSeconds"] != 8
+                    or not 8 <= receipt["outputDurationSeconds"] <= 8.1 or not 7 <= receipt["senderElapsedSeconds"] <= 13
+                    or receipt["senderExitCode"] != 0 or receipt["senderReaped"] is not True):
+                raise ValueError("Synthetic microphone sender did not complete and reap its finite input")
+        elif receipt["outputFrames"] < 8 * receipt["sampleRate"]:
             raise ValueError("Emitter did not complete its finite tone")
     else:
         mic, tap = receipt["rawMic"], receipt["globalTap"]
@@ -386,6 +414,16 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
                 or mic[other + "Amplitude"] >= 0.001 or tap[other + "Amplitude"] >= 0.001):
             raise ValueError("Synthetic audio routes are not independent")
     return safe
+
+
+def validate_audio_coverage(capture, emitters):
+    phases = {"mic-only": {"mic"}, "system-only": {"system", "mic-quiet"}}[capture["phase"]]
+    if len(emitters) != len(phases) or {emitter["phase"] for emitter in emitters} != phases:
+        raise ValueError("Measurement requires every active and quiet producer")
+    for emitter in emitters:
+        if (emitter["senderStartUptime"] > capture["measurementStartUptime"]
+                or emitter["senderEndUptime"] < capture["measurementEndUptime"]):
+            raise ValueError("Synthetic producer did not cover the complete measurement")
 
 
 def build_ui(evidence, architecture, environment):
@@ -425,12 +463,15 @@ def audio_routes(evidence, architecture):
          str(evidence / "module-cache"), "-framework", "CoreAudio", "-framework", "AVFoundation", "-framework", "AppKit",
          str(ROOT / "Tests/ReleaseReadiness/AudioRouteProbe.swift"), "-o", str(executable)],
         timeout=120, log=evidence / "audio-build.log")
+    run([sys.executable, str(ROOT / "scripts/release-input-fixture.py"), "prepare", "--app", str(fixture),
+         "--directory", str(evidence)], timeout=30, log=evidence / "input-prepare.log")
     run(["/usr/bin/codesign", "--force", "--sign", "-", str(fixture)], timeout=30, log=evidence / "audio-sign.log")
     run(["/usr/bin/codesign", "--verify", "--strict", str(fixture)], timeout=30)
     derived, configured = build_ui(evidence, architecture, {"JARVIS_READINESS_AUDIO_FIXTURE": str(fixture)})
     result = evidence / "result.xcresult"
     phases = [("authorize", "consent", "authorize"), ("capture", "mic-only", "mic-capture"),
-              ("emit", "mic", "mic-emit"), ("capture", "system-only", "system-capture"), ("emit", "system", "system-emit")]
+              ("emit", "mic", "mic-emit"), ("capture", "system-only", "system-capture"),
+              ("emit", "mic-quiet", "mic-quiet-emit"), ("emit", "system", "system-emit")]
     try:
         run_ui(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", str(configured),
                 "-destination", f"platform=macOS,arch={architecture}", "-resultBundlePath", str(result),
@@ -448,8 +489,11 @@ def audio_routes(evidence, architecture):
                     print("Audio fixture receipt absent or malformed: " + name, flush=True)
     summary = json.loads(run(["/usr/bin/xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result)], timeout=30))
     validate_summary(summary, count=1)
+    receipts = {}
     for mode, phase, name in phases:
-        validate_audio_receipt(json.loads((evidence / f"private-{name}.json").read_text()), mode, phase)
+        receipts[name] = validate_audio_receipt(json.loads((evidence / f"private-{name}.json").read_text()), mode, phase)
+    validate_audio_coverage(receipts["mic-capture"], [receipts["mic-emit"]])
+    validate_audio_coverage(receipts["system-capture"], [receipts["system-emit"], receipts["mic-quiet-emit"]])
     observed = json.loads((evidence / "fixture-consents.json").read_text())
     if (not isinstance(observed, dict) or any(type(value) is not bool for value in observed.values())
             or observed != {"microphoneAllowObserved": True, "systemAudioAllowObserved": True, "captureGrantProven": False}):
