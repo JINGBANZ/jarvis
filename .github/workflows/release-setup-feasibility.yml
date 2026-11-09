@@ -1,0 +1,120 @@
+name: Release ready check — setup feasibility
+
+on:
+  push:
+    branches: [feat/release-readiness]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-setup-feasibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15, macos-26-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify the public signed setup fixture
+        run: |
+          umask 077
+          mkdir -p .jarvis/release-ui-probe .build/setup-fixture
+          curl --fail --location --retry 3 \
+            https://github.com/JINGBANZ/jarvis/releases/download/v0.5.14/Jarvis.dmg \
+            --output .build/setup-fixture/Jarvis.dmg
+          printf '%s  %s\n' \
+            eb2f8ebc0f78ff4d6b09773e9052652eae74ffcc9d4bebf885a8c62b9b38416c \
+            .build/setup-fixture/Jarvis.dmg | shasum -a 256 -c -
+          python3 -m venv "$RUNNER_TEMP/release-layout-venv"
+          "$RUNNER_TEMP/release-layout-venv/bin/pip" install -r scripts/requirements-release.txt
+          DMGBUILD_PYTHON="$RUNNER_TEMP/release-layout-venv/bin/python" \
+            ./scripts/verify-release.sh .build/setup-fixture/Jarvis.dmg v0.5.14
+      - name: Install the normal app outside the checkout
+        run: |
+          set -euo pipefail
+          fixture_mount="$(mktemp -d "$RUNNER_TEMP/jarvis-setup.XXXXXX")"
+          mounted=false
+          cleanup() {
+            if [[ "$mounted" == true ]]; then hdiutil detach "$fixture_mount" || exit 1; fi
+            rmdir "$fixture_mount"
+          }
+          trap cleanup EXIT
+          hdiutil attach .build/setup-fixture/Jarvis.dmg -readonly -nobrowse -mountpoint "$fixture_mount"
+          mounted=true
+          test ! -e "$HOME/Applications/Jarvis.app"
+          mkdir -p "$HOME/Applications"
+          ditto "$fixture_mount/Jarvis.app" "$HOME/Applications/Jarvis.app"
+          codesign --verify --strict --deep "$HOME/Applications/Jarvis.app"
+          python3 - <<'PY'
+          import json, platform
+          from pathlib import Path
+          Path('.jarvis/release-ui-probe/fixture.json').write_text(json.dumps({
+              'phase': 'setup-feasibility', 'version': '0.5.14',
+              'sha256': 'eb2f8ebc0f78ff4d6b09773e9052652eae74ffcc9d4bebf885a8c62b9b38416c',
+              'architecture': platform.machine(), 'macOS': platform.mac_ver()[0],
+              'releaseCandidateProven': False,
+          }, indent=2) + '\n')
+          PY
+      - name: Inspect supported UI automation setup
+        run: |
+          sw_vers
+          /usr/bin/automationmodetool
+          /usr/bin/automationmodetool | grep -F 'DOES NOT REQUIRE'
+      - name: Install the pinned virtual audio driver
+        run: |
+          curl --fail --location --retry 3 \
+            https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg \
+            --output "$RUNNER_TEMP/BlackHole2ch.pkg"
+          printf '%s  %s\n' \
+            57b540f27a3e29c37e310e01bee0fdfab76733087e47f997ef9dccf851400dcf \
+            "$RUNNER_TEMP/BlackHole2ch.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "$RUNNER_TEMP/BlackHole2ch.pkg" -target /
+          sudo killall coreaudiod
+          sleep 3
+      - name: Verify the raw virtual-audio prerequisite
+        run: |
+          umask 077
+          swiftc -swift-version 6 -strict-concurrency=complete -warnings-as-errors \
+            -parse-as-library -module-cache-path "$RUNNER_TEMP/audio-probe-module-cache" \
+            -framework CoreAudio Tests/ReleaseReadiness/AudioProbe.swift \
+            -o "$RUNNER_TEMP/AudioProbe"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          with Path('.jarvis/release-ui-probe/audio-probe.json').open('w') as receipt:
+              subprocess.run([os.environ['RUNNER_TEMP'] + '/AudioProbe', '--verify-blackhole'],
+                             stdout=receipt, timeout=30, check=True)
+          PY
+      - name: Exercise ordinary launch and permissions without provider credentials
+        run: |
+          python3 scripts/prepare-release-ui-account.py prepare
+          python3 scripts/probe-release-ui.py "$HOME/Applications/Jarvis.app"
+      - name: Remove the temporary authorization account
+        if: always()
+        run: python3 scripts/prepare-release-ui-account.py cleanup
+      - name: Retain only scalar setup evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-setup-feasibility-${{ matrix.os }}
+          path: |
+            .jarvis/release-ui-probe/fixture.json
+            .jarvis/release-ui-probe/audio-probe.json
+            .jarvis/release-ui-probe/*/stage.json
+            .jarvis/release-ui-probe/*/ui-stage.json
+            .jarvis/release-ui-probe/*/authorization.json
+            .jarvis/release-ui-probe/*/authorization-process.json
+            .jarvis/release-ui-probe/*/authorization-owner.json
+            .jarvis/release-ui-probe/*/cleanup.json
+            .jarvis/release-ui-probe/*/summary.json
+            .jarvis/release-ui-probe/*/probe.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 3

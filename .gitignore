@@ -6,6 +6,9 @@ wiki/build_html.py
 .build/
 *.app
 *.xcodeproj
+!Tests/ReleaseReadiness/ReleaseReadiness.xcodeproj/
+Tests/ReleaseReadiness/ReleaseReadiness.xcodeproj/xcuserdata/
+Tests/ReleaseReadiness/ReleaseReadiness.xcodeproj/project.xcworkspace/
 .DS_Store
 secrets.env
 .env

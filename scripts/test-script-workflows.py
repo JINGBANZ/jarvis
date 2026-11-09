@@ -157,6 +157,24 @@ print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
 
 
 class GuardTests(ScriptTests):
+    def test_release_ui_boundary_rejects_product_imports_and_embedded_hooks(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []} for name in guard['PRODUCTION_TARGETS']]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        external = self.root / 'Tests/ReleaseReadiness/Fixture.swift'
+        external.parent.mkdir(parents=True)
+        external.write_text('import XCTest')
+        guard['check_boundary'](self.root, package)
+        external.write_text('@testable import JarvisCore')
+        with self.assertRaisesRegex(ValueError, 'cannot import product modules'):
+            guard['check_boundary'](self.root, package)
+        external.write_text('import XCTest')
+        product = self.root / 'Sources/JarvisApp/Fixture.swift'
+        product.write_text('let mode = environment["JARVIS_READINESS_MODE"]')
+        with self.assertRaisesRegex(ValueError, 'must remain external'):
+            guard['check_boundary'](self.root, package)
+
     def test_process_boundary_guard_rejects_context_import_and_transitive_dependency(self):
         guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
         package = {'targets': [{'name': name, 'dependencies': []}

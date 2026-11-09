@@ -96,6 +96,7 @@ Product modules expose the interfaces exercised by the harness and do not import
 | `Sources/JarvisApp/Testing/` | Debug-only signed-app adapters and explicit native harness modes requiring app composition or macOS frameworks. |
 | `Tests/JarvisScenarioHarnessTests/` | Offline verification of the shared harness; included in the Gate with synthetic dependencies. |
 | `Tests/JarvisLiveTests/` | Real-provider and signed-app test entry points, the suite catalog, scenarios, and fixtures; excluded from Gate execution. |
+| `Tests/ReleaseReadiness/` | External XCTest UI runner, native permission-form automation, and standalone synthetic OS-audio probes for the installed production app. It imports no Jarvis product module and is not linked into the shipped app. |
 
 `EvaluationSuiteRunner` in
 [`Execution/`](../Tests/Support/ScenarioHarness/Execution/EvaluationSuiteRunner.swift) owns provider
@@ -111,6 +112,13 @@ so native helpers and other test executables can use it without importing model 
 [`check-process-launching.py`](../scripts/check-process-launching.py) enforces these dependency and
 source-placement rules; its negative fixtures run in the Gate. The debug compilation guard keeps
 scenario machinery and ownership reporting out of release execution.
+
+The external `ReleaseReadiness` target is an Xcode UI-test boundary because it drives the ordinary
+installed app through Accessibility and native consent controls. Its setup-feasibility workflow
+uses a checksum-pinned public signed release on disposable hosted Macs, without provider credentials.
+Only allowlisted scalar setup receipts are uploaded; private XCTest results and UI logs stay on the
+disposable runner. This setup check does not establish a full coaching journey or final candidate
+readiness. It does not replace the existing source or release checks.
 
 An ordinary new eval adds scenarios and a manifest entry under
 [`Scenarios/`](../Tests/JarvisLiveTests/Scenarios), using an existing executor and acceptance contract.
