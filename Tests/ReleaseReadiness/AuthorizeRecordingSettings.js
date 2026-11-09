@@ -8,7 +8,9 @@ function run() {
         uiElementsEnabled: false, recognizedHeading: false, recognizedText: false,
         focusAvailable: false, focusIsSecureField: false, focusOwnerIsAuthenticationAgent: false,
         focusOwnerIsSystemSettings: false, focusOwnerIsSecurityPrivacyExtension: false,
-        focusOwnerPID: 0, focusError: 0
+        focusOwnerPID: 0, focusError: 0, usernameOwnerPID: 0,
+        usernameOwnerIsAuthenticationAgent: false, usernameOwnerIsSystemSettings: false,
+        usernameOwnerIsSecurityPrivacyExtension: false
     };
     const receipt = authorized => JSON.stringify({authorized, stage, diagnostics});
     let lastProgress = null;
@@ -237,9 +239,21 @@ function run() {
         }
         function fill(field, value, secure) {
             revalidate();
+            stage = "field-owner-query";
+            publish();
+            const identifier = pid(field);
+            const name = secure ? null : owner(identifier);
+            if (!secure) {
+                Object.assign(diagnostics, {
+                    usernameOwnerPID: identifier,
+                    usernameOwnerIsAuthenticationAgent: name === "com.apple.LocalAuthentication.UIAgent",
+                    usernameOwnerIsSystemSettings: name === "com.apple.systempreferences",
+                    usernameOwnerIsSecurityPrivacyExtension: name === "com.apple.settings.PrivacySecurity.extension"
+                });
+            }
             stage = "field-owner";
             publish();
-            if (pid(field) !== form.pid) { fail(); }
+            if (secure ? identifier !== form.pid : name === null) { fail(); }
             stage = "focus-read";
             publish();
             if (!same(attribute(system, "AXFocusedUIElement"), field)) {

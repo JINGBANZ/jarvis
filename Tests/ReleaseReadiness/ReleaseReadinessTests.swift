@@ -14,9 +14,17 @@ final class ReleaseReadinessTests: XCTestCase {
         if let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] {
             let location = issue.sourceCodeContext.location
             let ownSource = location?.fileURL.lastPathComponent == "ReleaseReadinessTests.swift"
+            let knownConsentOwners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent",
+                                      "com.apple.accessibility.universalAccessAuthWarn"]
+            let description = issue.compactDescription
+            let missingConsentOwner = description.contains("could not be found")
+                && knownConsentOwners.contains(where: description.contains)
             let receipt: [String: Any] = ["issueType": issue.type.rawValue,
                                           "sourceIsHarness": ownSource,
-                                          "line": ownSource ? location?.lineNumber ?? 0 : 0]
+                                          "line": ownSource ? location?.lineNumber ?? 0 : 0,
+                                          "missingKnownConsentOwner": missingConsentOwner,
+                                          "executionTimeExceeded": description.contains("execution time allowance"),
+                                          "internalInconsistency": description.contains("NSInternalInconsistencyException")]
             do {
                 let data = try JSONSerialization.data(withJSONObject: receipt)
                 try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("ui-issue.json"), options: .atomic)
@@ -362,8 +370,18 @@ final class ReleaseReadinessTests: XCTestCase {
             return
         }
         do {
-            let data = try JSONSerialization.data(withJSONObject: ["stage": name, "appState": app.state.rawValue])
+            let receipt: [String: Any] = ["stage": name, "appState": app.state.rawValue,
+                                         "uptime": ProcessInfo.processInfo.systemUptime]
+            let data = try JSONSerialization.data(withJSONObject: receipt)
             try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("ui-stage.json"), options: .atomic)
+            let progressURL = URL(fileURLWithPath: path).appendingPathComponent("ui-progress.json")
+            var progress: [[String: Any]] = []
+            if FileManager.default.fileExists(atPath: progressURL.path) {
+                progress = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: progressURL)) as? [[String: Any]])
+            }
+            guard progress.count < 64 else { throw ReadinessFailure("The bounded scalar UI progress record is full") }
+            progress.append(receipt)
+            try JSONSerialization.data(withJSONObject: progress).write(to: progressURL, options: .atomic)
         } catch {
             XCTFail("Could not record the scalar UI stage")
         }

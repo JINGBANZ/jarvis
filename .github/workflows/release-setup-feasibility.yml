@@ -111,9 +111,11 @@ jobs:
             .jarvis/release-ui-probe/*/ui-stage.json
             .jarvis/release-ui-probe/*/ui-issue.json
             .jarvis/release-ui-probe/*/ui-command.json
+            .jarvis/release-ui-probe/*/ui-progress.json
             .jarvis/release-ui-probe/*/authorization.json
             .jarvis/release-ui-probe/*/authorization-process.json
             .jarvis/release-ui-probe/*/authorization-owner.json
+            .jarvis/release-ui-probe/*/authorization-username-owner.json
             .jarvis/release-ui-probe/*/cleanup.json
             .jarvis/release-ui-probe/*/summary.json
             .jarvis/release-ui-probe/*/probe.json

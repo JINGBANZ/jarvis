@@ -51,8 +51,11 @@ class ProbeResultsTests(unittest.TestCase):
                 self.assertGreaterEqual(receipt['observedCount'], 2)
                 self.assertIs(receipt['forcedCleanup'], True)
                 self.assertIs(receipt['allOwnedProcessesAbsent'], True)
-                self.assertEqual(json.loads((directory / 'ui-command.json').read_text()),
-                                 {'returnCode': None, 'timedOut': True})
+                command_receipt = json.loads((directory / 'ui-command.json').read_text())
+                self.assertIsNone(command_receipt['returnCode'])
+                self.assertIs(command_receipt['timedOut'], True)
+                self.assertGreater(command_receipt['startedUptime'], 0)
+                self.assertGreaterEqual(command_receipt['elapsedSeconds'], 1)
                 self.assertIsNone(unrelated.poll())
             finally:
                 unrelated.terminate()
@@ -102,6 +105,8 @@ class NativeAuthorizationTests(unittest.TestCase):
             "focusOwnerIsAuthenticationAgent": True, "focusOwnerIsSystemSettings": False,
             "focusOwnerIsSecurityPrivacyExtension": False,
             "focusOwnerPID": 12345, "focusError": 0,
+            "usernameOwnerPID": 12345, "usernameOwnerIsAuthenticationAgent": True,
+            "usernameOwnerIsSystemSettings": False, "usernameOwnerIsSecurityPrivacyExtension": False,
         }}
 
     def test_only_allowlisted_scalar_receipts_are_accepted(self):
@@ -121,6 +126,10 @@ class NativeAuthorizationTests(unittest.TestCase):
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": 2_147_483_648}},
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": True}},
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": 0}},
+                            {"diagnostics": {**receipt["diagnostics"], "usernameOwnerPID": 0}},
+                            {"diagnostics": {**receipt["diagnostics"], "usernameOwnerPID": True}},
+                            {"diagnostics": {**receipt["diagnostics"], "usernameOwnerIsAuthenticationAgent": False}},
+                            {"diagnostics": {**receipt["diagnostics"], "usernameOwnerIsSystemSettings": True}},
                             {"diagnostics": {**receipt["diagnostics"], "focusError": -1}},
                             {"diagnostics": {**receipt["diagnostics"], "uiElementsEnabled": False}}):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
@@ -131,6 +140,14 @@ class NativeAuthorizationTests(unittest.TestCase):
             with self.subTest(owner=owner):
                 receipt = self.receipt()
                 receipt["diagnostics"].update({key: key == owner for key in PROBE["FOCUS_OWNER_FLAGS"]})
+                self.assertEqual(PROBE["validate_authorization_receipt"](json.dumps(receipt)), receipt)
+
+    def test_username_owner_is_independently_verified_across_native_processes(self):
+        for owner in PROBE["USERNAME_OWNER_FLAGS"]:
+            with self.subTest(owner=owner):
+                receipt = self.receipt()
+                receipt["diagnostics"]["usernameOwnerPID"] = 54321
+                receipt["diagnostics"].update({key: key == owner for key in PROBE["USERNAME_OWNER_FLAGS"]})
                 self.assertEqual(PROBE["validate_authorization_receipt"](json.dumps(receipt)), receipt)
 
     def test_native_operation_stages_preserve_failed_verdict(self):

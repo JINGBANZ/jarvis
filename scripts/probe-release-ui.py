@@ -20,13 +20,14 @@ ROOT = Path(__file__).resolve().parent.parent
 AUTHORIZATION_STAGES = {
     "input", "accessibility", "owner", "form", "fields", "fill", "submit", "dismiss", "complete",
     "revalidate-owner", "revalidate-form", "revalidate-controls", "field-owner", "focus-read",
-    "focus-settable", "focus-set", "focus-press", "focus-verify",
+    "focus-settable", "focus-set", "focus-press", "focus-verify", "field-owner-query",
 }
 AUTHORIZATION_COUNTS = {"processCount", "formCount", "usernameCount", "secureCount", "modifySettingsCount"}
 AUTHORIZATION_FLAGS = {"uiElementsEnabled", "recognizedHeading", "recognizedText"}
 FOCUS_OWNER_FLAGS = {"focusOwnerIsAuthenticationAgent", "focusOwnerIsSystemSettings", "focusOwnerIsSecurityPrivacyExtension"}
 FOCUS_FLAGS = {"focusAvailable", "focusIsSecureField"} | FOCUS_OWNER_FLAGS
-FOCUS_PIDS = {"focusOwnerPID"}
+USERNAME_OWNER_FLAGS = {"usernameOwnerIsAuthenticationAgent", "usernameOwnerIsSystemSettings", "usernameOwnerIsSecurityPrivacyExtension"}
+FOCUS_PIDS = {"focusOwnerPID", "usernameOwnerPID"}
 FOCUS_ERRORS = {0, *range(-25214, -25199)}
 
 
@@ -41,12 +42,12 @@ def validate_authorization_receipt(output):
             or not isinstance(receipt["diagnostics"], dict)):
         raise ValueError("Invalid native-authorization receipt")
     diagnostics = receipt["diagnostics"]
-    if set(diagnostics) != (AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS | FOCUS_FLAGS | FOCUS_PIDS | {"focusError"}):
+    if set(diagnostics) != (AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS | FOCUS_FLAGS | USERNAME_OWNER_FLAGS | FOCUS_PIDS | {"focusError"}):
         raise ValueError("Invalid native-authorization diagnostics")
     if any(type(diagnostics[key]) is not int or not 0 <= diagnostics[key] <= 256
            for key in AUTHORIZATION_COUNTS):
         raise ValueError("Invalid native-authorization counts")
-    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS | FOCUS_FLAGS):
+    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS | FOCUS_FLAGS | USERNAME_OWNER_FLAGS):
         raise ValueError("Invalid native-authorization flags")
     if (any(type(diagnostics[key]) is not int or not 0 <= diagnostics[key] <= 2_147_483_647 for key in FOCUS_PIDS)
             or type(diagnostics["focusError"]) is not int or diagnostics["focusError"] not in FOCUS_ERRORS):
@@ -57,8 +58,9 @@ def validate_authorization_receipt(output):
             not all(diagnostics[key] for key in AUTHORIZATION_FLAGS)
             or any(diagnostics[key] != 1 for key in AUTHORIZATION_COUNTS)
             or not diagnostics["focusAvailable"] or not diagnostics["focusIsSecureField"]
-            or diagnostics["focusOwnerPID"] == 0
-            or sum(diagnostics[key] for key in FOCUS_OWNER_FLAGS) != 1):
+            or diagnostics["focusOwnerPID"] == 0 or diagnostics["usernameOwnerPID"] == 0
+            or sum(diagnostics[key] for key in FOCUS_OWNER_FLAGS) != 1
+            or sum(diagnostics[key] for key in USERNAME_OWNER_FLAGS) != 1):
         raise ValueError("Native-authorization completion lacks form proof")
     return receipt
 
@@ -131,13 +133,14 @@ def collect_authorization(process, evidence, *, required):
     (evidence / "authorization.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print("Native authorization: " + json.dumps(receipt, sort_keys=True), flush=True)
     describe_focus_owner(receipt["diagnostics"]["focusOwnerPID"], evidence)
+    describe_focus_owner(receipt["diagnostics"]["usernameOwnerPID"], evidence, filename="authorization-username-owner.json")
     if required and timed_out:
         raise ValueError("Native-authorization helper did not finish")
     if required and (process.returncode != 0 or not receipt["authorized"]):
         raise ValueError("Native recording authorization failed at stage " + receipt["stage"])
 
 
-def describe_focus_owner(pid, evidence):
+def describe_focus_owner(pid, evidence, *, filename="authorization-owner.json"):
     if pid == 0:
         return
     identity = {"pid": pid, "stage": "process", "appleSigned": False,
@@ -147,7 +150,9 @@ def describe_focus_owner(pid, evidence):
                                 capture_output=True, text=True, timeout=5, check=True)
         path = Path(result.stdout.strip()).resolve(strict=True)
         identity["stage"] = "path"
-        if not path.is_relative_to("/System/Library") or not path.is_file() or path.stat().st_uid != 0:
+        if (not any(path.is_relative_to(root) for root in
+                    ("/System/Library", "/System/Applications/System Settings.app"))
+                or not path.is_file() or path.stat().st_uid != 0):
             raise ValueError
         identity.update(executable=str(path), stage="metadata")
         for bundle in path.parents:
@@ -164,7 +169,7 @@ def describe_focus_owner(pid, evidence):
         identity.update(appleSigned=True, stage="complete")
     except (OSError, ValueError, subprocess.SubprocessError, plistlib.InvalidFileException):
         pass
-    (evidence / "authorization-owner.json").write_text(json.dumps(identity, indent=2) + "\n")
+    (evidence / filename).write_text(json.dumps(identity, indent=2) + "\n")
     print("Native authorization owner: " + json.dumps(identity, sort_keys=True), flush=True)
 
 
@@ -225,7 +230,8 @@ def run_ui(arguments, *, timeout, log, roots, evidence):
             if process.returncode:
                 raise ValueError("Installed-app UI cases failed; raw output remains private")
     finally:
-        status = {"returnCode": process.poll() if process is not None else None, "timedOut": timed_out}
+        status = {"returnCode": process.poll() if process is not None else None, "timedOut": timed_out,
+                  "startedUptime": deadline - timeout, "elapsedSeconds": round(time.monotonic() - (deadline - timeout), 3)}
         for identity in owned_processes(roots, ownership):
             observed[identity["pid"]] = identity
         settle = time.monotonic() + 5
