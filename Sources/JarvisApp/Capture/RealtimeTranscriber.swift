@@ -329,12 +329,16 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             lock.lock()
             guard !stopped else { lock.unlock(); return }
             jarvisManagedSpeechBuffer?.speechEnded()
-            jarvisManagedTurnCoordinator?.recordTurn(
+            let accepted = jarvisManagedTurnCoordinator?.recordTurn(
                 startedAt: max(0, startedAt - sessionStart),
                 endedAt: max(0, endedAt - sessionStart),
                 committedThroughAt: max(0, commitAt - sessionStart),
-                throughSequenceNumber: throughSequenceNumber)
+                throughSequenceNumber: throughSequenceNumber) ?? false
             lock.unlock()
+            if !accepted {
+                transcriptionLifecycle.discardUnboundLocalTurns(1)
+                jlog("⚠️ Jarvis realtime local turn omitted: invalid speech timing")
+            }
             pumpAudioIfReady()
         }
     }

@@ -70,6 +70,31 @@ import Testing
         #expect(ledger.takeCompletedItem(itemID: "replacement") == nil)
     }
 
+    @Test func filteredReplacementConsumedAfterTimingSettlesExactlyOneFallback() {
+        let ledger = RealtimeTranscriptionLedger()
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        let first = fallback("first partial"), second = fallback("second partial")
+        recovery.begin(interruptedItems: [first, second], duplicateRiskItemCount: 0, replayAvailable: true)
+        _ = recovery.markReplacementReady()
+        ledger.recordSpeechStarted(itemID: "filtered", audioStartMilliseconds: 1_000, timelineOrigin: 0)
+        #expect(ledger.recordCompleted(itemID: "filtered", transcript: "Thank you.", speaker: .me) == nil)
+        #expect(ledger.isPending(itemID: "filtered"))
+        #expect(recovery.unresolvedItemCount == 2)
+
+        ledger.recordSpeechStopped(itemID: "filtered", audioEndMilliseconds: 1_100)
+        let wasPending = ledger.isPending(itemID: "filtered")
+        let item = ledger.takeCompletedItem(itemID: "filtered")
+        #expect(wasPending)
+        #expect(!ledger.isPending(itemID: "filtered"))
+        #expect(item == nil)
+        #expect(recovery.resolveReplacement(hasUsableText: item?.text != nil) == .useFallback(first))
+        #expect(recovery.unresolvedItemCount == 1)
+        #expect(ledger.resolveStoppedItemTimeout(itemID: "filtered", speaker: .me) == nil)
+        #expect(!ledger.isPending(itemID: "filtered"))
+        #expect(recovery.resolveReplacement(hasUsableText: true) == .appendReplacement)
+        #expect(recovery.timeout().isEmpty)
+    }
+
     @Test func coverageLossOrNoReplayImmediatelySalvagesInterruptedItems() {
         var beforeReady = RealtimeReconnectTranscriptionRecovery()
         let partial = fallback("partial")

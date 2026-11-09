@@ -34,14 +34,15 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
 
     public init() {}
 
+    @discardableResult
     public mutating func recordTurn(
         startedAt: TimeInterval,
         endedAt: TimeInterval,
         committedThroughAt: TimeInterval,
         throughSequenceNumber: UInt64
-    ) {
+    ) -> Bool {
         guard SpeechInterval(startedAt: startedAt, endedAt: endedAt) != nil, committedThroughAt.isFinite,
-              committedThroughAt >= endedAt else { return }
+              committedThroughAt >= endedAt else { return false }
         pendingTurns.append(Turn(
             id: nextTurnID,
             startedAt: startedAt,
@@ -50,6 +51,7 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
             throughSequenceNumber: throughSequenceNumber,
             needsInitialItemBinding: true))
         nextTurnID &+= 1
+        return true
     }
 
     public mutating func recordAudioSent(sequenceNumber: UInt64) {

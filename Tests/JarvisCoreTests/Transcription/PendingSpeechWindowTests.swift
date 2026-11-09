@@ -192,3 +192,17 @@ extension PendingSpeechWindowTests {
         #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 8, endedAt: 10))
     }
 }
+
+extension PendingSpeechWindowTests {
+    @Test func discardedFinalBeforeEndpointDoesNotPoisonTheNextWindow() {
+        var window = PendingSpeechWindow()
+        window.recordLocalSpeech(active: true, at: 2)
+        window.recordRecognitionObserved(at: 3)
+        #expect(window.awaitsSpeechEnd)
+        window.recordRecognitionFinalized()
+        window.recordLocalSpeech(active: false, at: 4)
+        window.recordLocalSpeech(active: true, at: 8)
+        window.recordLocalSpeech(active: false, at: 10)
+        #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 8, endedAt: 10))
+    }
+}

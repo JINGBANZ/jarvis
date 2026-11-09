@@ -241,6 +241,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
     }
 
     func sendAudio(_ pcm: Data, sequenceNumber: UInt64, capturedAt: TimeInterval) {
+        guard !pcm.isEmpty else { return }
         // Capture already delivers `audioFormat`'s rate; never resample here.
         continuityReporter.recordDelivery(
             sequence: sequenceNumber, pcm16: pcm, at: clock.now() - sessionStart)

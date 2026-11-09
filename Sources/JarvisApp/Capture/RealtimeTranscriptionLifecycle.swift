@@ -86,10 +86,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let didStart = ledger.recordSpeechStarted(
             itemID: itemID, audioStartMilliseconds: audioStartMilliseconds,
             timelineOrigin: timelineOrigin)
-        if let item = ledger.takeCompletedItem(itemID: itemID) {
-            locallyCommittedItemIDs.remove(itemID)
-            _ = reconcileReplacementItemLocked(item, reason: nil)
-        }
+        reconcileCompletedItemLocked(itemID: itemID)
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
         lock.unlock()
@@ -136,10 +133,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             itemID: itemID,
             audioEndMilliseconds: endMilliseconds)
         if didStart || didStop { locallyCommittedItemIDs.insert(itemID) }
-        if let item = ledger.takeCompletedItem(itemID: itemID) {
-            locallyCommittedItemIDs.remove(itemID)
-            _ = reconcileReplacementItemLocked(item, reason: nil)
-        }
+        reconcileCompletedItemLocked(itemID: itemID)
         if consumesUnboundTurn, unboundLocalTurnCount > 0 { unboundLocalTurnCount -= 1 }
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
@@ -219,10 +213,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return false }
         let didStop = ledger.recordSpeechStopped(
             itemID: itemID, audioEndMilliseconds: audioEndMilliseconds)
-        if let item = ledger.takeCompletedItem(itemID: itemID) {
-            locallyCommittedItemIDs.remove(itemID)
-            _ = reconcileReplacementItemLocked(item, reason: nil)
-        }
+        reconcileCompletedItemLocked(itemID: itemID)
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
         lock.unlock()
@@ -309,12 +300,22 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         cancelReplayRecoveryDeadline()
     }
 
+    private func reconcileCompletedItemLocked(itemID: String) {
+        let wasPending = ledger.isPending(itemID: itemID)
+        let item = ledger.takeCompletedItem(itemID: itemID)
+        guard wasPending, !ledger.isPending(itemID: itemID) else { return }
+        locallyCommittedItemIDs.remove(itemID)
+        _ = reconcileReplacementItemLocked(item, reason: nil)
+    }
+
     private func scheduleTerminalDeadline(itemID: String, socketGeneration: Int) {
         let timeout = terminalTimeout
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
             guard let self else { return }
             self.lock.lock()
-            guard !self.stopped, self.isReady(socketGeneration) else { self.lock.unlock(); return }
+            guard !self.stopped, self.isReady(socketGeneration), self.ledger.isPending(itemID: itemID) else {
+                self.lock.unlock(); return
+            }
             let item = self.ledger.resolveStoppedItemTimeout(itemID: itemID, speaker: self.speaker)
             guard let item else {
                 let handled = self.reconcileReplacementItemLocked(

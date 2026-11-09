@@ -3,6 +3,19 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct RealtimeJarvisManagedTurnCoordinatorTests {
+    @Test func rejectedTimingDoesNotQueueATurnOrBlockTheNextCommit() throws {
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
+        #expect(!coordinator.recordTurn(startedAt: 1, endedAt: 2,
+                                       committedThroughAt: 1.5, throughSequenceNumber: 4))
+        #expect(coordinator.unresolvedTurnCount == 0)
+        #expect(coordinator.allowsSendingAudio(sequenceNumber: 5))
+        #expect(coordinator.recordTurn(startedAt: 3, endedAt: 4,
+                                      committedThroughAt: 4.5, throughSequenceNumber: 9))
+        coordinator.recordAudioSent(sequenceNumber: 9)
+        let commit = coordinator.takeReadyCommit()
+        #expect(try #require(commit).startedAt == 3)
+    }
+
     @Test func commitWaitsUntilAudioThroughBoundaryWasSent() throws {
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
         coordinator.recordTurn(startedAt: 1, endedAt: 1.5, committedThroughAt: 2, throughSequenceNumber: 4)

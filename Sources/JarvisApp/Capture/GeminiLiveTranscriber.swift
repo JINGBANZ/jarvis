@@ -251,6 +251,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         if finalAwaitingSpeechEnd != nil {
             jlog("⚠️ Gemini final omitted at socket boundary: speech end unavailable")
             finalAwaitingSpeechEnd = nil
+            pendingSpeech.recordRecognitionFinalized()
         }
         lock.unlock()
         updateWorkFlag()
@@ -265,6 +266,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         if finalAwaitingSpeechEnd != nil {
             jlog("⚠️ Gemini final omitted at socket boundary: speech end unavailable")
             finalAwaitingSpeechEnd = nil
+            pendingSpeech.recordRecognitionFinalized()
         }
         lock.unlock()
         updateWorkFlag()
@@ -302,9 +304,12 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
                 pendingSpeech.recordLocalSpeech(active: active, at: boundary - sessionStart)
             }
             if !active, let pending = finalAwaitingSpeechEnd {
-                finalAwaitingSpeechEnd = nil
-                if let interval = pendingSpeech.takeFinalizedInterval() { timedFinal = (pending.text, interval, pending.generation) }
-                else { jlog("⚠️ Gemini final omitted: ambiguous local speech timing") }
+                if let interval = pendingSpeech.takeFinalizedInterval() {
+                    timedFinal = (pending.text, interval, pending.generation)
+                } else {
+                    finalAwaitingSpeechEnd = nil
+                    jlog("⚠️ Gemini final omitted: ambiguous local speech timing")
+                }
             }
         }
         let token = nextChunkToken
@@ -396,6 +401,9 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
             .transcriptionCompleted, audioTimeMilliseconds: nil, socketGeneration: generation)
         let accepted = coachingCoordinator.recordFinalizedTranscript(
             text, spokenAt: interval.startedAt, spokenEndAt: interval.endedAt, source: "gemini-live")
+        if let pending = finalAwaitingSpeechEnd, pending.generation == generation, pending.text == text {
+            finalAwaitingSpeechEnd = nil
+        }
         benchmark?.observer.record(.init(kind: .finalized,
             provider: TranscriptionProvider.gemini.rawValue, model: model.rawValue,
             speaker: speaker.rawValue, generation: generation, text: text,
@@ -533,7 +541,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         let leaseIsCurrent = !stopped && !draining && connection.isReady(lease)
         // Drain only when an utterance is in flight. An idle drain just holds back new audio for
         // the whole grace period.
-        let hasUtteranceToDrain = leaseIsCurrent && recognitionInFlight
+        let hasUtteranceToDrain = leaseIsCurrent && (recognitionInFlight || finalAwaitingSpeechEnd != nil)
         if leaseIsCurrent { draining = true }
         lock.unlock()
         guard leaseIsCurrent else { return }
