@@ -391,10 +391,13 @@ class AudioRouteTests(unittest.TestCase):
         receipt.update(check="fixture-capture-consent-bootstrap", mode="authorize", phase="consent",
                        microphoneAuthorized=True, tapCreated=True, nativeConsentAcknowledged=True, captureGrantProven=False,
                        microphoneRequestUptime=100.0, microphoneFinishedUptime=110.0, microphoneCompletionUptime=109.0,
-                       microphoneCallbackReceived=True, microphoneAuthorizationStatus=3)
+                       microphoneCallbackReceived=True, microphoneAuthorizationStatus=3,
+                       ioStarted=True, ioStartRequestedUptime=111.0, ioStartReturnedUptime=112.0)
         PROBE["validate_audio_receipt"](receipt, "authorize", "consent")
         for key, value in (("nativeConsentAcknowledged", False), ("microphoneAuthorized", False),
-                           ("captureGrantProven", True), ("tapCreated", 1)):
+                           ("captureGrantProven", True), ("tapCreated", 1), ("ioStarted", False),
+                           ("ioStartRequestedUptime", 99.0), ("ioStartReturnedUptime", 110.0),
+                           ("authorizationFailureStage", "cleanup")):
             with self.assertRaises(ValueError):
                 PROBE["validate_audio_receipt"]({**receipt, key: value}, "authorize", "consent")
 

@@ -9,18 +9,8 @@ final class AudioFixtureTests: XCTestCase {
     private var evidence: URL?
 
     override func record(_ issue: XCTIssue) {
-        if let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] {
-            let evidence = URL(fileURLWithPath: path)
-            let location = issue.sourceCodeContext.location
-            let ownSource = location?.fileURL.lastPathComponent == "AudioFixtureTests.swift"
-            let value: [String: Any] = ["issueType": issue.type.rawValue, "sourceIsHarness": ownSource,
-                                        "line": ownSource ? location?.lineNumber ?? 0 : 0]
-            do {
-                try JSONSerialization.data(withJSONObject: value).write(
-                    to: evidence.appendingPathComponent("audio-issue.json"), options: .withoutOverwriting)
-            } catch CocoaError.fileWriteFileExists {
-            } catch { print("Could not record the scalar audio issue location") }
-        }
+        UIIssueEvidence.record(issue, sourceName: "AudioFixtureTests.swift",
+                               firstFilename: "audio-issue.json", failureFilename: "audio-failure.json")
         super.record(issue)
     }
 
@@ -94,23 +84,51 @@ final class AudioFixtureTests: XCTestCase {
                       "com.apple.accessibility.universalAccessAuthWarn", "com.apple.AccessibilityUIServer"]
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             var matches: [(String, XCUIElement)] = []
-            for owner in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: owner).isEmpty {
+            var discovery: [String: [String: Int]] = [:]
+            for owner in owners {
+                let running = NSRunningApplication.runningApplications(withBundleIdentifier: owner).count
+                var counts = ["running": running, "dialogs": 0, "containers": 0, "fixtureMatches": 0,
+                              "labelMatches": 0, "titleMatches": 0, "staticTextMatches": 0,
+                              "microphoneMatches": 0, "audioMatches": 0, "exactAllowButtons": 0,
+                              "allowPrefixButtons": 0, "okButtons": 0, "openSettingsButtons": 0]
+                discovery[owner] = counts
+                guard running > 0 else { continue }
                 let app = XCUIApplication(bundleIdentifier: owner)
                 let dialogs = app.dialogs.allElementsBoundByIndex
                 let containers = dialogs.isEmpty ? app.windows.allElementsBoundByIndex : dialogs
+                counts["dialogs"] = dialogs.count
+                counts["containers"] = containers.count
                 for container in containers {
-                    let text = container.staticTexts.allElementsBoundByIndex.map {
+                    let staticText = container.staticTexts.allElementsBoundByIndex.map {
                         $0.label + " " + ($0.value as? String ?? "")
                     }.joined(separator: "\n")
+                    let label = container.label
+                    let title = container.title
+                    let text = [label, title, staticText].joined(separator: "\n")
                     guard text.contains("Jarvis Route Fixture") else { continue }
+                    counts["fixtureMatches", default: 0] += 1
+                    if label.contains("Jarvis Route Fixture") { counts["labelMatches", default: 0] += 1 }
+                    if title.contains("Jarvis Route Fixture") { counts["titleMatches", default: 0] += 1 }
+                    if staticText.contains("Jarvis Route Fixture") { counts["staticTextMatches", default: 0] += 1 }
                     let permissions = ["microphone", "audio"].filter { text.localizedCaseInsensitiveContains($0) }
+                    for permission in permissions { counts[permission + "Matches", default: 0] += 1 }
+                    counts["exactAllowButtons", default: 0] += container.buttons.matching(NSPredicate(format: "label == 'Allow' OR title == 'Allow'")).count
+                    counts["allowPrefixButtons", default: 0] += container.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow' OR title BEGINSWITH[c] 'Allow'")).count
+                    counts["okButtons", default: 0] += container.buttons.matching(NSPredicate(format: "label == 'OK' OR title == 'OK'")).count
+                    counts["openSettingsButtons", default: 0] += container.buttons.matching(identifier: "Open System Settings").count
                     guard permissions.count == 1, let permission = permissions.first, !accepted.contains(permission) else { continue }
-                    let buttons = container.buttons.matching(NSPredicate(format: "label == 'Allow' OR title == 'Allow'"))
+                    let buttons = container.buttons.matching(NSPredicate(format:
+                        "label BEGINSWITH[c] 'Allow' OR title BEGINSWITH[c] 'Allow' OR label == 'OK' OR title == 'OK'"))
                     if buttons.count == 1, buttons.element.isEnabled, buttons.element.isHittable {
                         matches.append((permission, buttons.element))
                     }
                 }
+                discovery[owner] = counts
             }
+            do {
+                try JSONSerialization.data(withJSONObject: discovery).write(
+                    to: XCTUnwrap(self.evidence).appendingPathComponent("audio-permission-discovery.json"), options: .atomic)
+            } catch { XCTFail("Could not record scalar fixture dialog discovery") }
             guard matches.count == 1 else { return false }
             found = matches[0]
             return true

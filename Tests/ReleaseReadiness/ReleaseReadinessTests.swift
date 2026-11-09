@@ -11,20 +11,8 @@ final class ReleaseReadinessTests: XCTestCase {
     private var credentialFile: URL?
 
     override func record(_ issue: XCTIssue) {
-        if let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] {
-            let location = issue.sourceCodeContext.location
-            let ownSource = location?.fileURL.lastPathComponent == "ReleaseReadinessTests.swift"
-            let receipt: [String: Any] = ["issueType": issue.type.rawValue,
-                                          "sourceIsHarness": ownSource,
-                                          "line": ownSource ? location?.lineNumber ?? 0 : 0]
-            do {
-                let data = try JSONSerialization.data(withJSONObject: receipt)
-                try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("ui-issue.json"), options: .withoutOverwriting)
-            } catch CocoaError.fileWriteFileExists {
-            } catch {
-                print("Could not record the scalar UI issue location")
-            }
-        }
+        UIIssueEvidence.record(issue, sourceName: "ReleaseReadinessTests.swift",
+                               firstFilename: "ui-issue.json", failureFilename: "ui-failure.json")
         super.record(issue)
     }
 
@@ -99,10 +87,12 @@ final class ReleaseReadinessTests: XCTestCase {
                 case "Open System Settings":
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 2,
                                    "The observed screen-settings branch requires microphone and system audio proof")
+                    XCTAssertEqual(welcome.staticTexts.matching(identifier: "Refused").count, 1)
                     XCTAssertTrue(welcome.staticTexts["Screen Recording"].exists)
                     let previousPID = try candidateProcessID()
                     welcome.buttons[title].click()
                     if try grantScreenRecordingInSettings() { waitForReplacement(of: previousPID) }
+                    acceptedConsents.insert("screen")
                     app.activate()
                 case "Quit & Reopen":
                     XCTAssertEqual(grantedPermissionCount(in: welcome), 2,
@@ -223,7 +213,10 @@ final class ReleaseReadinessTests: XCTestCase {
             let titles = ["Grant Access", "Open System Settings", "Quit & Reopen", "I’m Ready"].filter {
                 let pendingScreenRelaunch = $0 == "Quit & Reopen" && self.grantedPermissionCount(in: onboarding) == 2
                     && onboarding.staticTexts.matching(identifier: "Reopen to finish").count == 1
-                guard $0 == "Grant Access" || acceptedConsents.contains("screen") || pendingScreenRelaunch else { return false }
+                let refusedScreenSettings = $0 == "Open System Settings" && acceptedConsents.isSuperset(of: ["microphone", "audio"])
+                    && self.grantedPermissionCount(in: onboarding) == 2 && onboarding.staticTexts.matching(identifier: "Refused").count == 1
+                guard $0 == "Grant Access" || acceptedConsents.contains("screen") || pendingScreenRelaunch || refusedScreenSettings
+                else { return false }
                 let button = onboarding.buttons[$0]
                 return button.exists && button.isEnabled
             }
@@ -333,6 +326,9 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(section.switches.matching(identifier: "Jarvis_Toggle").count, 1)
         let toggle = section.switches["Jarvis_Toggle"]
         attachEvidence(settings, name: "recording-toggle-matched")
+        let evidence = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+        try JSONSerialization.data(withJSONObject: recordingToggleValue(toggle.value)).write(
+            to: URL(fileURLWithPath: evidence).appendingPathComponent("recording-initial.json"), options: .atomic)
         if toggle.value as? String != "1" { toggle.click() }
         let authorized = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             toggle.value as? String == "1" || settings.buttons["Quit & Reopen"].exists
@@ -385,7 +381,6 @@ final class ReleaseReadinessTests: XCTestCase {
                 if toggles.count == 1 { finalState["freshToggle"] = recordingToggleValue(toggles.element.value) }
             }
         }
-        let evidence = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
         try JSONSerialization.data(withJSONObject: finalState).write(
             to: URL(fileURLWithPath: evidence).appendingPathComponent("recording-final.json"), options: .atomic)
         XCTAssertEqual(enabledResult, .completed, "Screen-recording grant must be enabled")

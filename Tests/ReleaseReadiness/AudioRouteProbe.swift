@@ -96,6 +96,12 @@ struct AudioRouteProbe {
         var systemToneFraction = 0.0
     }
 
+    private enum AuthorizationStage: String, Encodable {
+        case paths, microphone, tap, aggregate, acknowledgement, cleanup
+        case ioProc = "io-proc"
+        case ioStart = "io-start"
+    }
+
     private struct Receipt: Encodable {
         let schemaVersion = 1
         var check = "audio-route-probe"
@@ -120,6 +126,10 @@ struct AudioRouteProbe {
         var microphoneAuthorizationStatus: Int?
         var microphoneCallbackReceived: Bool?
         var tapCreated: Bool?
+        var ioStarted: Bool?
+        var ioStartRequestedUptime: Double?
+        var ioStartReturnedUptime: Double?
+        var authorizationFailureStage: AuthorizationStage?
         var nativeConsentAcknowledged: Bool?
         var captureGrantProven: Bool?
         var error: String?
@@ -338,63 +348,106 @@ struct AudioRouteProbe {
     private static func authorize(_ options: Options, receipt: inout Receipt) throws {
         receipt.microphoneAuthorized = false
         receipt.tapCreated = false
+        receipt.ioStarted = false
         receipt.nativeConsentAcknowledged = false
         receipt.captureGrantProven = false
-        guard let acknowledgement = options.acknowledgement,
-              acknowledgement != options.receipt,
-              acknowledgement.deletingLastPathComponent() == options.receipt.deletingLastPathComponent() else {
-            throw Failure("acknowledgement must use a distinct path in the same private run directory")
-        }
-        try validatePrivateParent(acknowledgement)
-        var existing = stat()
-        guard lstat(acknowledgement.path, &existing) == -1, errno == ENOENT else {
-            throw Failure("acknowledgement must not exist before authorization")
-        }
         let state = OSAllocatedUnfairLock(initialState: ConsentState())
         let sources = signalSources { state.withLock { $0.interrupted = true } }
         defer { for source in sources { source.cancel() } }
-        try checkQuitRequest()
-        receipt.microphoneRequestUptime = ProcessInfo.processInfo.systemUptime
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            let completed = ProcessInfo.processInfo.systemUptime
-            state.withLock {
-                $0.microphoneCompletionUptime = completed
-                $0.microphoneResult = granted
-            }
-        }
-        let deadline = ProcessInfo.processInfo.systemUptime + 30
-        do {
-            defer {
-                let current = state.withLock { $0 }
-                receipt.microphoneCompletionUptime = current.microphoneCompletionUptime
-                receipt.microphoneFinishedUptime = ProcessInfo.processInfo.systemUptime
-                receipt.microphoneAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio).rawValue
-                receipt.microphoneCallbackReceived = current.microphoneResult != nil
-            }
-            while ProcessInfo.processInfo.systemUptime < deadline {
-                try checkQuitRequest()
-                let current = state.withLock { $0 }
-                if current.interrupted { throw Failure("interrupted") }
-                if let granted = current.microphoneResult {
-                    receipt.microphoneAuthorized = granted && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-                    break
-                }
-                Thread.sleep(forTimeInterval: 0.02)
-            }
-        }
-        guard state.withLock({ $0.microphoneResult }) != nil else { throw Failure("microphone authorization request timed out") }
-        guard receipt.microphoneAuthorized == true else { throw Failure("microphone authorization was not granted") }
-        try checkQuitRequest()
-        let description = CATapDescription(monoGlobalTapButExcludeProcesses: [])
-        description.isPrivate = true
-        description.muteBehavior = .unmuted
+        var stage = AuthorizationStage.paths
         var tap = AudioObjectID(kAudioObjectUnknown)
-        let creationStatus = AudioHardwareCreateProcessTap(description, &tap)
-        receipt.tapCreated = creationStatus == noErr && tap != kAudioObjectUnknown
+        var aggregate = AudioObjectID(kAudioObjectUnknown)
+        var proc: AudioDeviceIOProcID?
+        var started = false
         var failure: Error?
         do {
+            guard let acknowledgement = options.acknowledgement,
+                  acknowledgement != options.receipt,
+                  acknowledgement.deletingLastPathComponent() == options.receipt.deletingLastPathComponent() else {
+                throw Failure("acknowledgement must use a distinct path in the same private run directory")
+            }
+            try validatePrivateParent(acknowledgement)
+            var existing = stat()
+            guard lstat(acknowledgement.path, &existing) == -1, errno == ENOENT else {
+                throw Failure("acknowledgement must not exist before authorization")
+            }
+            stage = .microphone
+            try checkQuitRequest()
+            receipt.microphoneRequestUptime = ProcessInfo.processInfo.systemUptime
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                let completed = ProcessInfo.processInfo.systemUptime
+                state.withLock {
+                    $0.microphoneCompletionUptime = completed
+                    $0.microphoneResult = granted
+                }
+            }
+            let deadline = ProcessInfo.processInfo.systemUptime + 30
+            do {
+                defer {
+                    let current = state.withLock { $0 }
+                    receipt.microphoneCompletionUptime = current.microphoneCompletionUptime
+                    receipt.microphoneFinishedUptime = ProcessInfo.processInfo.systemUptime
+                    receipt.microphoneAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio).rawValue
+                    receipt.microphoneCallbackReceived = current.microphoneResult != nil
+                }
+                while ProcessInfo.processInfo.systemUptime < deadline {
+                    try checkQuitRequest()
+                    let current = state.withLock { $0 }
+                    if current.interrupted { throw Failure("interrupted") }
+                    if let granted = current.microphoneResult {
+                        receipt.microphoneAuthorized = granted && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+                        break
+                    }
+                    Thread.sleep(forTimeInterval: 0.02)
+                }
+            }
+            guard state.withLock({ $0.microphoneResult }) != nil else { throw Failure("microphone authorization request timed out") }
+            guard receipt.microphoneAuthorized == true else { throw Failure("microphone authorization was not granted") }
+            try checkQuitRequest()
+            stage = .tap
+            let description = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+            description.isPrivate = true
+            description.muteBehavior = .unmuted
+            let creationStatus = AudioHardwareCreateProcessTap(description, &tap)
+            receipt.tapCreated = creationStatus == noErr && tap != kAudioObjectUnknown
             try check(creationStatus, "create consent bootstrap tap")
             guard receipt.tapCreated == true else { throw Failure("missing consent bootstrap tap") }
+
+            stage = .aggregate
+            let output: AudioObjectID = try property(AudioObjectID(kAudioObjectSystemObject),
+                                                    kAudioHardwarePropertyDefaultOutputDevice, initial: 0)
+            guard output != kAudioObjectUnknown else { throw Failure("missing consent bootstrap clock") }
+            let outputUID = try stringProperty(output, kAudioDevicePropertyDeviceUID)
+            let aggregateDescription: [String: Any] = [
+                kAudioAggregateDeviceNameKey: "Jarvis Route Consent",
+                kAudioAggregateDeviceUIDKey: "com.jarvis.release-route.consent.\(UUID().uuidString)",
+                kAudioAggregateDeviceIsPrivateKey: true,
+                kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+                kAudioAggregateDeviceSubDeviceListKey: [],
+                kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: description.uuid.uuidString]],
+            ]
+            try check(AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregate),
+                      "create consent bootstrap aggregate")
+            guard aggregate != kAudioObjectUnknown else { throw Failure("missing consent bootstrap aggregate") }
+            stage = .ioProc
+            try check(AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, nil) { _, _, _, output, _ in
+                for buffer in UnsafeMutableAudioBufferListPointer(output) {
+                    if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
+                }
+            }, "create consent bootstrap IOProc")
+            guard let proc else { throw Failure("missing consent bootstrap IOProc") }
+            stage = .ioStart
+            try checkQuitRequest()
+            if state.withLock({ $0.interrupted }) { throw Failure("interrupted") }
+            // CoreAudio requests permission when recording starts, not when the tap object is created.
+            receipt.ioStartRequestedUptime = ProcessInfo.processInfo.systemUptime
+            let startStatus = AudioDeviceStart(aggregate, proc)
+            receipt.ioStartReturnedUptime = ProcessInfo.processInfo.systemUptime
+            started = startStatus == noErr
+            receipt.ioStarted = started
+            try check(startStatus, "start consent bootstrap IOProc")
+
+            stage = .acknowledgement
             try ready(options, stage: "authorization-ready")
             let acknowledgementDeadline = ProcessInfo.processInfo.systemUptime + 45
             while ProcessInfo.processInfo.systemUptime < acknowledgementDeadline {
@@ -409,11 +462,22 @@ struct AudioRouteProbe {
             guard receipt.nativeConsentAcknowledged == true else {
                 throw Failure("native consent acknowledgement timed out")
             }
-        } catch { failure = error }
-        if tap != kAudioObjectUnknown {
-            let destructionStatus = AudioHardwareDestroyProcessTap(tap)
-            receipt.resourcesReleased = destructionStatus == noErr
-            try check(destructionStatus, "destroy consent bootstrap tap")
+        } catch {
+            receipt.authorizationFailureStage = stage
+            failure = error
+        }
+        var cleanup: [String] = []
+        if let proc {
+            if started { collect(AudioDeviceStop(aggregate, proc), "stop consent bootstrap IOProc", into: &cleanup) }
+            collect(AudioDeviceDestroyIOProcID(aggregate, proc), "destroy consent bootstrap IOProc", into: &cleanup)
+        }
+        if aggregate != kAudioObjectUnknown { collect(AudioHardwareDestroyAggregateDevice(aggregate), "destroy consent bootstrap aggregate", into: &cleanup) }
+        if tap != kAudioObjectUnknown { collect(AudioHardwareDestroyProcessTap(tap), "destroy consent bootstrap tap", into: &cleanup) }
+        receipt.resourcesReleased = cleanup.isEmpty
+        if !cleanup.isEmpty {
+            receipt.authorizationFailureStage = .cleanup
+            if let failure { cleanup.insert(String(describing: failure), at: 0) }
+            throw Failure(cleanup.joined(separator: "; "))
         }
         if let failure { throw failure }
         guard !state.withLock({ $0.interrupted }) else { throw Failure("interrupted") }

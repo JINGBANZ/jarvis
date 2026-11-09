@@ -288,15 +288,17 @@ def validate_summary(summary, count=3):
 def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
     common = {"schemaVersion", "check", "mode", "phase", "stage", "passed", "outputFrames",
               "rawMic", "globalTap", "defaultsRestored", "resourcesReleased"}
-    specific = {"authorize": {"microphoneAuthorized", "tapCreated", "nativeConsentAcknowledged", "captureGrantProven"},
+    specific = {"authorize": {"microphoneAuthorized", "tapCreated", "ioStarted", "nativeConsentAcknowledged", "captureGrantProven"},
                 "capture": {"micUID", "systemUID", "sampleRate", "micChannels"},
                 "emit": {"emitterUID", "sampleRate"}}[mode]
     timing = {"microphoneRequestUptime", "microphoneFinishedUptime", "microphoneAuthorizationStatus",
               "microphoneCallbackReceived", "microphoneCompletionUptime"} if mode == "authorize" else set()
+    io_timing = {"ioStartRequestedUptime", "ioStartReturnedUptime"} if mode == "authorize" else set()
+    failure_stages = {"authorizationFailureStage"} if mode == "authorize" else set()
     checks = {"authorize": "fixture-capture-consent-bootstrap", "capture": "production-aggregate-route-isolation",
               "emit": "virtual-device-tone-emission"}
     if (not isinstance(receipt, dict) or not common <= receipt.keys()
-            or receipt.keys() - common - specific - timing - {"error"}
+            or receipt.keys() - common - specific - timing - io_timing - failure_stages - {"error"}
             or type(receipt["schemaVersion"]) is not int or receipt["schemaVersion"] != 1
             or receipt["mode"] != mode or receipt["phase"] != phase or receipt["check"] != checks[mode]
             or receipt["stage"] != "complete"):
@@ -341,6 +343,17 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
         start, end = receipt["microphoneRequestUptime"], receipt["microphoneFinishedUptime"]
         if end < start or not start <= receipt.get("microphoneCompletionUptime", start) <= end:
             raise ValueError("Invalid microphone timing order")
+    if "authorizationFailureStage" in receipt and (not isinstance(receipt["authorizationFailureStage"], str)
+            or receipt["authorizationFailureStage"] not in {
+                "paths", "microphone", "tap", "aggregate", "io-proc", "io-start", "acknowledgement", "cleanup"}):
+        raise ValueError("Unknown authorization failure stage")
+    for key in io_timing & receipt.keys():
+        if type(receipt[key]) not in (int, float) or not math.isfinite(receipt[key]) or not 0 < receipt[key] < 10_000_000_000:
+            raise ValueError("Invalid recording-start time")
+    if "ioStartReturnedUptime" in receipt and (
+            "ioStartRequestedUptime" not in receipt
+            or receipt["ioStartReturnedUptime"] < receipt["ioStartRequestedUptime"]):
+        raise ValueError("Invalid recording-start order")
     safe = {key: value for key, value in receipt.items() if key != "error"}
     safe["errorPresent"] = "error" in receipt
     if not require_pass:
@@ -350,8 +363,10 @@ def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
         raise ValueError("Audio fixture phase or cleanup did not pass")
     if mode == "authorize":
         if (receipt["captureGrantProven"] is not False
-                or not all(receipt[key] for key in ("microphoneAuthorized", "tapCreated", "nativeConsentAcknowledged"))
-                or receipt.get("microphoneCallbackReceived") is not True or receipt.get("microphoneAuthorizationStatus") != 3):
+                or not all(receipt[key] for key in ("microphoneAuthorized", "tapCreated", "ioStarted", "nativeConsentAcknowledged"))
+                or receipt.get("microphoneCallbackReceived") is not True or receipt.get("microphoneAuthorizationStatus") != 3
+                or "authorizationFailureStage" in receipt or not io_timing <= receipt.keys()
+                or receipt.get("ioStartRequestedUptime", 0) < receipt.get("microphoneFinishedUptime", float("inf"))):
             raise ValueError("Fixture consent bootstrap lacks observed acknowledgement")
     elif mode == "emit":
         if receipt["outputFrames"] < 8 * receipt["sampleRate"]:
