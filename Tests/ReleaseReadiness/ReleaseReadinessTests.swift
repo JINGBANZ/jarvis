@@ -1,4 +1,5 @@
 import AppKit
+import os
 import XCTest
 
 @MainActor
@@ -7,10 +8,40 @@ final class ReleaseReadinessTests: XCTestCase {
     var application: XCUIApplication?
     var installedURL: URL?
     var audioDevices: ReleaseAudioDevices?
+    private nonisolated let pendingRelaunch = OSAllocatedUnfairLock<(pid: pid_t, installedURL: URL)?>(initialState: nil)
 
     override func record(_ issue: XCTIssue) {
         UIIssueEvidence.record(issue, firstFilename: "ui-issue.json", failureFilename: "ui-failure.json")
+        let reference = issue as XCTIssueReference
+        var isFailure = (0...5).contains(issue.type.rawValue)
+        if reference.responds(to: NSSelectorFromString("isFailure")),
+           let value = reference.value(forKey: "isFailure") as? NSNumber {
+            isFailure = value.boolValue
+        }
+        if isFailure { recordRelaunchState() }
         super.record(issue)
+    }
+
+    private nonisolated func recordRelaunchState() {
+        guard let pending = pendingRelaunch.withLock({ $0 }),
+              let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
+        let previousPID = pending.pid
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+        let replacements = running.filter {
+            $0.processIdentifier != previousPID && $0.bundleURL?.resolvingSymlinksInPath() == pending.installedURL
+                && $0.executableArchitecture == NSRunningApplication.current.executableArchitecture
+        }
+        let replacement = replacements.count == 1 ? replacements.first : nil
+        let state: [String: Any] = ["previousPID": previousPID,
+                                   "oldProcessPresent": running.contains { $0.processIdentifier == previousPID },
+                                   "replacementCount": replacements.count,
+                                   "replacementActive": replacement?.isActive ?? false,
+                                   "replacementFinishedLaunching": replacement?.isFinishedLaunching ?? false]
+        do {
+            try JSONSerialization.data(withJSONObject: state).write(
+                to: URL(fileURLWithPath: path).appendingPathComponent("relaunch-state.json"), options: .withoutOverwriting)
+        } catch CocoaError.fileWriteFileExists {
+        } catch { print("Could not record the scalar relaunch state") }
     }
 
     func completePermissionOnboarding(_ initialApp: XCUIApplication) throws -> XCUIApplication {
@@ -77,8 +108,11 @@ final class ReleaseReadinessTests: XCTestCase {
                     XCTAssertEqual(welcome.staticTexts.matching(identifier: "Reopen to finish").count, 1,
                                    "The ordinary relaunch must be offered for the pending screen grant")
                     let previousPID = try candidateProcessID()
+                    let relaunch = (pid: previousPID, installedURL: try XCTUnwrap(installedURL))
+                    pendingRelaunch.withLock { $0 = relaunch }
                     welcome.buttons[title].click()
                     app = try waitForReplacement(of: previousPID)
+                    pendingRelaunch.withLock { $0 = nil }
                     welcome = app.windows["Welcome to Jarvis"]
                     replacementPID = try candidateProcessID()
                     app.activate()
@@ -369,10 +403,21 @@ final class ReleaseReadinessTests: XCTestCase {
         let openingURL = evidenceDirectory.appendingPathComponent("recording-open.json")
         var opening: [String: Any] = ["before": openingState()]
         try JSONSerialization.data(withJSONObject: opening).write(to: openingURL, options: .atomic)
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences")
+        guard running.count == 1, let existing = running.first, !existing.isTerminated else {
+            throw ReadinessFailure("Permission action must launch exactly one System Settings process before activation")
+        }
+        let existingPID = existing.processIdentifier
+        opening["activationRequested"] = true
+        try JSONSerialization.data(withJSONObject: opening).write(to: openingURL, options: .atomic)
+        settings.activate() // ghost-mode-allowed: external runner brings the opened native permission controls forward
         let waitStarted = ProcessInfo.processInfo.systemUptime
         let opened = settings.wait(for: .runningForeground, timeout: 15)
+        let sameProcess = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences")
+            .map(\.processIdentifier) == [existingPID]
         opening["elapsedSeconds"] = ProcessInfo.processInfo.systemUptime - waitStarted
         opening["waitSucceeded"] = opened
+        opening["sameProcess"] = sameProcess
         opening["after"] = openingState()
         try JSONSerialization.data(withJSONObject: opening).write(to: openingURL, options: .atomic)
         if !opened {
@@ -382,6 +427,7 @@ final class ReleaseReadinessTests: XCTestCase {
                 print("Could not record native ownership after the System Settings foreground wait failed")
             }
         }
+        XCTAssertTrue(sameProcess, "Activation must retain the System Settings process opened by the permission action")
         XCTAssertTrue(opened, "Permission action must open System Settings")
         attachEvidence(settings, name: "system-screen-recording-settings")
         let panes = settings.scrollViews.containing(.staticText, identifier: "Screen & System Audio Recording")
