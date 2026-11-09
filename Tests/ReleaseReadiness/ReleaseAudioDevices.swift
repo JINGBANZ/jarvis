@@ -36,12 +36,11 @@ struct ReleaseAudioDevices {
             throw Failure.invalidDevices
         }
         microphone = inputs[0]
-        output = outputs[0]
+        output = previousOutput
     }
 
     func select() throws {
         try Self.setDefault(kAudioHardwarePropertyDefaultInputDevice, microphone)
-        try Self.setDefault(kAudioHardwarePropertyDefaultOutputDevice, output)
         try verify()
     }
 
