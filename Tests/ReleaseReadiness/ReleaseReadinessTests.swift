@@ -215,6 +215,9 @@ final class ReleaseReadinessTests: XCTestCase {
                 return true
             }
             var matches: [(String, Set<String>, XCUIElement)] = []
+            guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                    as? [[String: Any]] else { return false }
+            let visibleOwners = Set(windows.compactMap { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value })
             var discovery: [String: [String: Int]] = [:]
             func recordDiscovery() {
                 guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
@@ -224,14 +227,15 @@ final class ReleaseReadinessTests: XCTestCase {
                 } catch { XCTFail("Could not record scalar native-dialog discovery") }
             }
             for identifier in owners {
-                let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).count
-                var counts = ["running": running, "dialogs": 0, "containers": 0, "jarvisTextMatches": 0,
+                let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+                let visible = running.filter { visibleOwners.contains($0.processIdentifier) }.count
+                var counts = ["running": running.count, "visibleOwners": visible, "dialogs": 0, "containers": 0, "jarvisTextMatches": 0,
                               "fixtureTextMatches": 0,
                               "jarvisLabelMatches": 0, "jarvisTitleMatches": 0, "jarvisStaticTextMatches": 0,
                               "microphoneMatches": 0, "audioMatches": 0, "screenMatches": 0,
                               "allowButtons": 0, "openSettingsButtons": 0]
                 discovery[identifier] = counts
-                guard running > 0 else { continue }
+                guard visible > 0 else { continue }
                 counts["queryStartedMilliseconds"] = Int(ProcessInfo.processInfo.systemUptime * 1_000)
                 discovery[identifier] = counts
                 recordDiscovery()

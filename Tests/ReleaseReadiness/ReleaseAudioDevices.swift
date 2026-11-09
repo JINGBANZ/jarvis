@@ -2,6 +2,8 @@ import CoreAudio
 import Foundation
 
 struct ReleaseAudioDevices {
+    enum OutputKind: String { case host, blackHole2, blackHole16 }
+    let outputKind: OutputKind
     private let microphone: AudioObjectID
     private let output: AudioObjectID
     private let previousInput: AudioObjectID
@@ -37,6 +39,7 @@ struct ReleaseAudioDevices {
         }
         microphone = inputs[0]
         output = previousOutput
+        outputKind = previousOutput == outputs[0] ? .blackHole2 : previousOutput == inputs[0] ? .blackHole16 : .host
     }
 
     func select() throws {

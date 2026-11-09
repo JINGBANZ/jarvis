@@ -4,7 +4,8 @@ import XCTest
 extension ReleaseReadinessTests {
     func testInstalledJourney() throws {
         try prepareRun()
-        attachEvidence(name: "fixture-playback-default-route")
+        let outputKind = try XCTUnwrap(audioDevices).outputKind.rawValue
+        attachEvidence(name: "fixture-playback-default-route-\(outputKind)")
         try playQuestion()
         try audioDevices?.select()
         attachEvidence(name: "fixture-playback-selected-route")
