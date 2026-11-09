@@ -9,8 +9,7 @@ final class ReleaseReadinessTests: XCTestCase {
     var audioDevices: ReleaseAudioDevices?
 
     override func record(_ issue: XCTIssue) {
-        UIIssueEvidence.record(issue, sourceName: "ReleaseReadinessTests.swift",
-                               firstFilename: "ui-issue.json", failureFilename: "ui-failure.json")
+        UIIssueEvidence.record(issue, firstFilename: "ui-issue.json", failureFilename: "ui-failure.json")
         super.record(issue)
     }
 
@@ -357,7 +356,33 @@ final class ReleaseReadinessTests: XCTestCase {
 
     private func grantScreenRecordingInSettings() throws -> Bool {
         let settings = XCUIApplication(bundleIdentifier: "com.apple.systempreferences")
-        XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 15), "Permission action must open System Settings")
+        func openingState() -> [String: Any] {
+            let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences")
+            let unique = running.count == 1 ? running.first : nil
+            return ["uptime": ProcessInfo.processInfo.systemUptime, "xcuiState": settings.state.rawValue,
+                    "processCount": running.count, "uniqueProcessID": unique?.processIdentifier ?? 0,
+                    "active": unique?.isActive ?? false, "finishedLaunching": unique?.isFinishedLaunching ?? false,
+                    "frontmostIsSettings": NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.systempreferences"]
+        }
+        let evidencePath = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+        let evidenceDirectory = URL(fileURLWithPath: evidencePath)
+        let openingURL = evidenceDirectory.appendingPathComponent("recording-open.json")
+        var opening: [String: Any] = ["before": openingState()]
+        try JSONSerialization.data(withJSONObject: opening).write(to: openingURL, options: .atomic)
+        let waitStarted = ProcessInfo.processInfo.systemUptime
+        let opened = settings.wait(for: .runningForeground, timeout: 15)
+        opening["elapsedSeconds"] = ProcessInfo.processInfo.systemUptime - waitStarted
+        opening["waitSucceeded"] = opened
+        opening["after"] = openingState()
+        try JSONSerialization.data(withJSONObject: opening).write(to: openingURL, options: .atomic)
+        if !opened {
+            do {
+                try PermissionOwnerEvidence.record(directory: evidenceDirectory, filename: "permission-owner.json")
+            } catch {
+                print("Could not record native ownership after the System Settings foreground wait failed")
+            }
+        }
+        XCTAssertTrue(opened, "Permission action must open System Settings")
         attachEvidence(settings, name: "system-screen-recording-settings")
         let panes = settings.scrollViews.containing(.staticText, identifier: "Screen & System Audio Recording")
         XCTAssertTrue(panes.firstMatch.waitForExistence(timeout: 10), "The recording privacy pane must load")

@@ -129,6 +129,7 @@ jobs:
             .jarvis/release-ui-probe/*/*/relaunch-control.json
             .jarvis/release-ui-probe/*/*/recording-final.json
             .jarvis/release-ui-probe/*/*/recording-initial.json
+            .jarvis/release-ui-probe/*/*/recording-open.json
             .jarvis/release-ui-probe/*/*/authorization.json
             .jarvis/release-ui-probe/*/*/authorization-process.json
             .jarvis/release-ui-probe/*/*/authorization-owner.json

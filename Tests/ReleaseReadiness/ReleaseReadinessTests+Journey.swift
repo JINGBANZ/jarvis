@@ -31,6 +31,7 @@ extension ReleaseReadinessTests {
         }
         try checkSkills(app)
         try selectOpenAIBrain(app)
+        attachEvidence(app, name: "journey-manual")
         if try preferences()["coaching.mode"] as? String != "manual" {
             app.typeKey(".", modifierFlags: [.command, .option])
         }
@@ -72,6 +73,7 @@ extension ReleaseReadinessTests {
     }
 
     private func checkSkills(_ app: XCUIApplication) throws {
+        attachEvidence(app, name: "journey-skills")
         let window = try settings(app)
         window.buttons["Skills"].click()
         for title in ["Behavioral", "Coding", "Coding with AI", "Customer scenario design", "System design"] {
@@ -83,6 +85,7 @@ extension ReleaseReadinessTests {
     }
 
     private func selectOpenAIBrain(_ app: XCUIApplication) throws {
+        attachEvidence(app, name: "journey-brain")
         let window = try settings(app)
         window.buttons["Brain settings"].click()
         let provider = window.popUpButtons["Primary provider"]
@@ -95,6 +98,7 @@ extension ReleaseReadinessTests {
     }
 
     private func selectTranscription(_ model: String, app: XCUIApplication) throws {
+        attachEvidence(app, name: "journey-transcription")
         let window = try settings(app)
         window.buttons["Ear settings"].click()
         let provider = window.popUpButtons["Transcription provider"]
@@ -109,6 +113,7 @@ extension ReleaseReadinessTests {
     }
 
     private func runSession(_ app: XCUIApplication, model: String, cycle: Int) throws -> [String: Any] {
+        attachEvidence(app, name: "journey-start")
         _ = try candidateProcessID()
         try audioDevices?.verify()
         let previous = try sessionDirectories()
@@ -117,6 +122,7 @@ extension ReleaseReadinessTests {
         app.menuItems["Start Jarvis"].click()
         XCTAssertTrue(app.statusItems["Jarvis is active"].waitForExistence(timeout: 60),
                       "Both endpoints and capture must reach full active readiness")
+        attachEvidence(app, name: "journey-active")
         try audioDevices?.verify()
         let fresh = try sessionDirectories().subtracting(previous)
         XCTAssertEqual(fresh.count, 1, "Start must create one fresh production session")
@@ -126,6 +132,7 @@ extension ReleaseReadinessTests {
         let player = try AVAudioPlayer(contentsOf: source)
         defer { player.stop() }
         XCTAssertTrue(player.duration.isFinite && player.duration > 1 && player.duration < 30)
+        attachEvidence(app, name: "journey-transcript")
         XCTAssertTrue(player.play(), "Ordinary system playback must start")
         try waitUntil("The fixed system question must produce a fresh finalized transcript", timeout: 60) {
             guard let rows = try? self.activity(directory) else { return false }
@@ -139,6 +146,7 @@ extension ReleaseReadinessTests {
         try audioDevices?.verify()
         let boundary = try activity(directory).map(\.order).max() ?? -1
         let shortcutAt = Date().timeIntervalSince1970
+        attachEvidence(app, name: "journey-hint")
         app.typeKey("j", modifierFlags: [.command, .option])
         try waitUntil("The normal Hint shortcut must produce a fresh delivered hint", timeout: 90) {
             guard let rows = try? self.activity(directory),

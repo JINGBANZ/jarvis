@@ -1,10 +1,12 @@
 import XCTest
 
 enum UIIssueEvidence {
-    static func record(_ issue: XCTIssue, sourceName: String, firstFilename: String, failureFilename: String) {
+    static func record(_ issue: XCTIssue, firstFilename: String, failureFilename: String) {
         guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
         let location = issue.sourceCodeContext.location
-        let ownSource = location?.fileURL.lastPathComponent == sourceName
+        let sources = ["ReleaseReadinessTests.swift": "permissions", "ReleaseReadinessTests+Journey.swift": "journey"]
+        let source = location.flatMap { sources[$0.fileURL.lastPathComponent] }
+        let ownSource = source != nil
         var classification = (0...5).contains(issue.type.rawValue) ? "failure" : "unknown"
         var severity = 0
         let reference = issue as XCTIssueReference
@@ -26,6 +28,7 @@ enum UIIssueEvidence {
             current = error.userInfo[NSUnderlyingErrorKey] as? NSError
         }
         let value: [String: Any] = ["issueType": issue.type.rawValue, "sourceIsHarness": ownSource,
+                                    "source": source ?? "external",
                                     "line": ownSource ? location?.lineNumber ?? 0 : 0,
                                     "classification": classification, "severity": severity, "errors": errors]
         do {

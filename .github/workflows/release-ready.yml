@@ -251,6 +251,7 @@ jobs:
             .jarvis/release-ui-probe/*/stage.json
             .jarvis/release-ui-probe/*/*/ui-stage.json
             .jarvis/release-ui-probe/*/*/ui-failure.json
+            .jarvis/release-ui-probe/*/*/recording-open.json
             .jarvis/release-ui-probe/*/*/cleanup.json
             .jarvis/release-ui-probe/*/*/summary.json
           include-hidden-files: true
