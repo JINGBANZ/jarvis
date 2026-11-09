@@ -13,10 +13,233 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 import xml.etree.ElementTree as ET
 
 
 REPOSITORY = Path(__file__).resolve().parent.parent
+
+
+class ReleasePromotionTests(unittest.TestCase):
+    def setUp(self):
+        self.module = runpy.run_path(str(REPOSITORY / 'scripts/release-promotion.py'))
+        temporary = tempfile.TemporaryDirectory(prefix='jarvis-promotion-tests-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.identity = {'schemaVersion': 1, 'repository': 'JINGBANZ/jarvis', 'pr': 42,
+                         'head': 'a' * 40, 'base': 'b' * 40, 'merge': 'c' * 40,
+                         'tree': 'd' * 40, 'version': '0.6.0', 'notes': '## [0.6.0]\n\nFixed resources.',
+                         'sourceRun': {'id': 11, 'attempt': 2}, 'workerRun': {'id': 12, 'attempt': 3},
+                         'checkID': 13, 'predecessor': {'tag': 'v0.5.14', 'assetID': 14,
+                                                     'sha256': 'e' * 64, 'size': 10}}
+        self.candidate = {'id': 21, 'runID': 12, 'sha256': 'f' * 64}
+        self.pr = {'number': 42, 'state': 'open', 'draft': False,
+                   'user': {'login': 'github-actions[bot]', 'id': 41898282},
+                   'head': {'ref': self.module['RELEASE_BRANCH'], 'sha': 'a' * 40,
+                            'repo': {'full_name': 'JINGBANZ/jarvis'}},
+                   'base': {'ref': 'main', 'sha': 'b' * 40, 'repo': {'full_name': 'JINGBANZ/jarvis'}},
+                   'labels': [{'name': 'autorelease: pending'}], 'merge_commit_sha': 'c' * 40}
+        self.source = {'id': 11, 'run_attempt': 2, 'head_sha': 'a' * 40,
+                       'event': 'pull_request', 'path': '.github/workflows/ci.yml',
+                       'status': 'in_progress', 'conclusion': None}
+
+    def api(self, replies, collections=None):
+        class API:
+            def repo(_self, path, **_kwargs):
+                return replies[path]
+            def pages(_self, path, _key):
+                return collections[path]
+        return API()
+
+    def test_only_current_genuine_release_pr_is_admitted(self):
+        admit = self.module['admit_release']
+        admit(self.pr, self.source, self.identity['base'])
+        for path, bad in ((('user', 'id'), 1), (('head', 'ref'), 'feature'),
+                          (('head', 'sha'), 'f' * 40), (('base', 'sha'), 'f' * 40),
+                          (('state',), 'closed'), (('draft',), True), (('labels',), [])):
+            value = json.loads(json.dumps(self.pr))
+            target = value
+            for part in path[:-1]:
+                target = target[part]
+            target[path[-1]] = bad
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                admit(value, self.source, self.identity['base'])
+
+    def test_metadata_admission_rejects_executable_or_other_plist_changes(self):
+        files = [{'filename': name, 'status': 'modified'} for name in self.module['METADATA']]
+        before = {'CFBundleVersion': '0.5.14', 'CFBundleShortVersionString': '0.5.14', 'LSMinimumSystemVersion': '15.0'}
+        after = {**before, 'CFBundleVersion': '0.6.0', 'CFBundleShortVersionString': '0.6.0'}
+        args = [files, {'.': '0.5.14'}, {'.': '0.6.0'}, before, after, self.identity['notes']]
+        self.assertEqual(self.module['validate_metadata'](*args), ('0.6.0', self.identity['notes']))
+        for index, replacement in ((0, files + [{'filename': 'Package.swift', 'status': 'modified'}]),
+                                   (2, {'.': '0.5.14'}),
+                                   (4, {**after, 'CFBundleExecutable': 'Other'}),
+                                   (5, '## [0.7.0]\nDifferent notes')):
+            changed = list(args)
+            changed[index] = replacement
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                self.module['validate_metadata'](*changed)
+
+    def test_source_proof_requires_all_jobs_and_exact_revision(self):
+        jobs = [{'name': name, 'status': 'completed', 'conclusion': 'success',
+                 'steps': [{'name': 'Verify source revision (' + self.identity['merge'] + ')',
+                            'conclusion': 'success'}]} for name in self.module['SOURCE_JOBS']]
+        check = self.module['source_jobs_pass']
+        self.assertTrue(check(jobs, self.identity['merge']))
+        self.assertFalse(check(jobs[:-1], self.identity['merge']))
+        with self.assertRaises(ValueError):
+            check(jobs + [jobs[0]], self.identity['merge'])
+        for conclusion in ('skipped', 'cancelled', 'failure'):
+            changed = json.loads(json.dumps(jobs))
+            changed[1]['conclusion'] = conclusion
+            with self.subTest(conclusion=conclusion), self.assertRaises(ValueError):
+                check(changed, self.identity['merge'])
+        with self.assertRaises(ValueError):
+            check(jobs, 'f' * 40)
+
+    def test_stale_base_head_merge_or_source_attempt_refuses(self):
+        replies = {'/actions/runs/11': self.source, '/pulls/42': self.pr,
+                   '/git/ref/heads/main': {'object': {'sha': 'b' * 40}}}
+        self.module['fresh'](self.api(replies), self.identity)
+        mutations = [('/actions/runs/11', 'run_attempt', 3), ('/pulls/42', 'merge_commit_sha', 'f' * 40)]
+        for path, key, value in mutations:
+            changed = json.loads(json.dumps(replies))
+            changed[path][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.module['fresh'](self.api(changed), self.identity)
+        replies['/git/ref/heads/main']['object']['sha'] = 'f' * 40
+        with self.assertRaises(ValueError):
+            self.module['fresh'](self.api(replies), self.identity)
+
+    def test_artifact_requires_exact_run_digest_and_unexpired_identity(self):
+        artifact = {'id': 21, 'workflow_run': {'id': 12}, 'expired': False,
+                    'expires_at': '2999-01-01T00:00:00Z', 'digest': 'sha256:' + 'f' * 64}
+        record = self.module['artifact_record']
+        self.assertEqual(record(self.api({'/actions/artifacts/21': artifact}), 21, 12, 'f' * 64), self.candidate)
+        for change in ({'workflow_run': {'id': 99}}, {'expired': True},
+                       {'expires_at': '2000-01-01T00:00:00Z'}, {'digest': 'sha256:' + 'a' * 64}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                record(self.api({'/actions/artifacts/21': {**artifact, **change}}), 21, 12, 'f' * 64)
+
+    def candidate_files(self):
+        directory = self.root / 'candidate'
+        directory.mkdir()
+        (directory / 'Jarvis.dmg').write_bytes(b'fixed final disk image')
+        size = (directory / 'Jarvis.dmg').stat().st_size
+        (directory / 'appcast.xml').write_text(f'''<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item>
+<sparkle:version>0.6.0</sparkle:version><sparkle:shortVersionString>0.6.0</sparkle:shortVersionString>
+<sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+<enclosure url="https://github.com/JINGBANZ/jarvis/releases/download/v0.6.0/Jarvis.dmg" length="{size}" sparkle:edSignature="fixture" />
+</item></channel></rss>''')
+        files = {name: self.module['file_hash'](directory / name) for name in self.module['ASSETS']}
+        self.module['write_json'](directory / 'manifest.json', {'schemaVersion': 1, 'identity': self.identity, 'files': files})
+        manifest_hash = self.module['file_hash'](directory / 'manifest.json')['sha256']
+        return directory, manifest_hash
+
+    def test_downloaded_candidate_cannot_bless_replaced_public_bytes(self):
+        directory, manifest_hash = self.candidate_files()
+        self.module['verify_files'](directory, self.identity, manifest_hash)
+        (directory / 'Jarvis.dmg').write_bytes(b'different final disk image')
+        with self.assertRaisesRegex(ValueError, 'Candidate file changed'):
+            self.module['verify_files'](directory, self.identity, manifest_hash)
+
+    def test_manifest_and_feed_identity_are_required(self):
+        directory, manifest_hash = self.candidate_files()
+        with self.assertRaisesRegex(ValueError, 'manifest changed'):
+            self.module['verify_files'](directory, self.identity, '0' * 64)
+        with self.assertRaisesRegex(ValueError, 'manifest identity'):
+            self.module['verify_files'](directory, {**self.identity, 'tree': '8' * 40}, manifest_hash)
+        feed = directory / 'appcast.xml'
+        feed.write_text(feed.read_text().replace('15.0', '14.2'))
+        with self.assertRaisesRegex(ValueError, 'minimum is inconsistent'):
+            self.module['check_feed'](feed, self.identity, self.module['file_hash'](directory / 'Jarvis.dmg'))
+
+    def test_setup_only_or_translated_execution_cannot_produce_native_proof(self):
+        evidence = self.root / 'evidence'
+        receipt = evidence / 'run'
+        receipt.mkdir(parents=True)
+        (receipt / 'setup-feasibility.json').write_text('{"passed":true,"releaseReady":false}')
+        with mock.patch('platform.machine', return_value='arm64'), mock.patch('platform.mac_ver', return_value=('15.0', (), '')):
+            with self.assertRaisesRegex(ValueError, 'complete readiness'):
+                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', evidence, self.root / 'proof')
+            (receipt / 'readiness.json').write_text('{"passed":true,"releaseReady":false}')
+            with self.assertRaisesRegex(ValueError, 'readiness is incomplete'):
+                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', evidence, self.root / 'proof')
+        with mock.patch('platform.machine', return_value='x86_64'), mock.patch('platform.mac_ver', return_value=('15.0', (), '')):
+            with self.assertRaisesRegex(ValueError, 'another platform'):
+                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', evidence, self.root / 'proof')
+
+    def test_acceptance_requires_all_platforms_at_the_same_manifest(self):
+        candidate_directory, manifest_hash = self.candidate_files()
+        evidence = self.root / 'proofs'
+        evidence.mkdir()
+        records = {}
+        for index, (name, (architecture, major)) in enumerate(self.module['NATIVE_JOBS'].items()):
+            value = {'schemaVersion': 1, 'identity': self.identity, 'candidate': self.candidate,
+                     'manifestSHA256': manifest_hash, 'os': name, 'architecture': architecture,
+                     'macOS': major + '.0', 'passed': True}
+            self.module['write_json'](evidence / (name + '.json'), value)
+            records[name] = {'id': 100 + index, 'runID': 12, 'sha256': 'a' * 64}
+        with mock.patch.dict(os.environ, {'GITHUB_OUTPUT': str(self.root / 'output')}):
+            self.module['accept'](self.identity, self.candidate, manifest_hash, records, evidence, self.root / 'accepted')
+        accepted = self.root / 'accepted'
+        record = {'identity': self.identity, 'candidate': self.candidate, 'manifestSHA256': manifest_hash,
+                  'acceptanceSHA256': self.module['file_hash'](accepted / 'acceptance.json')['sha256']}
+        self.module['verify_promotion'](record, accepted, candidate_directory)
+        self.assertEqual((candidate_directory / 'release-notes.md').read_text(), self.identity['notes'] + '\n')
+        with self.assertRaisesRegex(ValueError, 'Acceptance receipt changed'):
+            self.module['verify_promotion']({**record, 'acceptanceSHA256': '0' * 64}, accepted, candidate_directory)
+        path = evidence / 'macos-15-intel.json'
+        value = json.loads(path.read_text())
+        value['manifestSHA256'] = '2' * 64
+        path.write_text(json.dumps(value))
+        with self.assertRaisesRegex(ValueError, 'mismatched or incomplete'):
+            self.module['accept'](self.identity, self.candidate, manifest_hash, records, evidence, self.root / 'rejected')
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'Unexpected native evidence'):
+            self.module['accept'](self.identity, self.candidate, manifest_hash, records, evidence, self.root / 'rejected')
+
+    def test_native_finalizer_rejects_missing_skipped_and_duplicate_jobs(self):
+        names = ['Installed app (' + name + ')' for name in self.module['NATIVE_JOBS']]
+        jobs = [{'name': name, 'status': 'completed', 'conclusion': 'success'} for name in names]
+        path = '/actions/runs/12/attempts/3/jobs'
+        for bad in (jobs[:-1], jobs + [jobs[0]], [{**row, 'conclusion': 'skipped'} for row in jobs]):
+            with self.subTest(jobs=bad), self.assertRaisesRegex(ValueError, 'All three native jobs'):
+                self.module['native_artifacts'](self.api({}, {path: bad}), self.identity)
+
+    def promotion_api(self, record):
+        merged = '9' * 40
+        pr = {**self.pr, 'merged_at': '2026-11-09T00:00:00Z', 'merge_commit_sha': merged}
+        worker = {'path': self.module['WORKFLOW'], 'event': 'workflow_run', 'head_sha': 'b' * 40,
+                  'run_attempt': 3, 'conclusion': 'success'}
+        replies = {f'/git/commits/{merged}': {'parents': [{'sha': 'b' * 40}], 'tree': {'sha': 'd' * 40}},
+                   f'/commits/{merged}/pulls': [pr], '/git/ref/tags/v0.6.0': {'object': {'sha': merged}},
+                   '/actions/runs/12': worker,
+                   '/actions/runs/11': {**self.source, 'status': 'completed', 'conclusion': 'success'}}
+        for key in ('candidate', 'acceptance'):
+            artifact = record[key]
+            replies[f'/actions/artifacts/{artifact["id"]}'] = {'id': artifact['id'], 'workflow_run': {'id': 12},
+                'expired': False, 'expires_at': '2999-01-01T00:00:00Z', 'digest': artifact['sha256']}
+        check = {'id': 13, 'app': {'id': 15368}, 'external_id': self.module['external_id'](self.identity),
+                 'status': 'completed', 'conclusion': 'success', 'output': {'text': json.dumps(record)}}
+        collections = {'/commits/' + 'a' * 40 + '/check-runs?check_name=release-ready&filter=all': [check]}
+        return merged, replies, collections
+
+    def test_promotion_uses_tree_not_equal_merge_sha_and_refuses_changed_tree_or_attempt(self):
+        record = {'schemaVersion': 1, 'identity': self.identity, 'candidate': self.candidate,
+                  'manifestSHA256': '1' * 64, 'acceptanceSHA256': '2' * 64,
+                  'acceptance': {'id': 22, 'runID': 12, 'sha256': '3' * 64}}
+        merged, replies, collections = self.promotion_api(record)
+        with mock.patch.dict(os.environ, {'GITHUB_SHA': merged, 'GITHUB_OUTPUT': str(self.root / 'output')}):
+            self.module['select_promotion'](self.api(replies, collections), 'v0.6.0')
+            self.assertNotEqual(merged, self.identity['merge'])
+            replies[f'/git/commits/{merged}']['tree']['sha'] = '8' * 40
+            with self.assertRaisesRegex(ValueError, 'accepted tree/version'):
+                self.module['select_promotion'](self.api(replies, collections), 'v0.6.0')
+            replies[f'/git/commits/{merged}']['tree']['sha'] = 'd' * 40
+            replies['/actions/runs/11']['run_attempt'] = 3
+            with self.assertRaisesRegex(ValueError, 'attempt changed'):
+                self.module['select_promotion'](self.api(replies, collections), 'v0.6.0')
 
 
 class ScriptTests(unittest.TestCase):

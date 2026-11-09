@@ -13,8 +13,6 @@ concurrency:
 permissions: {}
 
 jobs:
-  # The Release PR is authored by GITHUB_TOKEN, so ci.yml never runs on it and the required `test`
-  # check stays missing: an admin merges it with `gh pr merge <n> --squash --admin`.
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -32,91 +30,51 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # Same job as the Gate so the macOS build runs once, and same workflow because tags created with
-  # GITHUB_TOKEN never trigger other workflows.
   publish:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    # Pinned, not macos-latest: AppKit picks the control design from the linked SDK.
-    runs-on: macos-26
-    # Merging the Release PR is the release approval, so this environment has no reviewer gate.
+    runs-on: ubuntu-24.04
     environment: release
-    # Must clear package-app.sh's two sequential 30-minute notarytool waits plus the build, or a
-    # stalled notarization leaves a draft release without its asset.
-    timeout-minutes: 75
+    timeout-minutes: 15
     permissions:
-      contents: write # upload the release asset
+      contents: write
+      actions: read
+      checks: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Run repository gate
-        run: swift build && ./scripts/run-ci-tests.sh
-
-      - name: Check bundled helper egress
-        run: ./scripts/test-proxy-privacy.sh
-
-      - name: Install DMG layout tool
-        run: |
-          RELEASE_TOOLS="$RUNNER_TEMP/release-tools"
-          python3 -m venv "$RELEASE_TOOLS"
-          "$RELEASE_TOOLS/bin/python" -m pip install \
-            --require-hashes \
-            --requirement scripts/requirements-release.txt
-          echo "DMGBUILD_PYTHON=$RELEASE_TOOLS/bin/python" >> "$GITHUB_ENV"
-
-      # set-key-partition-list lets codesign use the key without a GUI prompt, which would hang headless.
-      - name: Import Developer ID certificate
+        with:
+          persist-credentials: false
+      - name: Select the accepted artifact for the merged tree
+        id: accepted
         env:
-          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-        run: |
-          CERT_PATH="$RUNNER_TEMP/certificate.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
-          echo -n "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode -o "$CERT_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-
-      - name: Build, sign, notarize, package
-        env:
-          EXPECTED_RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
-          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
-        run: |
-          if [[ -z "$EXPECTED_RELEASE_TAG" ]]; then
-            echo "error: release-please did not provide the expected release tag" >&2
-            exit 1
-          fi
-          NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
-          echo -n "$NOTARY_KEY_BASE64" | base64 --decode -o "$NOTARY_KEY_PATH"
-          export NOTARY_KEY_PATH
-          ./scripts/package-app.sh
-
-      # Signed after package-app.sh because stapling rewrites the disk image, and the EdDSA
-      # signature must cover the exact bytes the release serves.
-      - name: Sign the update and render the appcast
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          NOTES_MD="$RUNNER_TEMP/appcast-notes.md"
-          NOTES_HTML="$RUNNER_TEMP/appcast-notes.html"
-          gh release view "$TAG" --json body --jq .body > "$NOTES_MD"
-          if [[ -s "$NOTES_MD" ]]; then
-            gh api --method POST /markdown -f mode=gfm -f text="$(cat "$NOTES_MD")" > "$NOTES_HTML"
-            ./scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_HTML"
-          else
-            ./scripts/generate-appcast.sh Jarvis.dmg "$TAG"
-          fi
+        run: python3 scripts/release-promotion.py select-promotion --tag "$TAG"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.accepted.outputs.candidate_id }}
+          run-id: ${{ steps.accepted.outputs.worker_run }}
+          github-token: ${{ github.token }}
+          path: retained-candidate
+          merge-multiple: true
+          digest-mismatch: error
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.accepted.outputs.acceptance_id }}
+          run-id: ${{ steps.accepted.outputs.worker_run }}
+          github-token: ${{ github.token }}
+          path: retained-acceptance
+          merge-multiple: true
+          digest-mismatch: error
+      - name: Verify acceptance, manifest, feed, and exact file hashes
+        env:
+          PROMOTION: ${{ steps.accepted.outputs.promotion }}
+        run: python3 scripts/release-promotion.py verify-promotion --source retained-acceptance --directory retained-candidate
 
       # release-please creates a draft, so a failed run never leaves a public Release without its app.
-      - name: Attach the app and publish the Release
+      - name: Attach the accepted app and publish the Release
+        working-directory: retained-candidate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
@@ -139,18 +97,11 @@ jobs:
             fi
           done
 
-          CURRENT_NOTES="$RUNNER_TEMP/current-release-notes.md"
           RELEASE_NOTES="$RUNNER_TEMP/release-notes.md"
-          gh release view "$TAG" --json body --jq .body > "$CURRENT_NOTES"
-          if grep -Fq '<!-- jarvis-release-install -->' "$CURRENT_NOTES"; then
-            cp "$CURRENT_NOTES" "$RELEASE_NOTES"
-          else
-            INSTALL_HEADER="$RUNNER_TEMP/release-header.md"
-            DOWNLOAD_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APP_ASSET}"
-            sed "s|@JARVIS_DOWNLOAD_URL@|$DOWNLOAD_URL|g" \
-              .github/release-header.md > "$INSTALL_HEADER"
-            cat "$INSTALL_HEADER" "$CURRENT_NOTES" > "$RELEASE_NOTES"
-          fi
+          DOWNLOAD_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APP_ASSET}"
+          sed "s|@JARVIS_DOWNLOAD_URL@|$DOWNLOAD_URL|g" \
+            ../.github/release-header.md > "$RELEASE_NOTES"
+          cat release-notes.md >> "$RELEASE_NOTES"
 
           ASSET_NAMES="$RUNNER_TEMP/existing-release-assets.txt"
           ASSET_DIR="$RUNNER_TEMP/existing-release-assets"
@@ -189,7 +140,3 @@ jobs:
             fi
           done
           gh release edit "$TAG" --notes-file "$RELEASE_NOTES" --draft=false --latest
-
-      - name: Delete temporary keychain
-        if: ${{ always() }}
-        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true

@@ -23,6 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Verify source revision (${{ github.sha }})
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
       - name: Show toolchain
         id: toolchain
         run: |
@@ -104,17 +107,42 @@ jobs:
     needs: [gate, universal-app]
     if: always()
     runs-on: ubuntu-24.04
-    timeout-minutes: 1
+    timeout-minutes: >-
+      ${{ (github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending')) && 240 || 1 }}
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: >-
+          github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
+        with:
+          persist-credentials: false
       - name: Require all validation jobs
         env:
           GATE_RESULT: ${{ needs.gate.result }}
           UNIVERSAL_APP_RESULT: ${{ needs.universal-app.result }}
+          RELEASE_SCOPE: >-
+            ${{ github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}
         run: |
           test "$GATE_RESULT" = success
-          test "$UNIVERSAL_APP_RESULT" = success
+          if [[ "$RELEASE_SCOPE" == true ]]; then
+            test "$UNIVERSAL_APP_RESULT" = skipped
+          else
+            test "$UNIVERSAL_APP_RESULT" = success
+          fi
+      - name: Require this release source attempt's installed-app acceptance
+        if: >-
+          github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-promotion.py wait-ready
 
   universal-app:
+    if: >-
+      github.head_ref != 'release-please--branches--main' && !contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
     runs-on: macos-26
     timeout-minutes: 25
     steps:

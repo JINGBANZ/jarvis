@@ -1,0 +1,321 @@
+name: Release ready check
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [in_progress]
+
+permissions: {}
+
+concurrency:
+  group: release-ready-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: read
+    outputs:
+      release: ${{ steps.source.outputs.release }}
+      identity: ${{ steps.source.outputs.identity }}
+      merge: ${{ steps.source.outputs.merge }}
+      version: ${{ steps.source.outputs.version }}
+      check_id: ${{ steps.source.outputs.check_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Admit the approved source attempt
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-promotion.py prepare
+
+  source:
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 31
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require all three source jobs at the frozen merge revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_IDENTITY: ${{ needs.prepare.outputs.identity }}
+        run: python3 scripts/release-promotion.py wait-source
+
+  candidate:
+    needs: [prepare, source]
+    runs-on: macos-26
+    environment: release
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
+    env:
+      RELEASE_IDENTITY: ${{ needs.prepare.outputs.identity }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.merge }}
+          path: candidate
+          persist-credentials: false
+      - name: Install DMG layout tool
+        run: |
+          RELEASE_TOOLS="$RUNNER_TEMP/release-tools"
+          python3 -m venv "$RELEASE_TOOLS"
+          "$RELEASE_TOOLS/bin/python" -m pip install \
+            --require-hashes --requirement scripts/requirements-release.txt
+          echo "DMGBUILD_PYTHON=$RELEASE_TOOLS/bin/python" >> "$GITHUB_ENV"
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo -n "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+      - name: Build, sign, notarize, package the admitted source
+        working-directory: candidate
+        env:
+          EXPECTED_RELEASE_TAG: v${{ needs.prepare.outputs.version }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          echo -n "$NOTARY_KEY_BASE64" | base64 --decode -o "$NOTARY_KEY_PATH"
+          export NOTARY_KEY_PATH
+          ./scripts/package-app.sh
+      - name: Check the bundled helper egress
+        working-directory: candidate
+        run: ./scripts/test-proxy-privacy.sh Jarvis.app/Contents/MacOS/cliproxyapi
+      - name: Sign the final bytes with frozen release notes
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          TAG: v${{ needs.prepare.outputs.version }}
+        run: |
+          NOTES_HTML="$RUNNER_TEMP/appcast-notes.html"
+          python3 scripts/release-promotion.py notes --output "$NOTES_HTML"
+          cd candidate
+          ./scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_HTML"
+      - name: Freeze the candidate files
+        id: seal
+        run: python3 scripts/release-promotion.py seal --source candidate --directory retained-candidate
+      - name: Verify the exact retained disk image
+        env:
+          TAG: v${{ needs.prepare.outputs.version }}
+        run: ./scripts/verify-release.sh retained-candidate/Jarvis.dmg "$TAG"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: release-candidate-${{ github.run_attempt }}
+          path: retained-candidate/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Delete temporary signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/AuthKey.p8"
+
+  installed:
+    name: Installed app (${{ matrix.os }})
+    needs: [prepare, candidate]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    env:
+      RELEASE_IDENTITY: ${{ needs.prepare.outputs.identity }}
+      CANDIDATE_ARTIFACT_ID: ${{ needs.candidate.outputs.artifact_id }}
+      CANDIDATE_ARTIFACT_DIGEST: ${{ needs.candidate.outputs.artifact_digest }}
+      CANDIDATE_MANIFEST_SHA256: ${{ needs.candidate.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.candidate.outputs.artifact_id }}
+          path: retained-candidate
+          merge-multiple: true
+          digest-mismatch: error
+      - name: Validate retained identity and current source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-promotion.py candidate --directory retained-candidate
+      - name: Verify and extract the candidate and frozen predecessor
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 -m venv "$RUNNER_TEMP/release-layout-venv"
+          "$RUNNER_TEMP/release-layout-venv/bin/python" -m pip install \
+            --require-hashes --requirement scripts/requirements-release.txt
+          export DMGBUILD_PYTHON="$RUNNER_TEMP/release-layout-venv/bin/python"
+          mkdir "$RUNNER_TEMP/predecessor"
+          python3 scripts/release-promotion.py predecessor --output "$RUNNER_TEMP/predecessor/Jarvis.dmg"
+          TAG="$(python3 -c 'import json,os; print("v"+json.loads(os.environ["RELEASE_IDENTITY"])["version"])')"
+          ./scripts/verify-release.sh retained-candidate/Jarvis.dmg "$TAG"
+          PREDECESSOR_TAG="$(python3 -c 'import json,os; print(json.loads(os.environ["RELEASE_IDENTITY"])["predecessor"]["tag"])')"
+          ./scripts/verify-release.sh "$RUNNER_TEMP/predecessor/Jarvis.dmg" "$PREDECESSOR_TAG"
+          mount_point="$(mktemp -d "$RUNNER_TEMP/jarvis-candidate.XXXXXX")"
+          mounted=false
+          cleanup() {
+            if [[ "$mounted" == true ]]; then hdiutil detach "$mount_point" || exit 1; fi
+            rmdir "$mount_point"
+          }
+          trap cleanup EXIT
+          for phase in candidate predecessor; do
+            if [[ "$phase" == candidate ]]; then image=retained-candidate/Jarvis.dmg; else image="$RUNNER_TEMP/predecessor/Jarvis.dmg"; fi
+            hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount_point"
+            mounted=true
+            test ! -e "$RUNNER_TEMP/Jarvis-$phase.app"
+            ditto "$mount_point/Jarvis.app" "$RUNNER_TEMP/Jarvis-$phase.app"
+            codesign --verify --strict --deep "$RUNNER_TEMP/Jarvis-$phase.app"
+            hdiutil detach "$mount_point"
+            mounted=false
+          done
+      - name: Require supported UI automation
+        run: /usr/bin/automationmodetool | grep -F 'DOES NOT REQUIRE'
+      - name: Install the pinned virtual audio devices
+        run: |
+          curl --fail --location --retry 3 https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg --output "$RUNNER_TEMP/BlackHole2ch.pkg"
+          printf '%s  %s\n' 57b540f27a3e29c37e310e01bee0fdfab76733087e47f997ef9dccf851400dcf "$RUNNER_TEMP/BlackHole2ch.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "$RUNNER_TEMP/BlackHole2ch.pkg" -target /
+          curl --fail --location --retry 3 https://existential.audio/downloads/BlackHole16ch-0.7.1.pkg --output "$RUNNER_TEMP/BlackHole16ch.pkg"
+          printf '%s  %s\n' 57254e2f76cd40db7f3f715238b1a2cb2bd08819d38abf4087f2944f71a3641a "$RUNNER_TEMP/BlackHole16ch.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "$RUNNER_TEMP/BlackHole16ch.pkg" -target /
+          sudo killall coreaudiod
+          sleep 3
+      - name: Prepare native permission authorization
+        run: python3 scripts/prepare-release-ui-account.py prepare
+      - name: Require fresh, predecessor, and retained-state upgrade journeys
+        env:
+          RELEASE_READINESS_OPENAI_API_KEY: ${{ secrets.RELEASE_TEST_OPENAI_API_KEY }}
+        run: python3 scripts/probe-release-ui.py --candidate "$RUNNER_TEMP/Jarvis-candidate.app" --predecessor "$RUNNER_TEMP/Jarvis-predecessor.app"
+      - name: Remove temporary permission authorization
+        if: always()
+        run: python3 scripts/prepare-release-ui-account.py cleanup
+      - name: Bind native proof to the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-promotion.py native-proof --os '${{ matrix.os }}' --source .jarvis/release-ui-probe --output native-proof
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-native-${{ github.run_attempt }}-${{ matrix.os }}
+          path: native-proof/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain scalar failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-failure-${{ github.run_attempt }}-${{ matrix.os }}
+          path: |
+            .jarvis/release-ui-probe/*/stage.json
+            .jarvis/release-ui-probe/*/*/ui-stage.json
+            .jarvis/release-ui-probe/*/*/ui-failure.json
+            .jarvis/release-ui-probe/*/*/cleanup.json
+            .jarvis/release-ui-probe/*/*/summary.json
+          include-hidden-files: true
+          retention-days: 30
+
+  accepted:
+    needs: [prepare, source, candidate, installed]
+    if: always() && needs.prepare.outputs.check_id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_CHECK_ID: ${{ needs.prepare.outputs.check_id }}
+      RELEASE_IDENTITY: ${{ needs.prepare.outputs.identity }}
+      CANDIDATE_ARTIFACT_ID: ${{ needs.candidate.outputs.artifact_id }}
+      CANDIDATE_ARTIFACT_DIGEST: ${{ needs.candidate.outputs.artifact_digest }}
+      CANDIDATE_MANIFEST_SHA256: ${{ needs.candidate.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require every release job
+        if: needs.prepare.outputs.release == 'true'
+        env:
+          PREPARE: ${{ needs.prepare.result }}
+          SOURCE: ${{ needs.source.result }}
+          CANDIDATE: ${{ needs.candidate.result }}
+          INSTALLED: ${{ needs.installed.result }}
+        run: test "$PREPARE:$SOURCE:$CANDIDATE:$INSTALLED" = success:success:success:success
+      - name: Select this attempt's complete native evidence
+        id: native
+        if: needs.prepare.outputs.release == 'true'
+        run: python3 scripts/release-promotion.py native-artifacts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.prepare.outputs.release == 'true'
+        with:
+          artifact-ids: ${{ steps.native.outputs.native_ids }}
+          path: native-evidence
+          merge-multiple: true
+          digest-mismatch: error
+      - name: Freeze acceptance
+        id: acceptance
+        if: needs.prepare.outputs.release == 'true'
+        run: python3 scripts/release-promotion.py accept --directory native-evidence --output accepted
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        if: needs.prepare.outputs.release == 'true'
+        with:
+          name: release-acceptance-${{ github.run_attempt }}
+          path: accepted/acceptance.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Complete this source attempt's release-ready check
+        if: needs.prepare.outputs.release == 'true'
+        env:
+          ACCEPTANCE_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ACCEPTANCE_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          ACCEPTANCE_SHA256: ${{ steps.acceptance.outputs.acceptance_sha256 }}
+        run: python3 scripts/release-promotion.py pass
+      - name: Refuse failed, cancelled, or incomplete acceptance
+        if: always() && (failure() || cancelled() || needs.prepare.result != 'success')
+        run: python3 scripts/release-promotion.py fail
