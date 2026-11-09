@@ -1,10 +1,11 @@
 import AppKit
-import AVFoundation
 import XCTest
 
 extension ReleaseReadinessTests {
     func testInstalledJourney() throws {
         try prepareRun()
+        attachEvidence(name: "fixture-playback-preflight")
+        try playQuestion()
         let environment = ProcessInfo.processInfo.environment
         let phase = try XCTUnwrap(environment["JARVIS_READINESS_PHASE"])
         XCTAssertTrue(["fresh", "predecessor", "upgrade"].contains(phase))
@@ -109,21 +110,6 @@ extension ReleaseReadinessTests {
         attachEvidence(app, name: "journey-start")
         _ = try candidateProcessID()
         try audioDevices?.verify()
-        let environment = ProcessInfo.processInfo.environment
-        let source = URL(fileURLWithPath: try XCTUnwrap(environment["JARVIS_READINESS_SPEECH_FILE"]))
-        let file = try AVAudioFile(forReading: source)
-        let duration = Double(file.length) / file.processingFormat.sampleRate
-        XCTAssertTrue(duration.isFinite && duration > 1 && duration < 30)
-        let engine = AVAudioEngine()
-        let player = AVAudioPlayerNode()
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: file.processingFormat)
-        let played = XCTestExpectation(description: "The fixed system question must finish playback")
-        player.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { _ in played.fulfill() }
-        defer { player.stop(); engine.stop() }
-        attachEvidence(app, name: "journey-playback-prepare")
-        try engine.start()
-        XCTAssertTrue(engine.isRunning, "System playback must prepare before capture starts")
         let previous = try sessionDirectories()
         let started = Date().timeIntervalSince1970
         app.statusItems["Jarvis is stopped"].click()
@@ -136,7 +122,7 @@ extension ReleaseReadinessTests {
         XCTAssertEqual(fresh.count, 1, "Start must create one fresh production session")
         let directory = try XCTUnwrap(fresh.first)
         attachEvidence(app, name: "journey-transcript")
-        player.play() // ghost-mode-allowed: external runner plays the fixed fixture through the selected virtual output
+        try playQuestion()
         try waitUntil("The fixed system question must produce a fresh finalized transcript", timeout: 60) {
             guard let rows = try? self.activity(directory) else { return false }
             return rows.contains { row in
@@ -145,7 +131,6 @@ extension ReleaseReadinessTests {
                     && text.contains("binary search") && text.contains("sorted list")
             }
         }
-        XCTAssertEqual(XCTWaiter.wait(for: [played], timeout: 30), .completed, "Synthetic playback must finish")
         try audioDevices?.verify()
         let boundary = try activity(directory).map(\.order).max() ?? -1
         let shortcutAt = Date().timeIntervalSince1970
@@ -173,6 +158,20 @@ extension ReleaseReadinessTests {
         attachEvidence(app, name: "\(model)-cycle-\(cycle)-complete")
         return ["model": model, "cycle": cycle, "fullActive": true, "freshSession": true,
                 "stimulusTranscript": true, "shortcutHint": true, "stopped": true, "auditComplete": true]
+    }
+
+    private func playQuestion() throws {
+        let environment = ProcessInfo.processInfo.environment
+        let player = Process()
+        player.executableURL = URL(fileURLWithPath: try XCTUnwrap(environment["JARVIS_READINESS_PLAYER"]))
+        player.arguments = [try XCTUnwrap(environment["JARVIS_READINESS_SPEECH_FILE"])]
+        player.standardOutput = FileHandle.nullDevice
+        player.standardError = FileHandle.nullDevice
+        defer { if player.isRunning { player.terminate() } }
+        try player.run() // ghost-mode-allowed: external runner plays the fixed fixture through the selected virtual output
+        try waitUntil("The fixed question must finish playback", timeout: 30) { !player.isRunning }
+        XCTAssertEqual(player.terminationReason, .exit)
+        XCTAssertEqual(player.terminationStatus, 0, "The system player must finish successfully")
     }
 
     private struct Row: Decodable {

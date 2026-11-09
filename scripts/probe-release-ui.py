@@ -189,14 +189,16 @@ def run(arguments, *, timeout, log=None):
 
 
 def owned_processes(roots, ownership):
-    listing = subprocess.check_output(["/bin/ps", "-axo", "pid=,uid=,comm="], text=True, timeout=5)
+    names = {path.name[:15] for root in roots for path in root.rglob("*")}
+    # ucomm avoids reading every process's argument memory; exact kernel path and birth still establish ownership.
+    listing = subprocess.check_output(["/bin/ps", "-axo", "pid=,uid=,ucomm="], text=True, timeout=5)
     found = []
     for line in listing.splitlines():
         fields = line.split(maxsplit=2)
         if len(fields) != 3:
             raise ValueError("Incomplete process inventory")
         pid, uid = map(int, fields[:2])
-        if uid != os.getuid() or not any(Path(fields[2]).is_relative_to(root) for root in roots):
+        if uid != os.getuid() or fields[2].rstrip()[:15] not in names:
             continue
         identity = ownership["process"](pid)
         if identity is None:
@@ -341,6 +343,10 @@ def build_ui(evidence, architecture):
     manifests = list((derived / "Build/Products").glob("*.xctestrun"))
     if len(manifests) != 1:
         raise ValueError("Expected one compiled UI test manifest")
+    player = derived / "readiness-afplay"
+    # Keep the Apple player under an owned root so failed UI tests cannot leave playback behind.
+    shutil.copy("/usr/bin/afplay", player)
+    run(["/usr/bin/codesign", "--verify", "--strict", "-R=anchor apple", str(player)], timeout=30)
     return derived, manifests[0]
 
 
@@ -456,7 +462,8 @@ def run_phase(name, version, app, evidence, derived, template, speech, architect
     phase = evidence / name
     phase.mkdir(mode=0o700)
     environment = {"JARVIS_READINESS_APP_PATH": str(app), "JARVIS_READINESS_EXPECTED_VERSION": version,
-                   "JARVIS_READINESS_PHASE": name, "JARVIS_READINESS_SPEECH_FILE": str(speech)}
+                   "JARVIS_READINESS_PHASE": name, "JARVIS_READINESS_SPEECH_FILE": str(speech),
+                   "JARVIS_READINESS_PLAYER": str(derived / "readiness-afplay")}
     if upgrade_profile is not None:
         environment["JARVIS_READINESS_UPGRADE_PROFILE"] = str(upgrade_profile)
     configured = configure_manifest(template, phase, environment)

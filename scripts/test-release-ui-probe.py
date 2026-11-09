@@ -23,6 +23,24 @@ ACCOUNT_GLOBALS = ACCOUNT["prepare"].__globals__
 
 
 class ProbeResultsTests(unittest.TestCase):
+    def test_inventory_uses_kernel_names_and_verifies_exact_executable_and_birth(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runner = root / 'runner-with-a-long-name'
+            runner.touch()
+            ownership = {'process': mock.Mock(side_effect=lambda pid: {'pid': pid, 'start': [1, pid]}),
+                         'executable': mock.Mock(side_effect=lambda pid, **_: {
+                             42: str(runner), 43: '/unrelated/runner-with-a-long-name', 44: None, 45: str(runner),
+                         }[pid]), 'same': mock.Mock(side_effect=lambda item: item['pid'] != 45)}
+            output = '\n'.join(f'{pid} 501 runner-with-a-l' for pid in (42, 43, 44, 45)) + '\n46 0 runner-with-a-l\n47 501 protected\n'
+            with mock.patch.object(PROBE['subprocess'], 'check_output', return_value=output) as listing, \
+                    mock.patch.object(PROBE['os'], 'getuid', return_value=501):
+                result = PROBE['owned_processes']([root], ownership)
+            self.assertEqual(result, [{'pid': 42, 'start': [1, 42], 'executable': str(runner)}])
+        self.assertEqual(listing.call_args.args[0], ['/bin/ps', '-axo', 'pid=,uid=,ucomm='])
+        ownership['process'].assert_has_calls([mock.call(pid) for pid in (42, 43, 44, 45)])
+        self.assertEqual(ownership['process'].call_count, 4)
+
     def test_subprocess_errors_do_not_publish_private_ui_logs(self):
         with tempfile.TemporaryDirectory() as temporary:
             log = Path(temporary) / 'test.log'

@@ -602,13 +602,13 @@ final class ReleaseReadinessTests: XCTestCase {
         return app
     }
 
-    func attachEvidence(_ app: XCUIApplication, name: String) {
+    func attachEvidence(_ app: XCUIApplication? = nil, name: String) {
         guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else {
             XCTFail("Required private evidence directory is missing")
             return
         }
         do {
-            let receipt: [String: Any] = ["stage": name, "appState": app.state.rawValue,
+            let receipt: [String: Any] = ["stage": name, "appState": app?.state.rawValue ?? 0,
                                          "uptime": ProcessInfo.processInfo.systemUptime]
             let data = try JSONSerialization.data(withJSONObject: receipt)
             try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("ui-stage.json"), options: .atomic)

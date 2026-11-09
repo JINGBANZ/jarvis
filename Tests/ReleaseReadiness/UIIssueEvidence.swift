@@ -30,7 +30,8 @@ enum UIIssueEvidence {
         let value: [String: Any] = ["issueType": issue.type.rawValue, "sourceIsHarness": ownSource,
                                     "source": source ?? "external",
                                     "line": ownSource ? location?.lineNumber ?? 0 : 0,
-                                    "classification": classification, "severity": severity, "errors": errors]
+                                    "classification": classification, "severity": severity, "errors": errors,
+                                    "automationSignals": automationSignals(issue.compactDescription)]
         do {
             let data = try JSONSerialization.data(withJSONObject: value)
             let filenames = classification == "failure" ? [firstFilename, failureFilename] : [firstFilename]
@@ -41,5 +42,23 @@ enum UIIssueEvidence {
                 }
             }
         } catch { print("Could not record the scalar UI issue metadata") }
+    }
+
+    private static func automationSignals(_ message: String) -> [String] {
+        let patterns: [(String, [String])] = [
+            ("snapshot", ["snapshot"]),
+            ("connection", ["communication", "connection"]),
+            ("not-running", ["not running"]),
+            ("not-hittable", ["not hittable", "no hittable", "no hit point"]),
+            ("element-match", ["no matches found", "multiple matching", "matching element"]),
+            ("activation", ["failed to activate", "failed to launch"]),
+            ("timeout", ["timed out", "timeout", "time allowance"]),
+            ("event", ["synthesize", "event"]),
+            ("permission", ["not authorized", "denied", "accessibility"]),
+            ("interruption", ["interrupted", "unresponsive", "not responding"]),
+        ]
+        return patterns.compactMap { category, terms in
+            terms.contains { message.localizedCaseInsensitiveContains($0) } ? category : nil
+        }
     }
 }
