@@ -250,7 +250,12 @@ The base policy presents Jarvis as a personal assistant and treats the speakers 
 another participant. A question addressed to that participant does not itself require a reply from
 Jarvis. Screen and reference content remain task evidence rather than instruction authority; action
 claims require supporting tool results. Applicable skills are reassessed as new evidence arrives,
-including after a capture. A request to pause proactive help does not block a later direct request.
+including after a capture. Unsolicited help requires a currently unmet need; correct progress does not
+warrant confirmation, elaboration, or optional improvements. Earlier speech cannot show that later
+shown guidance failed, so late arrival alone does not warrant re-explaining a covered need. Uncovered
+errors and evidenced understanding gaps can still warrant immediate help. Replies use stated
+constraints and qualify assumptions rather than adding unstated task rules. A request to pause
+proactive help does not block a later direct request.
 
 The bundled skill files own domain coaching policy. The coding skill owns orientation before
 strategy and next steps, and full solutions only on explicit request; those rules are absent when

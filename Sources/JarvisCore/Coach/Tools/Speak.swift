@@ -14,7 +14,8 @@ public let speakTool = ToolDef(
         """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
     guidance: """
         Answer the user's current request directly. Follow applicable loaded skills for delivery.
-        Ground replies in the available evidence. Never invent personal experience or screen details.
+        Ground replies in the available evidence and stated constraints. Qualify assumptions your answer
+        depends on. Never invent personal experience or screen details.
 
         # Hint
         One direct, connected reply of at most 36 words. Lead with the most useful answer or advice.
