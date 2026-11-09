@@ -100,7 +100,7 @@ func referenceHit(name: String, text: String) -> ReferenceSearchHit {
         }
         #expect(declared.contains("load_tool") == admitted)
         #expect(declared.contains("call_tool") == admitted)
-        #expect(prompt.contains("# Tools you can load") == admitted)
+        #expect(prompt.contains("# Available additional tools") == admitted)
     }
 
     @Test func listReadSearchReachAsyncSessionAndPreserveTypedCoverage() async throws {

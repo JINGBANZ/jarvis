@@ -17,6 +17,44 @@ import JarvisCore
         }
     }
 
+    @Test func toolDeclarationsCarryGuidanceAndRemainStableAcrossHistory() throws {
+        let wire = ResponsesWireFormat(model: "gpt-5.5", reasoningEffort: "low", maxOutputTokens: 2_048, store: false, stream: false)
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], referencesAdmitted: true, skills: SkillCatalog.bundled())
+        let system = JarvisPrompts.Coach.system(capabilities: capabilities)
+        let call = RawToolCall(id: "load", name: "load_tool", argumentsJSON: "{}")
+        let histories: [[ChatMessage]] = [
+            [.user("first request")],
+            [.user("first request"), .assistantToolCalls([call]),
+             ChatMessage(role: .tool, text: "loaded guidance", toolCallId: "load"), .user("next request")],
+        ]
+        var declarations: [Data] = []
+        for history in histories {
+            let data = try wire.encode(messages: [.system(system)] + history,
+                                       tools: capabilities.tools, toolChoice: .required)
+            let payload = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let tools = try #require(payload["tools"] as? [[String: Any]])
+            let speak = try #require(tools.first { $0["name"] as? String == "speak" })
+            #expect(speak["description"] as? String == speakTool.description + "\n\n" + speakTool.guidance)
+            let schema = try #require(speak["parameters"] as? [String: Any])
+            let properties = try #require(schema["properties"] as? [String: [String: Any]])
+            let hint = try #require(properties["hint"]?["description"] as? String)
+            let detail = try #require(properties["detail"]?["description"] as? String)
+            #expect(hint == "One brief, direct, connected reply; the overlay handles wrapping.")
+            #expect(detail == "Markdown shown under the hint for requested content that cannot fit there, supporting content required by a loaded skill, or a warranted explanation; otherwise null.")
+            #expect((speak["description"] as? String ?? "").contains("an explanation request is not required"))
+            #expect((speak["description"] as? String ?? "").contains("# Hint"))
+            #expect((speak["description"] as? String ?? "").contains("# Detail"))
+            let capture = try #require(tools.first { $0["name"] as? String == "capture_screen" })
+            #expect(capture["description"] as? String == captureScreenTool.description + "\n\n" + captureScreenTool.guidance)
+            #expect(!tools.contains { $0["name"] as? String == "search_references" })
+            #expect(!system.contains(speakTool.guidance))
+            #expect(!system.contains(searchReferencesTool.guidance))
+            declarations.append(try JSONSerialization.data(withJSONObject: tools, options: [.sortedKeys]))
+        }
+        #expect(declarations[0] == declarations[1])
+    }
+
     @Test(arguments: [false, true])
     func metadataPrefixSurvivesChangingHistoryAndToolContinuations(store: Bool) throws {
         let catalog = #"Untrusted filenames: [{"documentID":"stable-id","sourceDisplayName":"notes.md"}]"#

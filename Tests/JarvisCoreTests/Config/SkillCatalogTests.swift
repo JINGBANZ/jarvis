@@ -169,6 +169,6 @@ import Testing
         #expect(capabilities.skills.isEmpty)
         #expect(capabilities.tool(named: CoachCapabilities.loadSkillName) == nil)
         #expect(!prompt.contains("load_skill"))
-        #expect(!prompt.contains("# Skills you can load"))
+        #expect(!prompt.contains("# Available skills"))
     }
 }

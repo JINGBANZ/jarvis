@@ -15,6 +15,44 @@ import JarvisCore
     func types(_ body: [String: Any]) -> [String] { input(body).map { $0["type"] as? String ?? "?" } }
     func config(_ body: [String: Any]) -> [String: Any] { body["generation_config"] as? [String: Any] ?? [:] }
 
+    @Test func toolDeclarationsCarryGuidanceAndRemainStableAcrossHistory() throws {
+        let wire = InteractionsWireFormat(model: "gemini-3.8-flash", reasoningEffort: "low", maxOutputTokens: 2_048)
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], referencesAdmitted: true, skills: SkillCatalog.bundled())
+        let system = JarvisPrompts.Coach.system(capabilities: capabilities)
+        let call = RawToolCall(id: "load", name: "load_tool", argumentsJSON: "{}")
+        let histories: [[ChatMessage]] = [
+            [.user("first request")],
+            [.user("first request"), .assistantToolCalls([call]),
+             ChatMessage(role: .tool, text: "loaded guidance", toolCallId: "load"), .user("next request")],
+        ]
+        var declarations: [Data] = []
+        for history in histories {
+            let data = try wire.encode(messages: [.system(system)] + history,
+                                       tools: capabilities.tools, toolChoice: .required)
+            let payload = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let tools = try #require(payload["tools"] as? [[String: Any]])
+            let speak = try #require(tools.first { $0["name"] as? String == "speak" })
+            #expect(speak["description"] as? String == speakTool.description + "\n\n" + speakTool.guidance)
+            let schema = try #require(speak["parameters"] as? [String: Any])
+            let properties = try #require(schema["properties"] as? [String: [String: Any]])
+            let hint = try #require(properties["hint"]?["description"] as? String)
+            let detail = try #require(properties["detail"]?["description"] as? String)
+            #expect(hint == "One brief, direct, connected reply; the overlay handles wrapping.")
+            #expect(detail == "Markdown shown under the hint for requested content that cannot fit there, supporting content required by a loaded skill, or a warranted explanation; otherwise null.")
+            #expect((speak["description"] as? String ?? "").contains("an explanation request is not required"))
+            #expect((speak["description"] as? String ?? "").contains("# Hint"))
+            #expect((speak["description"] as? String ?? "").contains("# Detail"))
+            let capture = try #require(tools.first { $0["name"] as? String == "capture_screen" })
+            #expect(capture["description"] as? String == captureScreenTool.description + "\n\n" + captureScreenTool.guidance)
+            #expect(!tools.contains { $0["name"] as? String == "search_references" })
+            #expect(!system.contains(speakTool.guidance))
+            #expect(!system.contains(searchReferencesTool.guidance))
+            declarations.append(try JSONSerialization.data(withJSONObject: tools, options: [.sortedKeys]))
+        }
+        #expect(declarations[0] == declarations[1])
+    }
+
     @Test func encodesTheStatelessRequestShape() throws {
         let b = try body([.system("You are Jarvis."), .system("Be brief."), .user("hi"), .userImage("AAAA")])
         #expect(b["model"] as? String == "gemini-3.8-flash")
@@ -183,7 +221,7 @@ import JarvisCore
         {"model":"gemini-3.8-flash","store":false,"system_instruction":"You are Jarvis.",
          "generation_config":{"thinking_level":"low","thinking_summaries":"none","max_output_tokens":2048,
            "tool_choice":{"allowed_tools":{"mode":"any","tools":["speak"]}}},
-         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"hint":{},"detail":{}}}}],
+         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"hint":{},"detail":{"description":"Optional Markdown displayed below the hint"}}}}],
          "input":[{"type":"user_input","content":[{"type":"text","text":"Session start."}]},
                   {"type":"thought","signature":"skip_thought_signature_validator"},
                   {"type":"function_call","id":"runner_1a2b3c4d","name":"load_skill","arguments":{"name":"coding"}},
@@ -201,6 +239,7 @@ import JarvisCore
         #expect(exchange.instructions == "You are Jarvis.")
         #expect(exchange.toolNames == ["speak"])
         #expect(exchange.speakParameters == ["detail", "hint"])
+        #expect(exchange.speakDescription == nil)
         #expect(exchange.toolChoiceType == "allowed_tools")
         #expect(exchange.input.count == 5)
         #expect(exchange.input[0] == .message(role: "user", parts: ["Session start."]))

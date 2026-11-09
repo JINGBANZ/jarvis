@@ -82,7 +82,7 @@ struct InteractionsWireFormat: BrainWireFormat {
         var verbatim = VerbatimJSON()
         if !tools.isEmpty {
             body["tools"] = try tools.map { tool -> [String: Any] in
-                ["type": "function", "name": tool.name, "description": tool.description,
+                ["type": "function", "name": tool.name, "description": tool.descriptionWithGuidance,
                  "parameters": try verbatim.placeholder(for: tool.parametersJSON)]
             }
             // Top-level `tool_choice` and any parallel-call field are 400s; the runner answers extra
