@@ -28,14 +28,23 @@ public struct TestProviderConfiguration: Decodable, Sendable {
 
     public static let shared: Self = {
         do {
-            guard let url = Bundle.module.url(forResource: "test-providers", withExtension: "json") else {
-                preconditionFailure("Missing shared test provider configuration")
-            }
-            return try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+            return try load(in: Bundle(for: Anchor.self))
         } catch {
             preconditionFailure("Invalid shared test provider configuration: \(error)")
         }
     }()
+
+    static func load(in host: Bundle) throws -> Self {
+        let installedBundle = host.resourceURL?
+            .appendingPathComponent("Jarvis_JarvisScenarioHarness.bundle")
+        let resources = installedBundle.flatMap { Bundle(url: $0) } ?? Bundle.module
+        guard let url = resources.url(forResource: "test-providers", withExtension: "json") else {
+            preconditionFailure("Missing shared test provider configuration")
+        }
+        return try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+    }
+
+    private final class Anchor: NSObject {}
 
     public func modelID(for provider: BrainProvider, judge: Bool = false) -> String {
         if judge, let model = judgeModels[provider.rawValue] { return model }
