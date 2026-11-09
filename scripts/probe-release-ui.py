@@ -2,6 +2,7 @@
 """Credential-free installed-app UI feasibility check on disposable GitHub-hosted Macs."""
 
 import json
+import math
 import os
 from pathlib import Path
 import plistlib
@@ -277,11 +278,154 @@ def inject_environment(value, environment):
     return count
 
 
-def validate_summary(summary):
-    expected = {"totalTestCount": 3, "passedTests": 3, "failedTests": 0, "skippedTests": 0}
+def validate_summary(summary, count=3):
+    expected = {"totalTestCount": count, "passedTests": count, "failedTests": 0, "skippedTests": 0}
     for key, value in expected.items():
         if type(summary.get(key)) is not int or summary[key] != value:
-            raise ValueError(f"UI probe requires all three cases to pass: {key}")
+            raise ValueError(f"UI probe requires all {count} cases to pass: {key}")
+
+
+def validate_audio_receipt(receipt, mode, phase, *, require_pass=True):
+    common = {"schemaVersion", "check", "mode", "phase", "stage", "passed", "outputFrames",
+              "rawMic", "globalTap", "defaultsRestored", "resourcesReleased"}
+    specific = {"authorize": {"microphoneAuthorized", "tapCreated", "nativeConsentAcknowledged", "captureGrantProven"},
+                "capture": {"micUID", "systemUID", "sampleRate", "micChannels"},
+                "emit": {"emitterUID", "sampleRate"}}[mode]
+    checks = {"authorize": "fixture-capture-consent-bootstrap", "capture": "production-aggregate-route-isolation",
+              "emit": "virtual-device-tone-emission"}
+    if (not isinstance(receipt, dict) or not common <= receipt.keys()
+            or receipt.keys() - common - specific - {"error"}
+            or type(receipt["schemaVersion"]) is not int or receipt["schemaVersion"] != 1
+            or receipt["mode"] != mode or receipt["phase"] != phase or receipt["check"] != checks[mode]
+            or receipt["stage"] != "complete"):
+        raise ValueError("Invalid audio fixture receipt identity")
+    for key in {"passed", "defaultsRestored", "resourcesReleased"} | (specific if mode == "authorize" else set()):
+        if key in receipt and type(receipt[key]) is not bool:
+            raise ValueError("Invalid audio fixture flags")
+    metrics = {"frames", "rms", "micToneAmplitude", "systemToneAmplitude", "micToneFraction", "systemToneFraction"}
+    for route in ("rawMic", "globalTap"):
+        value = receipt[route]
+        if not isinstance(value, dict) or value.keys() != metrics:
+            raise ValueError("Invalid route metric shape")
+        if type(value["frames"]) is not int or not 0 <= value["frames"] <= 10_000_000:
+            raise ValueError("Invalid route frame count")
+        if any(type(value[key]) not in (int, float) or not math.isfinite(value[key]) or not 0 <= value[key] <= 10
+               for key in metrics - {"frames"}):
+            raise ValueError("Invalid route energy")
+    if type(receipt["outputFrames"]) is not int or not 0 <= receipt["outputFrames"] <= 10_000_000:
+        raise ValueError("Invalid emitter frame count")
+    if "sampleRate" in receipt and (type(receipt["sampleRate"]) not in (int, float)
+                                    or not math.isfinite(receipt["sampleRate"]) or not 8_000 <= receipt["sampleRate"] <= 192_000):
+        raise ValueError("Invalid audio sample rate")
+    if "micChannels" in receipt and (type(receipt["micChannels"]) is not int or receipt["micChannels"] != 16):
+        raise ValueError("Unexpected microphone fixture format")
+    identities = {"micUID": "BlackHole16ch_UID", "systemUID": "BlackHole2ch_UID",
+                  "emitterUID": "BlackHole16ch_UID" if phase == "mic" else "BlackHole2ch_UID"}
+    if any(key in receipt and receipt[key] != value for key, value in identities.items()):
+        raise ValueError("Audio fixture route identity mismatch")
+    if "error" in receipt and (not isinstance(receipt["error"], str) or len(receipt["error"]) > 1_024):
+        raise ValueError("Invalid audio failure metadata")
+    safe = {key: value for key, value in receipt.items() if key != "error"}
+    safe["errorPresent"] = "error" in receipt
+    if not require_pass:
+        return safe
+    if (not specific <= receipt.keys() or receipt["passed"] is not True or "error" in receipt
+            or receipt["defaultsRestored"] is not True or receipt["resourcesReleased"] is not True):
+        raise ValueError("Audio fixture phase or cleanup did not pass")
+    if mode == "authorize":
+        if (receipt["captureGrantProven"] is not False
+                or not all(receipt[key] for key in ("microphoneAuthorized", "tapCreated", "nativeConsentAcknowledged"))):
+            raise ValueError("Fixture consent bootstrap lacks observed acknowledgement")
+    elif mode == "emit":
+        if receipt["outputFrames"] < 8 * receipt["sampleRate"]:
+            raise ValueError("Emitter did not complete its finite tone")
+    else:
+        mic, tap = receipt["rawMic"], receipt["globalTap"]
+        if min(mic["frames"], tap["frames"]) < 4 * receipt["sampleRate"]:
+            raise ValueError("Both capture routes require the complete measurement")
+        intended, inactive = (mic, tap) if phase == "mic-only" else (tap, mic)
+        tone = "micTone" if phase == "mic-only" else "systemTone"
+        other = "systemTone" if phase == "mic-only" else "micTone"
+        amplitude = intended[tone + "Amplitude"]
+        if intended["rms"] <= 0.02 or amplitude <= 0.02 or intended[tone + "Fraction"] <= 0.8:
+            raise ValueError("Intended route tone is missing")
+        if (inactive[tone + "Amplitude"] >= 0.001 or inactive[tone + "Amplitude"] >= amplitude * 0.01
+                or inactive["rms"] >= 0.001 or inactive["rms"] >= intended["rms"] * 0.01
+                or mic[other + "Amplitude"] >= 0.001 or tap[other + "Amplitude"] >= 0.001):
+            raise ValueError("Synthetic audio routes are not independent")
+    return safe
+
+
+def build_ui(evidence, architecture, environment):
+    project = ROOT / "Tests/ReleaseReadiness/ReleaseReadiness.xcodeproj"
+    derived = evidence / "derived"
+    run(["/usr/bin/xcodebuild", "build-for-testing", "-project", str(project),
+         "-scheme", "ReleaseReadiness", "-destination", f"platform=macOS,arch={architecture}",
+         "-derivedDataPath", str(derived), f"ARCHS={architecture}", "ONLY_ACTIVE_ARCH=YES",
+         "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_REQUIRED=NO"], timeout=300, log=evidence / "build.log")
+    manifests = list((derived / "Build/Products").glob("*.xctestrun"))
+    if len(manifests) != 1:
+        raise ValueError("Expected one compiled UI test manifest")
+    with manifests[0].open("rb") as source:
+        manifest = plistlib.load(source)
+    if inject_environment(manifest, {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted",
+                                    "RUNNER_OS": "macOS", "GITHUB_WORKSPACE": str(ROOT),
+                                    "JARVIS_READINESS_EVIDENCE": str(evidence), **environment}) != 1:
+        raise ValueError("Expected one external UI test target")
+    configured = manifests[0].with_name("HostedProbe.xctestrun")
+    with configured.open("wb") as output:
+        plistlib.dump(manifest, output)
+    return derived, configured
+
+
+def audio_routes(evidence, architecture):
+    fixture = evidence / "derived/Jarvis Route Fixture.app"
+    executable = fixture / "Contents/MacOS/AudioRouteProbe"
+    executable.parent.mkdir(parents=True, mode=0o700)
+    with (fixture / "Contents/Info.plist").open("wb") as output:
+        plistlib.dump({"CFBundleIdentifier": "com.jarvis.release-route-fixture", "CFBundleExecutable": "AudioRouteProbe",
+                      "CFBundleName": "Jarvis Route Fixture", "CFBundleDisplayName": "Jarvis Route Fixture",
+                      "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "LSMinimumSystemVersion": "15.0",
+                      "LSUIElement": True, "NSMicrophoneUsageDescription": "Measure synthetic microphone routing.",
+                      "NSAudioCaptureUsageDescription": "Measure synthetic system playback for route verification."}, output)
+    run(["/usr/bin/swiftc", "-swift-version", "6", "-strict-concurrency=complete", "-warnings-as-errors",
+         "-parse-as-library", "-target", architecture + "-apple-macos15.0", "-module-cache-path",
+         str(evidence / "module-cache"), "-framework", "CoreAudio", "-framework", "AVFoundation",
+         str(ROOT / "Tests/ReleaseReadiness/AudioRouteProbe.swift"), "-o", str(executable)],
+        timeout=120, log=evidence / "audio-build.log")
+    run(["/usr/bin/codesign", "--force", "--sign", "-", str(fixture)], timeout=30, log=evidence / "audio-sign.log")
+    run(["/usr/bin/codesign", "--verify", "--strict", str(fixture)], timeout=30)
+    derived, configured = build_ui(evidence, architecture, {"JARVIS_READINESS_AUDIO_FIXTURE": str(fixture)})
+    result = evidence / "result.xcresult"
+    phases = [("authorize", "consent", "authorize"), ("capture", "mic-only", "mic-capture"),
+              ("emit", "mic", "mic-emit"), ("capture", "system-only", "system-capture"), ("emit", "system", "system-emit")]
+    try:
+        run_ui(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", str(configured),
+                "-destination", f"platform=macOS,arch={architecture}", "-resultBundlePath", str(result),
+                "-only-testing:ReleaseReadiness/AudioFixtureTests", "-parallel-testing-enabled", "NO",
+                "-maximum-test-execution-time-allowance", "120"],
+               timeout=240, log=evidence / "test.log", roots=[derived], evidence=evidence)
+    finally:
+        for mode, phase, name in phases:
+            path = evidence / f"private-{name}.json"
+            if path.exists() and 0 < path.stat().st_size <= 8_192:
+                try:
+                    safe = validate_audio_receipt(json.loads(path.read_text()), mode, phase, require_pass=False)
+                    (evidence / f"route-{name}.json").write_text(json.dumps(safe, indent=2) + "\n")
+                except (ValueError, OSError):
+                    print("Audio fixture receipt absent or malformed: " + name, flush=True)
+    summary = json.loads(run(["/usr/bin/xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result)], timeout=30))
+    validate_summary(summary, count=1)
+    for mode, phase, name in phases:
+        validate_audio_receipt(json.loads((evidence / f"private-{name}.json").read_text()), mode, phase)
+    observed = json.loads((evidence / "fixture-consents.json").read_text())
+    if (not isinstance(observed, dict) or any(type(value) is not bool for value in observed.values())
+            or observed != {"microphoneAllowObserved": True, "systemAudioAllowObserved": True, "captureGrantProven": False}):
+        raise ValueError("Fixture requires both observed native consent actions")
+    (evidence / "audio-summary.json").write_text(json.dumps({"architecture": architecture, "nativeArchitectureProven": True,
+        "bothRoutesIndependent": True, "fixtureCaptureGrantProven": True, "jarvisCaptureGrantProven": False,
+        "providerAcceptanceProven": False}, indent=2) + "\n")
+    print("Both synthetic OS routes passed; Jarvis capture and provider acceptance remain separate.")
 
 
 def main():
@@ -291,7 +435,17 @@ def main():
             or account.pw_name != "runner" or account.pw_dir != "/Users/runner"):
         raise ValueError("This probe may change app preferences only on a disposable hosted runner")
     if len(sys.argv) != 2:
-        raise ValueError("usage: probe-release-ui.py /Users/runner/Applications/Jarvis.app")
+        raise ValueError("usage: probe-release-ui.py /Users/runner/Applications/Jarvis.app | --audio-routes")
+    os.umask(0o077)
+    evidence = ROOT / ".jarvis" / "release-ui-probe" / uuid.uuid4().hex
+    evidence.mkdir(parents=True, mode=0o700)
+    architecture = run(["/usr/bin/uname", "-m"], timeout=5).strip()
+    if architecture not in {"arm64", "x86_64"}:
+        raise ValueError("Unsupported hosted native architecture")
+    print(f"UI probe evidence: {evidence}", flush=True)
+    if sys.argv[1] == "--audio-routes":
+        audio_routes(evidence, architecture)
+        return
     app = Path(sys.argv[1])
     allowed = Path(account.pw_dir) / "Applications/Jarvis.app"
     if app != allowed or app.resolve(strict=True) != app or not app.is_dir():
@@ -304,42 +458,17 @@ def main():
         raise ValueError("Probe requires the normal production app identity and executable")
     run(["/usr/bin/codesign", "--verify", "--strict", "--deep", str(app)], timeout=30)
 
-    os.umask(0o077)
-    evidence = ROOT / ".jarvis" / "release-ui-probe" / uuid.uuid4().hex
-    evidence.mkdir(parents=True, mode=0o700)
     started = time.monotonic()
     def stage(name):
         receipt = {"phase": "setup-feasibility", "stage": name,
                    "elapsedSeconds": round(time.monotonic() - started, 3)}
         (evidence / "stage.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print("Setup feasibility: " + json.dumps(receipt, sort_keys=True), flush=True)
-    print(f"UI probe evidence: {evidence}", flush=True)
-    architecture = run(["/usr/bin/uname", "-m"], timeout=5).strip()
-    project = ROOT / "Tests/ReleaseReadiness/ReleaseReadiness.xcodeproj"
-    derived = evidence / "derived"
     stage("build")
-    run(["/usr/bin/xcodebuild", "build-for-testing", "-project", str(project),
-         "-scheme", "ReleaseReadiness", "-destination", f"platform=macOS,arch={architecture}",
-         "-derivedDataPath", str(derived), f"ARCHS={architecture}", "ONLY_ACTIVE_ARCH=YES",
-         "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_REQUIRED=NO"],
-        timeout=300, log=evidence / "build.log")
-    manifests = list((derived / "Build/Products").glob("*.xctestrun"))
-    if len(manifests) != 1:
-        raise ValueError("Expected one compiled UI test manifest")
-    with manifests[0].open("rb") as source:
-        manifest = plistlib.load(source)
-    injected = inject_environment(manifest, {
-        "GITHUB_ACTIONS": "true",
-        "RUNNER_ENVIRONMENT": "github-hosted",
+    derived, configured = build_ui(evidence, architecture, {
         "JARVIS_READINESS_APP_PATH": str(app),
         "JARVIS_READINESS_EXPECTED_VERSION": info["CFBundleShortVersionString"],
-        "JARVIS_READINESS_EVIDENCE": str(evidence),
     })
-    if injected != 1:
-        raise ValueError("Expected one external UI test target")
-    configured = manifests[0].with_name("HostedProbe.xctestrun")
-    with configured.open("wb") as output:
-        plistlib.dump(manifest, output)
     result = evidence / "result.xcresult"
     authorization = start_authorization()
     stage("permissions")
@@ -347,7 +476,8 @@ def main():
         try:
             run_ui(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", str(configured),
                  "-destination", f"platform=macOS,arch={architecture}", "-resultBundlePath", str(result),
-                 "-parallel-testing-enabled", "NO", "-maximum-test-execution-time-allowance", "120"],
+                 "-only-testing:ReleaseReadiness/ReleaseReadinessTests", "-parallel-testing-enabled", "NO",
+                 "-maximum-test-execution-time-allowance", "120"],
                 timeout=420, log=evidence / "test.log", roots=[app, derived], evidence=evidence)
         except BaseException:
             try:

@@ -119,6 +119,11 @@ uses a checksum-pinned public signed release on disposable hosted Macs, without 
 Only allowlisted scalar setup receipts are uploaded; private XCTest results and UI logs stay on the
 disposable runner. This setup check does not establish a full coaching journey or final candidate
 readiness. It does not replace the existing source or release checks.
+The standalone route fixture has its own native consent identity. It measures microphone-only and
+system-only synthetic tones through the production-shaped unexcluded global tap and default-input
+aggregate, rejects cross-route tone and RMS energy, and restores device defaults. Its scalar evidence
+establishes external capture routing only; Jarvis's own capture grant and speech-to-hint journey remain
+separate requirements.
 
 An ordinary new eval adds scenarios and a manifest entry under
 [`Scenarios/`](../Tests/JarvisLiveTests/Scenarios), using an existing executor and acceptance contract.

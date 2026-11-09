@@ -156,28 +156,48 @@ final class ReleaseReadinessTests: XCTestCase {
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             var matches: [(String, Set<String>, XCUIElement)] = []
             var hasConsentPrompt = false
-            for identifier in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
+            var discovery: [String: [String: Int]] = [:]
+            for identifier in owners {
+                let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).count
+                var counts = ["running": running, "dialogs": 0, "containers": 0, "jarvisTextMatches": 0,
+                              "microphoneMatches": 0, "audioMatches": 0, "screenMatches": 0,
+                              "allowButtons": 0, "openSettingsButtons": 0]
+                discovery[identifier] = counts
+                guard running > 0 else { continue }
                 let candidate = XCUIApplication(bundleIdentifier: identifier)
                 if captured.insert(identifier).inserted {
                     self.attachEvidence(candidate, name: "permission-owner-first-\(identifier)")
                 }
                 let dialogs = candidate.dialogs.allElementsBoundByIndex
                 let containers = dialogs.isEmpty ? candidate.windows.allElementsBoundByIndex : dialogs
+                counts["dialogs"] = dialogs.count
+                counts["containers"] = containers.count
                 for container in containers {
                     let text = container.staticTexts.allElementsBoundByIndex.map {
                         $0.label + " " + ($0.value as? String ?? "")
                     }.joined(separator: "\n")
                     guard text.localizedCaseInsensitiveContains("Jarvis") else { continue }
+                    counts["jarvisTextMatches", default: 0] += 1
                     let permissions = Set(["microphone", "audio", "screen"].filter {
                         text.localizedCaseInsensitiveContains($0)
                     })
                     guard !permissions.isEmpty else { continue }
+                    for permission in permissions { counts[permission + "Matches", default: 0] += 1 }
                     hasConsentPrompt = true
                     let allow = self.consentButtons(in: container)
+                    counts["allowButtons", default: 0] += allow.count
+                    counts["openSettingsButtons", default: 0] += container.buttons.matching(identifier: "Open System Settings").count
                     let opensSettings = permissions.contains("screen")
                         && container.buttons.matching(identifier: "Open System Settings").count == 1
                     if allow.count == 1 || opensSettings { matches.append((identifier, permissions, container)) }
                 }
+                discovery[identifier] = counts
+            }
+            if let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] {
+                do {
+                    try JSONSerialization.data(withJSONObject: discovery).write(
+                        to: URL(fileURLWithPath: path).appendingPathComponent("permission-discovery.json"), options: .atomic)
+                } catch { XCTFail("Could not record scalar native-dialog discovery") }
             }
             if matches.count == 1 {
                 let (owner, permissions, dialog) = matches[0]
@@ -302,10 +322,12 @@ final class ReleaseReadinessTests: XCTestCase {
         let authorizationResult = XCTWaiter.wait(for: [authorized], timeout: 45)
         attachEvidence(settings, name: "system-screen-recording-authorization-outcome")
         XCTAssertEqual(authorizationResult, .completed, "Native Settings authorization must enable recording or offer relaunch")
-        let confirmations = settings.buttons.matching(identifier: "Quit & Reopen")
-        let relaunches = confirmations.firstMatch.waitForExistence(timeout: 5)
+        let sheets = settings.sheets.containing(.button, identifier: "Quit & Reopen")
+        let relaunches = sheets.firstMatch.waitForExistence(timeout: 5)
         if relaunches {
             attachEvidence(settings, name: "recording-relaunch-offered")
+            XCTAssertEqual(sheets.count, 1, "The native relaunch sheet must be unique")
+            let confirmations = sheets.element.buttons.matching(identifier: "Quit & Reopen")
             let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 confirmations.count == 1 && confirmations.element.isEnabled && confirmations.element.isHittable
             }, object: nil)

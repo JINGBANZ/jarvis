@@ -5,11 +5,13 @@
 	objectVersion = 56;
 	objects = {
 		A00000000000000000000001 = {isa = PBXBuildFile; fileRef = A00000000000000000000002; };
+		A00000000000000000000010 = {isa = PBXBuildFile; fileRef = A00000000000000000000011; };
+		A00000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFixtureTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseReadinessTests.swift; sourceTree = "<group>"; };
 		A00000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ReleaseReadiness.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000002, A0000000000000000000000F, A00000000000000000000005); sourceTree = "<group>"; };
+		A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000002, A00000000000000000000011, A0000000000000000000000F, A00000000000000000000005); sourceTree = "<group>"; };
 		A00000000000000000000005 = {isa = PBXGroup; children = (A00000000000000000000003); name = Products; sourceTree = "<group>"; };
-		A00000000000000000000006 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000001); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000006 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000001, A00000000000000000000010); runOnlyForDeploymentPostprocessing = 0; };
 		A00000000000000000000007 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		A00000000000000000000008 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		A00000000000000000000009 = {

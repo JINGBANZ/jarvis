@@ -366,5 +366,75 @@ class TemporaryAccountSafetyTests(unittest.TestCase):
             self.assertEqual(str(error.exception), "account-creation")
 
 
+class AudioRouteTests(unittest.TestCase):
+    def receipt(self, phase="mic-only"):
+        empty = {"frames": 192_000, "rms": 0.0, "micToneAmplitude": 0.0, "systemToneAmplitude": 0.0,
+                 "micToneFraction": 0.0, "systemToneFraction": 0.0}
+        active = {**empty, "rms": 0.071}
+        prefix = "micTone" if phase == "mic-only" else "systemTone"
+        active.update({prefix + "Amplitude": 0.1, prefix + "Fraction": 0.99})
+        return {"schemaVersion": 1, "check": "production-aggregate-route-isolation", "mode": "capture",
+                "phase": phase, "stage": "complete", "passed": True, "outputFrames": 0,
+                "rawMic": active if phase == "mic-only" else empty,
+                "globalTap": empty if phase == "mic-only" else active,
+                "micUID": "BlackHole16ch_UID", "systemUID": "BlackHole2ch_UID", "micChannels": 16,
+                "sampleRate": 48_000, "defaultsRestored": True, "resourcesReleased": True}
+
+    def test_both_independent_phases_pass(self):
+        for phase in ("mic-only", "system-only"):
+            PROBE["validate_audio_receipt"](self.receipt(phase), "capture", phase)
+
+    def test_bootstrap_requires_observed_acknowledgement_without_claiming_capture(self):
+        receipt = self.receipt()
+        for key in ("micUID", "systemUID", "micChannels", "sampleRate"):
+            del receipt[key]
+        receipt.update(check="fixture-capture-consent-bootstrap", mode="authorize", phase="consent",
+                       microphoneAuthorized=True, tapCreated=True, nativeConsentAcknowledged=True, captureGrantProven=False)
+        PROBE["validate_audio_receipt"](receipt, "authorize", "consent")
+        for key, value in (("nativeConsentAcknowledged", False), ("microphoneAuthorized", False),
+                           ("captureGrantProven", True), ("tapCreated", 1)):
+            with self.assertRaises(ValueError):
+                PROBE["validate_audio_receipt"]({**receipt, key: value}, "authorize", "consent")
+
+    def test_emitter_requires_matching_device_complete_tone_and_cleanup(self):
+        receipt = self.receipt()
+        for key in ("micUID", "systemUID", "micChannels"):
+            del receipt[key]
+        receipt.update(check="virtual-device-tone-emission", mode="emit", phase="system",
+                       emitterUID="BlackHole2ch_UID", outputFrames=384_000)
+        PROBE["validate_audio_receipt"](receipt, "emit", "system")
+        for key, value in (("outputFrames", 0), ("emitterUID", "BlackHole16ch_UID"), ("resourcesReleased", False)):
+            with self.assertRaises(ValueError):
+                PROBE["validate_audio_receipt"]({**receipt, key: value}, "emit", "system")
+
+    def test_phase_cancelled_leak_is_rejected_by_inactive_rms(self):
+        for phase in ("mic-only", "system-only"):
+            receipt = self.receipt(phase)
+            receipt["globalTap" if phase == "mic-only" else "rawMic"]["rms"] = 0.071
+            with self.assertRaisesRegex(ValueError, "not independent"):
+                PROBE["validate_audio_receipt"](receipt, "capture", phase)
+
+    def test_missing_signal_partial_capture_cleanup_and_nonfinite_values_refuse(self):
+        for key, value in (("frames", 1), ("rms", float("nan")), ("micToneAmplitude", 0), ("micToneFraction", 0.1)):
+            receipt = self.receipt()
+            receipt["rawMic"][key] = value
+            with self.assertRaises(ValueError):
+                PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")
+        for key, value in (("passed", False), ("defaultsRestored", False), ("resourcesReleased", False),
+                           ("micUID", "physical-device"), ("mode", "emit"), ("sampleRate", True)):
+            receipt = {**self.receipt(), key: value}
+            with self.assertRaises(ValueError):
+                PROBE["validate_audio_receipt"](receipt, "capture", "mic-only")
+
+    def test_failure_export_retains_only_scalar_metrics_and_presence_of_error(self):
+        receipt = {**self.receipt(), "passed": False, "error": "private native diagnostic"}
+        safe = PROBE["validate_audio_receipt"](receipt, "capture", "mic-only", require_pass=False)
+        self.assertIs(safe["errorPresent"], True)
+        self.assertNotIn("error", safe)
+        self.assertNotIn("private", json.dumps(safe))
+        with self.assertRaises(ValueError):
+            PROBE["validate_audio_receipt"]({**receipt, "rawAudio": "untrusted"}, "capture", "mic-only", require_pass=False)
+
+
 if __name__ == "__main__":
     unittest.main()
