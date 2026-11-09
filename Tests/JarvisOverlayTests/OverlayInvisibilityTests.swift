@@ -1,5 +1,6 @@
 import Testing
 import AppKit
+import JarvisTestDisplay
 @testable import JarvisOverlay
 // @preconcurrency: CI's Xcode toolchain rejects ScreenCaptureKit's non-Sendable async results
 // crossing back to the @MainActor helpers.
@@ -36,12 +37,11 @@ private func checkScreenCaptureKitExclusion() async {
                                         rect: NSRect(x: f.minX + 140, y: f.minY + 380, width: 900, height: 240))
     let controlPanel = makeSolidPanel(color: controlColor, protected: false,
                                       rect: NSRect(x: f.minX + 140, y: f.minY + 90, width: 900, height: 240))
-    let placements = [OverlayTestDisplay(window: protectedPanel), OverlayTestDisplay(window: controlPanel)]
     defer {
-        withExtendedLifetime(placements) {
-            protectedPanel.orderOut(nil)
-            controlPanel.orderOut(nil)
-        }
+        protectedPanel.orderOut(nil)
+        controlPanel.orderOut(nil)
+        protectedPanel.close()
+        controlPanel.close()
     }
     protectedPanel.orderFrontRegardless()
     controlPanel.orderFrontRegardless()
@@ -79,9 +79,11 @@ private func checkScreenCaptureKitExclusion() async {
 
 @MainActor
 private func makeSolidPanel(color: (r: UInt8, g: UInt8, b: UInt8), protected: Bool, rect: NSRect) -> NSPanel {
-    let panel = NSPanel(contentRect: rect, styleMask: [.nonactivatingPanel, .borderless],
+    let panel = TestDisplayPanel(contentRect: rect, styleMask: [.nonactivatingPanel, .borderless],
                         backing: .buffered, defer: false)
     panel.level = .floating
+    panel.isReleasedWhenClosed = false
+    panel.animationBehavior = .none
     panel.isFloatingPanel = true
     panel.hidesOnDeactivate = false
     panel.isOpaque = true

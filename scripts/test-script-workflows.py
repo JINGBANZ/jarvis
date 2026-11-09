@@ -178,6 +178,24 @@ class GuardTests(ScriptTests):
         with self.assertRaisesRegex(ValueError, 'depends on JarvisTestProcesses'):
             check(self.root, package)
 
+    def test_overlay_boundary_rejects_display_support_and_environment(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in guard['PRODUCTION_TARGETS']]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        overlay = next(target for target in package['targets'] if target['name'] == 'JarvisOverlay')
+        overlay['dependencies'] = [{'byName': ['JarvisTestDisplay', None]}]
+        with self.assertRaisesRegex(ValueError, 'JarvisOverlay depends on JarvisTestDisplay'):
+            guard['check_boundary'](self.root, package)
+        overlay['dependencies'] = []
+        source = self.root / 'Sources/JarvisOverlay/Fixture.swift'
+        for text in ('import JarvisTestDisplay', 'OverlayTestDisplay(window: panel)',
+                     'let display = environment["JARVIS_TEST_DISPLAY_ID"]'):
+            source.write_text(text)
+            with self.assertRaisesRegex(ValueError, 'test ownership in production logic'):
+                guard['check_boundary'](self.root, package)
+
     def test_scenario_harness_boundaries(self):
         guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
         package = {'targets': [{'name': name, 'dependencies': []}
@@ -204,6 +222,48 @@ class GuardTests(ScriptTests):
         misplaced.write_text('struct CoachingReplayExecutor {}')
         with self.assertRaisesRegex(ValueError, 'scenario harness implementation'):
             check(self.root, package)
+
+    def test_test_host_bootstrap_cannot_enter_any_product_target(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in (*guard['PRODUCTION_TARGETS'], 'JarvisApp', 'Bridge', 'JarvisTestHost')]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        guard['check_boundary'](self.root, package)
+        package['targets'][-3]['dependencies'] = [{'target': ['Bridge', None]}]
+        package['targets'][-2]['dependencies'] = [{'target': ['JarvisTestHost', None]}]
+        with self.assertRaisesRegex(ValueError, 'JarvisApp.*test-bundle-only JarvisTestHost'):
+            guard['check_boundary'](self.root, package)
+
+    def test_old_skip_build_test_host_is_refused_before_admission(self):
+        marker = self.root / 'admission-touched'
+        (self.root / 'scripts/lib/test-display.sh').write_text(
+            'isolate_test_display() { touch admission-touched; exit 99; }\n')
+        for entry in ('run-tests.sh', 'run-ci-tests.sh'):
+            result = self.run_script(entry, '--skip-build')
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn('current build', result.stderr)
+            self.assertFalse(marker.exists())
+
+    def test_every_test_product_retains_ownership_before_discovery(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in (*guard['PRODUCTION_TARGETS'], 'JarvisTestHost')]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        target = {'name': 'SeparateTests', 'type': 'test', 'dependencies': []}
+        package['targets'].append(target)
+        with self.assertRaisesRegex(ValueError, 'SeparateTests.*does not link'):
+            guard['check_boundary'](self.root, package)
+        target['dependencies'] = [{'byName': ['JarvisTestHost', None]}]
+        with self.assertRaisesRegex(ValueError, 'SeparateTests.*does not retain'):
+            guard['check_boundary'](self.root, package)
+        target['settings'] = [{'tool': 'linker', 'kind': {'unsafeFlags': {
+            '_0': ['-Xlinker', '-u', '-Xlinker', '_jarvis_test_host_link']}}}]
+        guard['check_boundary'](self.root, package)
+        target['settings'][0]['condition'] = {'config': 'debug'}
+        with self.assertRaisesRegex(ValueError, 'SeparateTests.*does not retain'):
+            guard['check_boundary'](self.root, package)
 
     def test_non_debug_tests_refused_before_admission_in_both_entrypoints(self):
         # Admission and every Python command must remain untouched, even under a foreign owner.

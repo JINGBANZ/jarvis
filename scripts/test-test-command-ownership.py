@@ -22,8 +22,9 @@ class DisplayLayoutTests(unittest.TestCase):
     def test_headless_and_physical_display_contracts(self):
         with tempfile.TemporaryDirectory(prefix='jarvis-layout-') as directory:
             binary = Path(directory) / 'layout-fixture'
-            subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '6',
+            subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '6', '-D', 'DEBUG',
                             str(ROOT / 'scripts/test-display/TestDisplayLayout.swift'),
+                            str(ROOT / 'Tests/Support/TestDisplay/TestWindowPlacement.swift'),
                             str(ROOT / 'scripts/test-command-ownership/TestDisplayLayoutFixture.swift'),
                             '-o', str(binary)], cwd=ROOT, env=BASE_ENV, check=True, timeout=60)
             subprocess.run([str(binary)], env=BASE_ENV, check=True, timeout=5)

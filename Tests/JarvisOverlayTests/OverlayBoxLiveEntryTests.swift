@@ -10,15 +10,16 @@ import JarvisCore
         BrainReplyProgress(hint: hint, hintComplete: complete, detailMarkdown: detail)
     }
 
-    @MainActor private func liveBox() -> OverlayBoxPanel {
-        let panel = OverlayBoxPanel()
+    @MainActor private func liveBox() -> TestOverlayBox {
+        let (panel, closePanel) = makeTestOverlayBox()
         panel.setSessionLive(true)
-        return panel
+        return (panel, closePanel)
     }
 
     @MainActor @Test
     func theEntryOpensOnTheFirstCharacterAndFollowsTheReply() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "  "))
         #expect(panel.entryCount == 0, "blank text opens nothing")
 
@@ -41,7 +42,8 @@ import JarvisCore
 
     @MainActor @Test
     func deliverReplacesTheLiveEntryAndKeepsItsStamp() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Sort by start."))
         let stamps = panel.entryStamps
         let detail = ReplyDetail(markdown: "Sort, then scan.")
@@ -58,7 +60,8 @@ import JarvisCore
 
     @MainActor @Test
     func nilRemovesTheLiveEntry() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         _ = panel.deliver("Earlier.", detail: nil)
         panel.showReplyProgress(progress(hint: "Half way."))
         #expect(panel.entryCount == 2)
@@ -71,7 +74,8 @@ import JarvisCore
 
     @MainActor @Test
     func nilRemovesAHalfWrittenHint() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Sort by"))
         #expect(panel.hasLiveEntry)
         panel.showReplyProgress(nil)
@@ -82,7 +86,8 @@ import JarvisCore
 
     @MainActor @Test
     func aDetailFirstReplyShowsAPlaceholderUntilItsHintStarts() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(detail: " \n\t"))
         #expect(panel.entryCount == 0)
         #expect(panel.detailCount == 0)
@@ -102,7 +107,8 @@ import JarvisCore
 
     @MainActor @Test
     func theLiveDetailGrowsWithTheReplyAndIsFiledOnce() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Move the left edge.", detail: "Use a window.\n\n```python\nleft = 0\n"))
         #expect(panel.detailCount == 1)
         #expect(panel.currentDetailPosition == "1 of 1")
@@ -118,7 +124,8 @@ import JarvisCore
 
     @MainActor @Test
     func deliverReplacesTheLiveDetailWithTheDeliveredOne() throws {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Move the left edge.", detail: "Use a window.\n\n```python\nleft = 0\n"))
         let delivered = try #require(ReplyDetail(markdown: "Use a window.\n\n```python\nleft = 0\nright = 0\n```\n\nThen scan."))
         let shown = panel.deliver("Move the left edge.", detail: delivered)
@@ -133,7 +140,8 @@ import JarvisCore
 
     @MainActor @Test
     func collapsingKeepsStreamingAndFinalDetailsForExpansion() throws {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Move the left edge.", detail: "Use a window.\n\n```python\nleft = 0\n"))
         #expect(panel.detailCount == 1)
         panel.clickCollapseButton()
@@ -155,7 +163,8 @@ import JarvisCore
 
     @MainActor @Test
     func nilRemovesTheLiveDetailAndTheBoxReturnsToTheEarlierOne() throws {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         let earlier = try #require(ReplyDetail(markdown: "Sort, then scan."))
         _ = panel.deliver("Sort by start.", detail: earlier)
         panel.showReplyProgress(progress(hint: "Half way.", detail: "Use a window.\n\n```python\nleft = 0\n"))
@@ -171,7 +180,8 @@ import JarvisCore
 
     @MainActor @Test
     func aHeldDetailIsNotDisplacedByALiveOne() throws {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         let earlier = try #require(ReplyDetail(markdown: "Sort, then scan."))
         _ = panel.deliver("Sort by start.", detail: earlier)
         panel.clickDetailPin()
@@ -194,7 +204,8 @@ import JarvisCore
 
     @MainActor @Test
     func aSnapshotThatParsesToNothingLeavesTheLastLiveDetailUp() throws {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Fill the list.", detail: code(lines: CodeBlock.lineLimit)))
         let shown = try #require(panel.currentDetail)
         #expect(panel.currentText.contains("detail below"))
@@ -215,7 +226,8 @@ import JarvisCore
 
     @MainActor @Test
     func aHeldAndDismissedLiveDetailSurvivesASnapshotThatParsesToNothing() throws {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Fill the list.", detail: code(lines: CodeBlock.lineLimit)))
         panel.clickDetailPin()
         panel.clickDetailDismiss()
@@ -248,7 +260,8 @@ import JarvisCore
 
     @MainActor @Test
     func anOpenDiagramShowsAPlaceholderUntilItsFenceCloses() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         let open = "Sketch it.\n\n```mermaid\nflowchart LR\nclient[Client] --> api[API]\n"
         panel.showReplyProgress(progress(hint: "Sketch the read path.", detail: open))
         #expect(panel.detailCount == 1)
@@ -266,7 +279,8 @@ import JarvisCore
 
     @MainActor @Test
     func aDetailThatIsOnlyAnOpenDiagramShowsJustThePlaceholder() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         let open = "```mermaid\nflowchart LR\nclient[Client] --> api[API]"
         panel.showReplyProgress(progress(hint: "Sketch the read path.", detail: open))
         #expect(panel.detailCount == 1)
@@ -284,7 +298,8 @@ import JarvisCore
 
     @MainActor @Test
     func withdrawingAPinnedLiveDetailReleasesTheHold() throws {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Move the left edge.", detail: "Use a window.\n\n```python\nleft = 0\n"))
         panel.clickDetailPin()
         #expect(panel.isDetailHeld)
@@ -298,7 +313,8 @@ import JarvisCore
 
     @MainActor @Test
     func aHeldLiveDetailSurvivesClearAndHeadsTheNextEntry() async throws {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Move the left edge.", detail: "Use a window.\n\n```python\nleft = 0\n"))
         panel.clickDetailPin()
         let cleared = try #require(panel.entryStamps.first)
@@ -352,7 +368,8 @@ import JarvisCore
 
     @MainActor @Test
     func aDeliveryWithNoHintEndsTheLiveEntry() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(detail: "Only a detail"))
         #expect(panel.hasLiveEntry)
         #expect(panel.detailCount == 1)
@@ -365,7 +382,8 @@ import JarvisCore
 
     @MainActor @Test
     func clearRemovesALiveEntryLikeAnyOther() {
-        let panel = liveBox()
+        let (panel, closePanel) = liveBox()
+        defer { closePanel() }
         panel.showReplyProgress(progress(hint: "Half way."))
         panel.clear()
         #expect(panel.entryCount == 0)
@@ -376,7 +394,8 @@ import JarvisCore
 
     @MainActor @Test
     func theSamplePreviewIsUntouchedByProgress() {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         panel.showAppearancePreview(true)
         panel.showReplyProgress(progress(hint: "Mid-preview."))
         #expect(panel.currentText.contains("Ask about the time complexity"))

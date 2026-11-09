@@ -45,6 +45,8 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisCore/Support/`: small shared runtime primitives.
 - `Sources/JarvisProcess/`: the ordinary process-launch interface and native implementation shared by production OS adapters ([test command ownership](./test-command-ownership.md#whole-commands-and-process-roles)).
 - `Tests/Support/ProcessOwnership/`: the `JarvisTestProcesses` debug-only tracked launch and reporting module supplied by development/test composition ([test command ownership](./test-command-ownership.md)).
+- `Tests/Support/TestDisplay/`: the `JarvisTestDisplay` debug-only window placement and containment module ([test window containment](./test-command-ownership.md#test-window-containment)).
+- `Tests/Support/TestHost/`: the `JarvisTestHost` test-bundle bootstrap ([test command ownership](./test-command-ownership.md#whole-commands-and-process-roles)).
 - `Sources/JarvisCore/Diagnostics/`: session evidence, Activity, readiness, capture health, and session history ([session-audit.md](./session-audit.md)).
 - `Sources/JarvisCore/Prompts/`: the predefined model-facing text.
 - `Sources/JarvisEvaluation/`: sealed-session evaluation, from evidence parsing and metrics to the agentic evaluator and its report.

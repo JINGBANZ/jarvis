@@ -93,6 +93,8 @@ Product modules expose the interfaces exercised by the harness and do not import
 | `Sources/JarvisEvaluation/` | Product analysis of recorded sessions, shared by Activity's Evaluate flow and `EvalPrep`. |
 | `Tests/Support/ScenarioHarness/` (`JarvisScenarioHarness`) | Shared scenario definitions and validation, transcript replay, grading, reports, and suite execution. |
 | `Tests/Support/ProcessOwnership/` (`JarvisTestProcesses`) | Debug-only tracked process launch and ownership reporting, depending only on `JarvisProcess`. |
+| `Tests/Support/TestDisplay/` (`JarvisTestDisplay`) | Debug-only display discovery, window placement, containment, and refusal, shared by overlay tests and signed-app composition. |
+| `Tests/Support/TestHost/` (`JarvisTestHost`) | Test-bundle load-time host registration before discovery, linked into every test product. |
 | `Sources/JarvisApp/Testing/` | Debug-only signed-app adapters and explicit native harness modes requiring app composition or macOS frameworks. |
 | `Tests/JarvisScenarioHarnessTests/` | Offline verification of the shared harness; included in the Gate with synthetic dependencies. |
 | `Tests/JarvisLiveTests/` | Real-provider and signed-app test entry points, the suite catalog, scenarios, and fixtures; excluded from Gate execution. |
@@ -105,8 +107,10 @@ reports and applies test assertions. Native launch and legacy Scenario A checks 
 adapter. Shared execution code does not import the Testing framework.
 
 The scenario harness depends on product interfaces and receives its process launcher explicitly.
-Product Core, provider, capture, evaluation, and process libraries cannot depend directly or
-transitively on either test module. The process-ownership module remains independent of coaching
+Product Core, provider, capture, evaluation, process, and overlay libraries cannot depend directly or
+transitively on test-support modules. Overlay rendering accepts a panel factory; debug executable
+composition and overlay fixtures supply the constrained test panel. The process-ownership module
+remains independent of coaching
 so native helpers and other test executables can use it without importing model execution.
 [`check-process-launching.py`](../scripts/check-process-launching.py) enforces these dependency and
 source-placement rules; its negative fixtures run in the Gate. The debug compilation guard keeps
