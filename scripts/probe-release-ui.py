@@ -188,6 +188,22 @@ def run(arguments, *, timeout, log=None):
         raise ValueError("Private subprocess failed: " + log.name) from None
 
 
+def check_system_playback(speech, evidence):
+    started = time.monotonic()
+    receipt = {"stage": "system-player-before-xctest", "passed": False, "timedOut": False}
+    try:
+        with (evidence / "private-playback.log").open("w") as output:
+            subprocess.run(["/usr/bin/afplay", str(speech)], check=True, timeout=30,
+                           stdout=output, stderr=subprocess.STDOUT)
+        receipt["passed"] = True
+    except subprocess.TimeoutExpired:
+        receipt["timedOut"] = True
+        raise ValueError("System playback failed before UI-test startup") from None
+    finally:
+        receipt["elapsedSeconds"] = round(time.monotonic() - started, 3)
+        (evidence / "stage.json").write_text(json.dumps(receipt) + "\n")
+
+
 def owned_processes(roots, ownership):
     names = {path.name[:15] for root in roots for path in root.rglob("*")}
     # ucomm avoids reading every process's argument memory; exact kernel path and birth still establish ownership.
@@ -528,6 +544,7 @@ def main():
     run(["/usr/bin/say", "-v", "Samantha", "-r", "135", "-o", str(speech),
          "How does binary search find a number in a sorted list?"], timeout=60, log=evidence / "speech.log")
     speech.chmod(0o600)
+    check_system_playback(speech, evidence)
     app.parent.mkdir(exist_ok=True)
     keyfile = profile / "openai-api-key"
     ownership = runpy.run_path(str(ROOT / "scripts/test-display/supervisor.py"))

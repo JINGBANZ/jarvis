@@ -23,6 +23,17 @@ ACCOUNT_GLOBALS = ACCOUNT["prepare"].__globals__
 
 
 class ProbeResultsTests(unittest.TestCase):
+    def test_playback_setup_keeps_timeout_private_and_cannot_claim_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with mock.patch.object(PROBE['subprocess'], 'run', side_effect=subprocess.TimeoutExpired('private', 30)):
+                with self.assertRaisesRegex(ValueError, '^System playback failed before UI-test startup$'):
+                    PROBE['check_system_playback'](directory / 'question.aiff', directory)
+            receipt = json.loads((directory / 'stage.json').read_text())
+            self.assertFalse(receipt['passed'])
+            self.assertTrue(receipt['timedOut'])
+            self.assertNotIn('private', json.dumps(receipt))
+
     def test_inventory_uses_kernel_names_and_verifies_exact_executable_and_birth(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -344,7 +355,7 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
                 mock.patch.dict(globals_, ROOT=root, Path=path, run=command,
                                 verify_app=lambda app, _: "0.5.15" if app == candidate else predecessor_version,
                                 build_ui=lambda evidence, _: (evidence / "derived", evidence / "manifest"),
-                                run_phase=phase, owned_processes=lambda *_: []):
+                                run_phase=phase, owned_processes=lambda *_: [], check_system_playback=lambda *_: None):
             PROBE["main"]()
         evidence = next((root / ".jarvis/release-ui-probe").iterdir())
         self.assertFalse((home / "Library/Application Support/Jarvis/openai-api-key").exists())
