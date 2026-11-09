@@ -151,7 +151,7 @@ final class ReleaseReadinessTests: XCTestCase {
 
     private func nextPermissionAction(onboarding: XCUIElement, acceptedConsents: Set<String>) throws -> PermissionAction {
         let owners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent",
-                      "com.apple.accessibility.universalAccessAuthWarn"]
+                      "com.apple.accessibility.universalAccessAuthWarn", "com.apple.AccessibilityUIServer"]
         var captured: Set<String> = []
         var action: PermissionAction?
         var consentOwner: String?

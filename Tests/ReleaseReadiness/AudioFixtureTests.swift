@@ -91,7 +91,7 @@ final class AudioFixtureTests: XCTestCase {
     private func nextConsent(excluding accepted: Set<String>) throws -> (String, XCUIElement) {
         var found: (String, XCUIElement)?
         let owners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent",
-                      "com.apple.accessibility.universalAccessAuthWarn"]
+                      "com.apple.accessibility.universalAccessAuthWarn", "com.apple.AccessibilityUIServer"]
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             var matches: [(String, XCUIElement)] = []
             for owner in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: owner).isEmpty {
