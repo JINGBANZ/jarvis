@@ -168,8 +168,9 @@ runner. Permission-form automation uses a temporary owned administrator account 
 
 The setup matrix requires Apple silicon on macOS 15 and 26, and Intel on macOS 15. Intel macOS 26
 retains ordinary source-Gate coverage; installed-app readiness has no Intel macOS 26 coverage. The
-product minimum is macOS 15. The setup-feasibility workflow uses a checksum-pinned public signed
-release to exercise the runner; its receipts cannot authorize release publication. The
+product minimum is macOS 15. Setup-only probe receipts cannot authorize release publication.
+The display-free probe and promotion regressions run in the ordinary Gate; the expensive
+installed-app journey runs for release PRs. The
 [`release-ready.yml`](../.github/workflows/release-ready.yml) worker owns required fresh-candidate
 and retained-profile upgrade validation before merge, and
 [`release.yml`](../.github/workflows/release.yml) promotes its accepted artifacts after merge.

@@ -327,7 +327,7 @@ class TestSelectionTests(ScriptTests):
     )
     shared_python_checks = (
         'check-process-launching.py', 'test-live-cancellation.py', 'test-script-workflows.py',
-        'test-test-display.py', 'test-test-command-ownership.py',
+        'test-release-ui-probe.py', 'test-test-display.py', 'test-test-command-ownership.py',
     )
 
     def setUp(self):
