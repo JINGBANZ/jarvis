@@ -11,7 +11,7 @@
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>JarvisApp</string>
   <key>CFBundleIconFile</key><string>Jarvis.icns</string>
-  <key>LSMinimumSystemVersion</key><string>14.2</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
   <!-- SUEnableAutomaticChecks stays false: background checks and Sparkle's first-launch prompt
        would present UI on an autonomous path. -->

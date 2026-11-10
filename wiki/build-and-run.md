@@ -11,8 +11,10 @@ The Command Line Tools SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security — everything Jarvis
 needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`.
 
-The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Line Tools;
-no Xcode project exists. CI uses the hosted runners' selected Xcode toolchains. Developer desktops
+The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Line Tools.
+The external installed-app release runner under `Tests/ReleaseReadiness` uses full Xcode and
+XCUIAutomation; it is independent of the shipped targets and SwiftPM test suite.
+CI uses the hosted runners' selected Xcode toolchains. Developer desktops
 also have full Xcode and the Xcode MCP,
 whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
 the scripts use `open`. The [live-test prerequisites](./live-e2e-tests.md#prerequisites-and-standing-conditions) depend on
@@ -66,8 +68,9 @@ release packaging resolves the same pinned dependencies independently of these P
   `DocumentSession` port. That split is what
   lets most of the system be verified headless. `JarvisLiveTests` is the test target of the
   [live e2e tests](./live-e2e-tests.md): it selects transcript replay or signed-app scenarios,
-  and it is the only test target that reaches real providers.
-- **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
+  and it reaches real providers only through explicit live commands. Installed-app release acceptance
+  separately reaches providers through the normal app, using a dedicated test credential.
+- **SwiftPM tests use swift-testing.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only and passes `--skip JarvisLiveTests`, so
   the Gate compiles the live target but never runs it. Both commands use
@@ -387,31 +390,54 @@ Gatekeeper policy result before detaching the image. The same SDK guard runs imm
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for
 the downloaded artifact.
 
-Releases are cut by `.github/workflows/release.yml`, not by hand: on every push to `main`,
-**release-please** maintains a standing Release PR from the conventional-commit history (bumping both
-version keys in `Resources/Info.plist` via `x-release-please-version` annotations, plus the
-CHANGELOG — config in `release-please-config.json`). Merging that PR is the manual release approval:
-it creates the GitHub Release **as a draft**, with no second deployment approval. `force-tag-creation`
-tags that draft immediately: GitHub otherwise defers tagging a draft until publish, and an untagged
-draft makes the next release-please run miss the previous release and garble the changelog. An Apple-silicon
-`macos-26` job then runs the test gate and installs the hash-pinned pure-Python wheels in
-`scripts/requirements-release.txt` into an ephemeral environment, and signs/notarizes with secrets
-scoped to the main-only `release` environment (the base64 `.p12` certificate and an App Store Connect
-API key — names in the workflow). It attaches `Jarvis.dmg` and the `appcast.xml` update feed described
-below, rejects any other asset, then publishes the Release. The
-stable installation block in
-`.github/release-header.md` links directly to that tag's DMG and explains the in-window drag to
-Applications; GitHub still supplies its automatic source archives. A failed sign, notarization, or
-final-image verification therefore never leaves a public Release without a validated app. The exact
-runner label and binary guard keep downloaded
-AppKit controls on the same macOS 26 design as local development builds instead of inheriting the
-compatibility appearance of an older linked SDK. The publish job lives in the same workflow because
-tags created with `GITHUB_TOKEN` never trigger other workflows.
+On each push to `main`, [`release.yml`](../.github/workflows/release.yml) lets release-please maintain
+a standing Release PR from conventional commits. Its only changes are the CHANGELOG, release manifest,
+and both version keys in `Resources/Info.plist`; see `release-please-config.json`.
+The existing **Approve workflows to run** action on that bot PR starts its source CI and the
+default-branch-owned [`release-ready.yml`](../.github/workflows/release-ready.yml). Ordinary code PRs
+keep automatic source CI and an explicit outside-scope `release-ready` result; their `test` aggregate
+does not wait for installed-app acceptance.
+
+The release worker admits only the genuine bot PR and metadata-only merge tree. It freezes the PR
+head, current main base, merge tree, version, CHANGELOG notes, predecessor asset, and source run attempt.
+It waits for all three source Gate jobs at that exact merge revision, independently of `test`, then
+builds, signs, notarizes, and verifies one universal candidate on macOS 26. Signing credentials stay in
+the main-only `release` environment. The hash-pinned DMG layout dependencies live in an ephemeral
+environment. The appcast signs the final DMG bytes and uses the frozen notes, so it does not depend on
+a draft Release existing before merge.
+
+The same retained candidate runs the [basic installed-app journey](./live-e2e-tests.md#external-installed-app-readiness)
+on native Apple silicon macOS 15 and 26 and Intel macOS 15. Every job requires fresh installation,
+normal provider-backed operation, Stop/restart, and retained-state upgrade from the frozen public
+predecessor. Missing, failed, skipped, or cancelled native work cannot produce acceptance. This proves
+basic operation with synthetic system speech and a silent virtual microphone; speech quality,
+microphone acoustics, isolation, and coaching usefulness belong to separate tests and evaluations.
+The native evidence binds the immutable candidate artifact ID and digest, manifest, and individual file
+hashes. Candidate, acceptance receipt, and scalar evidence are retained for 30 days. No raw session,
+transcript, screenshot, provider traffic, or test credential is uploaded by this workflow.
+
+The release source `test` aggregate requires this attempt's `release-ready` success. Merge enforcement
+also needs the repository's required `test` and `release-ready` checks, current-base requirement, and
+no bypass; workflow changes do not themselves activate those repository settings. A changed head or
+base requires a new source run and acceptance. [`release-promotion.py`](../scripts/release-promotion.py)
+owns the identity and freshness checks shared by the worker and publisher.
+Re-run all source CI jobs to renew acceptance; re-running only failed jobs cannot combine evidence
+from different attempts. Approve the new run when GitHub requires approval.
+
+Merging the accepted Release PR creates a draft and its tag immediately (`force-tag-creation` prevents
+an untagged draft from confusing the next release-please run). Publication compares the squash-merged
+tree, parent base, version, and tag with the accepted source, then downloads only the recorded artifact
+IDs and verifies their digests and file hashes. It publishes those exact `Jarvis.dmg` and `appcast.xml`
+bytes without rebuilding. Missing, expired, stale, or mismatched acceptance leaves the draft private;
+recovery requires a fresh accepted candidate, not a bypass or a replacement build during promotion.
+The installation header links to that tag's DMG; public asset retries accept identical bytes and
+refuse replacing different public assets. The publish job remains in the release-please workflow
+because tags created with `GITHUB_TOKEN` do not start another workflow.
 
 `package-app.sh` also runs locally for packaging without CI. Create a virtual environment, install
 `scripts/requirements-release.txt` with `--require-hashes`, and pass its interpreter through
 `DMGBUILD_PYTHON`; notarization also needs the one-time
-`xcrun notarytool store-credentials jarvis-notary …` setup. Distributed builds require macOS 14.2 or
+`xcrun notarytool store-credentials jarvis-notary …` setup. Distributed builds require macOS 15 or
 later and run natively on Apple silicon and Intel. Packaging resolves the pinned universal AEC
 dependency, compiles both app architectures, then validates the assembled bundle before signing. The README owns the user
 installation steps; provider credentials remain user-supplied in Settings.

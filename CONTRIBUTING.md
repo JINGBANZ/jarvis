@@ -8,7 +8,7 @@ local-process boundaries. Small, testable changes are preferred.
 The coding agent performs this setup and runs the tests. Human contributors are not expected to run
 tests manually.
 
-Use an Apple silicon or Intel Mac with macOS 14.2+, Swift 6, Python 3, and the
+Use an Apple silicon or Intel Mac with macOS 15+, Swift 6, Python 3, and the
 [Command Line Tools](./wiki/build-and-run.md#toolchain). Keep a responsive logged-in macOS GUI session
 and run tests as your ordinary development account. A physical monitor and full Xcode are optional.
 On a headless Mac, `Jarvis Tests` serves as the main display. The offline Gate needs no API

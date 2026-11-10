@@ -8,7 +8,6 @@ import JarvisCore
 /// and `AudioDeviceStop` drains it before teardown mutates state.
 final class SystemAudioBenchmarkCapture: @unchecked Sendable {
     enum Failure: Error, CustomStringConvertible {
-        case unsupported
         case processAudioObjectUnavailable
         case tapCreationFailed(OSStatus)
         case aggregateCreationFailed(OSStatus)
@@ -19,7 +18,6 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
 
         var description: String {
             switch self {
-            case .unsupported: "System-audio benchmark capture requires macOS 14.2 or later"
             case .processAudioObjectUnavailable:
                 "Jarvis's synthetic playback process was not visible to Core Audio"
             case .tapCreationFailed(let status): "Process-tap creation failed (OSStatus \(status))"
@@ -61,7 +59,6 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
     }
 
     func start() throws {
-        guard #available(macOS 14.2, *) else { throw Failure.unsupported }
         lock.lock()
         defer { lock.unlock() }
         do {
@@ -80,7 +77,6 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         deliveryQueue.sync {}
     }
 
-    @available(macOS 14.2, *)
     private func buildLocked() throws {
         guard let processObjectID = Self.currentProcessAudioObjectID() else {
             throw Failure.processAudioObjectUnavailable
@@ -155,7 +151,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         if aggregateID != kAudioObjectUnknown {
             AudioHardwareDestroyAggregateDevice(aggregateID)
         }
-        if #available(macOS 14.2, *), tapID != kAudioObjectUnknown {
+        if tapID != kAudioObjectUnknown {
             AudioHardwareDestroyProcessTap(tapID)
         }
         procID = nil
@@ -198,7 +194,6 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         }
     }
 
-    @available(macOS 14.2, *)
     private static func currentProcessAudioObjectID() -> AudioObjectID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
