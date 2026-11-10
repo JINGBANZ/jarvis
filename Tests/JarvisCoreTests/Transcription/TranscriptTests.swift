@@ -13,9 +13,10 @@ import Testing
         #expect(rendered.range(of: "them:")!.lowerBound < rendered.range(of: "me:")!.lowerBound)
     }
 
-    @Test func silenceDurationFromLastLine() {
+    @Test func silenceDurationFromLocalSpeech() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "hmm", at: 50, endedAt: 50))
+        t.recordLocalSpeech(.ended(startedAt: 45, endedAt: 50, commitAt: 51), speaker: .me)
         #expect(abs(t.silenceDuration(now: 70) - 20) < 0.001)
     }
 
@@ -24,10 +25,11 @@ import Testing
         #expect(abs(t.silenceDuration(now: 70) - 70) < 0.001)
     }
 
-    @Test func silenceDurationUsesLatestSpokenNotLastAppended() {
+    @Test func silenceDurationUsesLatestLocalSpeechNotLastFinal() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "later", at: 100, endedAt: 100))
         t.append(.init(speaker: .them, text: "earlier", at: 95, endedAt: 95))
+        t.recordLocalSpeech(.ended(startedAt: 90, endedAt: 100, commitAt: 101), speaker: .me)
         #expect(abs(t.silenceDuration(now: 120) - 20) < 0.001)    // 120 - 100, not 120 - 95
     }
 
@@ -74,12 +76,16 @@ import Testing
 }
 
 extension TranscriptTests {
-    @Test func rendersMeasuredEndsAndUsesTheLatestEndForSilence() {
+    @Test func rendersRangesWhileSilenceUsesOnlyLocalActivity() {
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "a long explanation", at: 3, endedAt: 12))
         transcript.append(.init(speaker: .them, text: "an overlapping question", at: 8, endedAt: 10))
         #expect(transcript.renderFrom(index: 0).text == "[00:03-00:12] me: a long explanation\n[00:08-00:10] them: an overlapping question")
+        #expect(transcript.silenceDuration(now: 14) == 14)
+        transcript.recordLocalSpeech(.ended(startedAt: 3, endedAt: 12, commitAt: 13), speaker: .me)
         #expect(transcript.silenceDuration(now: 14) == 2)
+        transcript.recordLocalSpeech(.started(at: 13), speaker: .them)
+        #expect(transcript.silenceDuration(now: 14) == 0)
     }
 
     @Test func rejectsUnmeasuredOrInvalidSpeechIntervals() {
@@ -92,10 +98,10 @@ extension TranscriptTests {
 
 
 extension TranscriptTests {
-    @Test func unformattableEndpointPreservesTextAndItsNumericTime() {
+    @Test func unformattableEndpointPreservesTextAndKnownStart() {
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "retained words", at: 1, endedAt: 1e20))
-        #expect(transcript.renderFrom(index: 0).text == "[00:01-1e+20s] me: retained words")
+        #expect(transcript.renderFrom(index: 0).text == "[00:01-00:01] me: retained words")
     }
 
     @Test func representableFractionalEndpointsKeepMeasuredTiming() {
@@ -104,24 +110,24 @@ extension TranscriptTests {
         #expect(transcript.renderFrom(index: 0).text == "[00:01-01:02] me: normal words")
     }
 
-    @Test func receiptChronologyDoesNotMasqueradeAsMeasuredSpeech() {
+    @Test func fallbackProvenanceStaysInternal() {
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .me, text: "retained words", observedAt: 42, speechInterval: nil))
+        transcript.append(.init(speaker: .me, text: "retained words", interval: SpeechInterval(startedAt: 40, endedAt: 42)!, timingSource: .audioWindowEstimate))
         let snapshot = transcript.renderFrom(index: 0)
-        #expect(snapshot.text == "[00:42; estimated from transcript receipt] me: retained words")
-        #expect(snapshot.lines.first?.at == 42)
-        #expect(snapshot.lines.first?.timingIsEstimated == true)
-        #expect(snapshot.lines.first?.interval == SpeechInterval(startedAt: 42, endedAt: 42))
+        #expect(snapshot.text == "[00:40-00:42] me: retained words")
+        #expect(snapshot.lines.first?.at == 40)
+        #expect(snapshot.lines.first?.timingSource == .audioWindowEstimate)
+        #expect(snapshot.lines.first?.interval == SpeechInterval(startedAt: 40, endedAt: 42))
         #expect(snapshot.lines.first?.endedAt == 42)
     }
 
     @Test func measuredAndEstimatedLinesKeepTheirTimingSourceWhenOrdered() {
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .me, text: "estimated words", observedAt: 42, speechInterval: nil))
+        transcript.append(.init(speaker: .me, text: "estimated words", interval: SpeechInterval(startedAt: 40, endedAt: 42)!, timingSource: .audioWindowEstimate))
         transcript.append(.init(speaker: .them, text: "measured words", at: 10, endedAt: 12))
         let snapshot = transcript.renderFrom(index: 0)
-        #expect(snapshot.text == "[00:10-00:12] them: measured words\n[00:42; estimated from transcript receipt] me: estimated words")
-        #expect(snapshot.lines.map(\.timingIsEstimated) == [true, false])
-        #expect(transcript.silenceDuration(now: 45) == 3)
+        #expect(snapshot.text == "[00:10-00:12] them: measured words\n[00:40-00:42] me: estimated words")
+        #expect(snapshot.lines.map(\.timingSource) == [.audioWindowEstimate, .providerOffsets])
+        #expect(transcript.silenceDuration(now: 45) == 45)
     }
 }

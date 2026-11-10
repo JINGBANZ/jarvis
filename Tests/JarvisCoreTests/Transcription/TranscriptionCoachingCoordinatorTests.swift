@@ -5,7 +5,7 @@ import Testing
 @Suite struct TranscriptionCoachingCoordinatorTests {
     @Test func finalizedFragmentsWaitForActivityToSettleAndCoalesce() async {
         let transcript = RollingTranscript()
-        let clock = ManualClock(now: 100)
+        let clock = ManualClock(now: 110)
         let events = CoachingEvents()
         let coordinator = makeCoordinator(
             transcript: transcript,
@@ -42,7 +42,7 @@ import Testing
 
     @Test func rejectsEmptyFinalsAndStopCancelsPendingTurn() async {
         let transcript = RollingTranscript()
-        let clock = ManualClock(now: 10)
+        let clock = ManualClock(now: 13)
         let events = CoachingEvents()
         let transcriptBatchingWindow: TimeInterval = 0.02
         let coordinator = makeCoordinator(
@@ -82,10 +82,37 @@ import Testing
         #expect(events.firstSilence == 1)
     }
 
+    @Test func stoppedSpeakerCannotSuppressRemainingStreamsSilence() {
+        let transcript = RollingTranscript()
+        let clock = ManualClock(now: 20)
+        func coordinator(_ speaker: Speaker) -> TranscriptionCoachingCoordinator {
+            TranscriptionCoachingCoordinator(
+                speaker: speaker, transcript: transcript, clock: clock, sessionStart: 0,
+                transcriptBatchingWindow: 0, silenceTimeout: 60, silenceMaxInterval: 120,
+                silenceEnabled: false, onTurnEnd: { _ in }, onSilence: { _ in },
+                onTranscriptionWorkChanged: { _ in })
+        }
+        let mic = coordinator(.me)
+        let system = coordinator(.them)
+        mic.start()
+        system.start()
+        system.recordLocalSpeech(.started(at: 4))
+        mic.recordLocalSpeech(.ended(startedAt: 5, endedAt: 8, commitAt: 9))
+        #expect(transcript.silenceDuration(now: 20) == 0)
+        system.stop()
+        #expect(transcript.silenceDuration(now: 20) == 12)
+        mic.recordFinalizedTranscript("delayed words", spokenAt: 100, spokenEndAt: 1e20, source: "test")
+        #expect(transcript.silenceDuration(now: 20) == 12)
+        system.start()
+        #expect(transcript.silenceDuration(now: 20) == 12)
+        mic.stop()
+        system.stop()
+    }
+
     @Test func finalizedQuestionPublishesWhileLaterSpeechIsPending() async {
         let events = CoachingEvents()
         let coordinator = makeCoordinator(
-            transcript: RollingTranscript(), clock: ManualClock(), sessionStart: 0,
+            transcript: RollingTranscript(), clock: ManualClock(now: 3), sessionStart: 0,
             transcriptBatchingWindow: 0, events: events)
         coordinator.start()
         coordinator.updateTranscriptionWork(.pending(since: 2))
@@ -98,7 +125,7 @@ import Testing
     @Test func pendingBoundaryAdvanceReleasesCompletedQuestionWithoutFullSettlement() async throws {
         let events = CoachingEvents()
         let coordinator = makeCoordinator(
-            transcript: RollingTranscript(), clock: ManualClock(), sessionStart: 0,
+            transcript: RollingTranscript(), clock: ManualClock(now: 3), sessionStart: 0,
             transcriptBatchingWindow: 0, events: events)
         let pending = try #require(PendingTurnProbe(coordinator))
         coordinator.start()
@@ -258,7 +285,7 @@ extension TranscriptionCoachingCoordinatorTests {
         }
         await waitForMainQueue(after: 0.02)
         #expect(transcript.count == 3)
-        #expect(transcript.renderFrom(index: 0).text.components(separatedBy: "[00:50; estimated from transcript receipt]").count == 4)
+        #expect(transcript.renderFrom(index: 0).text.components(separatedBy: "[00:02-00:02]").count == 4)
         #expect(events.turnCount > 0)
         coordinator.stop()
     }

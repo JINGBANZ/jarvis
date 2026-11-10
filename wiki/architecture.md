@@ -106,21 +106,27 @@ moments the model judges worthwhile.
    local onset of the utterance the server is recognizing, capped by the moment that recognition
    was first reported. Speech the local detector missed stays unknown, and one long run of speech
    that the server splits into several utterances keeps its first onset until the run ends.
-   Every meaningful finalized transcript is retained immediately. A valid measured speech range is
-   included when available; otherwise the model sees a point timestamp explicitly labelled
-   `estimated from transcript receipt`. Every transcript line has an interval and an estimate flag.
-   Receipt-based estimates order text and restart silence scheduling, but neither claim a speech
-   duration nor establish whether speech preceded or followed a reply. Missing timing neither
-   discards words nor holds a final waiting for metadata.
+   Every meaningful finalized transcript is retained immediately. Every formatted transcript line
+   uses `[mm:ss-mm:ss] speaker: words`; timing provenance stays in the internal transcript and
+   attempt audit, outside model context. Native provider offsets take precedence. OpenAI local
+   commits retain their item-bound Silero interval; Apple uses its final result range.
+   Gemini maps optional final offsets through actually submitted audio. Without a usable native
+   range, it associates words with the latest local Silero interval on a best-effort basis. Several
+   finals may share that interval; a delayed final after later speech can associate approximately.
+   An open interval preserves its measured start and uses the available audio extent for its end.
+   Missing timing falls back to a conservative audio window, preserving any usable known boundary.
+   That window describes available audio rather than inventing a speech duration. Missing timing
+   neither discards words nor holds a final waiting for metadata.
    Local-commit models keep the last speech-positive frame end separate from the later audio commit
-   boundary. Apple uses its final result range. Gemini uses a single closed, unambiguous local episode
-   when available; an early final uses the labelled receipt-based estimate. A socket interruption retires its
-   unresolved recognition window, including interim-only recognition, so the next episode starts fresh.
-   Deepgram maps finalized word times through contiguous sent-audio spans. Capture sequence identifiers
-   reserve a gap when a route rebuild restarts capture; ordinary callback timestamp jitter does not
-   create a break. Earlier spans remain until socket close so delayed finals keep their measured range.
-   A final crossing a proven capture gap keeps its words with a receipt-based estimate; speech wholly inside
-   the next span uses its new capture origin (see `AudioCaptureSequence` and `DeepgramLiveSession.AudioClock`).
+   boundary. Local Silero activity from both speakers drives silence detection independently of
+   transcript timing or arrival. Final text does not close local activity or restart silence checks.
+   A socket interruption retires its unresolved recognition window, including interim-only
+   recognition, so the next episode starts fresh.
+   Gemini and Deepgram map native offsets through contiguous sent-audio spans (`SentAudioClock`).
+   Capture sequence identifiers reserve a gap when a route rebuild restarts capture; ordinary
+   callback timestamp jitter does not create a break. Earlier spans remain until socket close so
+   delayed finals keep their measured range. An unmappable range keeps its words with an audio-window
+   estimate; speech wholly inside the next span uses its new capture origin.
    The model still decides whether a finalized thought warrants a hint; admission does not classify
    intent or infer sentence completeness from punctuation.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
@@ -142,7 +148,7 @@ moments the model judges worthwhile.
    audit record.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
-   new transcript delta with measured start/end ranges or labelled receipt-based estimates, any silence marker, and the session's
+   new transcript delta with start/end ranges, any silence marker, and the session's
    switched-on tool set. `capture_screen`, `speak`, and `stay_silent` are always there; `load_tool`,
    `call_tool`, and catalog entries for `list_references`, `search_references`, and `read_reference`
    join them when References are admitted at Start and permitted by the session's frozen access
@@ -172,7 +178,7 @@ moments the model judges worthwhile.
    failed `capture_screen`, `speak`, `stay_silent`, each reference list, search or read, each capability
    load, and typed reference admission or access notices. Heard rows and
    model-facing transcript deltas share `ConversationChronology`:
-   measured speech time, or an explicit receipt-based estimate, sets chronology; insertion order breaks ties. A late-finalizing
+   the transcript segment start sets chronology; insertion order breaks ties. A late-finalizing
    earlier utterance is therefore inserted before a faster later reply. When Activity reaches its
    memory backstop, Core sends the discarded insertion identities so the live DOM trims in lockstep
    and keeps using those same indices. Reopened sessions retain the same newest insertion identities
@@ -745,7 +751,7 @@ automatic mode.
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `ProviderFailure` feeds attempt outcomes into the finite provider route; cycle exhaustion uses the session recovery policy. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. A Start while live prepares as a replacement candidate whose preflight checks never touch the live status or token; only committing it, immediately before the old pipeline's teardown, hands readiness over. A refused or cancelled replacement therefore leaves the live session's capture and endpoint monitoring working, and its fatal preflight notices (missing key or permission) are reported as warnings so they cannot stop that session. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
-| **Transcriber** | Maintain a rolling, speaker-labeled transcript with measured speech ranges or labelled receipt-based estimates; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM, and carries the pending start described in [The turn](#the-turn). The opt-in Gemini Live adapter times its pending start and its finals with `PendingSpeechWindow`, also described there, and publishes its interim hypothesis only to the [transcript column](#the-transcript-column). The opt-in Deepgram Live adapter uses that pending-work window and finalized word ranges for speech timing and does not publish interim text to the [transcript column](#the-transcript-column). Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection), Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device), the Gemini Live WebSocket, or the Deepgram Live WebSocket. |
+| **Transcriber** | Maintain a rolling, speaker-labeled transcript with speech ranges and internal timing provenance; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its shared content-free Silero observations request analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM, and carries the pending start described in [The turn](#the-turn). The opt-in Gemini Live adapter tracks pending work with `PendingSpeechWindow` and resolves final ranges as described there, and publishes its interim hypothesis only to the [transcript column](#the-transcript-column). The opt-in Deepgram Live adapter uses that pending-work window and finalized word ranges for speech timing and does not publish interim text to the [transcript column](#the-transcript-column). Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection), Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device), the Gemini Live WebSocket, or the Deepgram Live WebSocket. |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit automatic attempts only when both transcription streams are settled through the selected context, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. In [manual mode](#manual-mode) it admits only coaching shortcuts. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
@@ -1257,10 +1263,12 @@ rather than a per-turn screenshot.
   `TransportFailureClassifier`'s fixed table, keyed on the error code and never on the error's own
   description, and a server close reason reaches Activity only through `ProviderMessageRedaction`
   (see [Failure surfacing](#failure-surfacing--startup-loud-runtime-ghost)). Turn detection is **entirely
-  server-owned**: Gemini finalizes each utterance itself and returns it as `inputTranscription`, so
-  unlike the OpenAI models there is no client-side commit, no Silero endpoint scoring, and no
-  ledger reconciling provisional against final items. Each final enters the transcript immediately,
-  with a labelled receipt-based estimate when its local episode has not closed. The absence of server speech events is mirrored
+  server-owned**: Gemini finalizes each utterance itself and returns it as `inputTranscription`.
+  Shared local Silero observations provide timing estimates and pending work without controlling
+  the wire turn boundary. Each final enters the transcript immediately, with optional native offsets
+  or the best-effort local/audio range described in [The turn](#the-turn). There is no serialized
+  manual-activity queue: empty recognition need not produce a final or an all-final completion
+  signal, so such a queue cannot safely advance its owner. The absence of server speech events is mirrored
   in `RealtimeContinuityReporter`'s `expectsServerSpeechEvents: false` for this boundary. The opening
   `setup` frame carries the model, expected-language hints (`languageCodes`, `[]` selects automatic
   detection rather than an omission the server would have to guess at), the optional vocabulary
@@ -1305,7 +1313,7 @@ rather than a per-turn screenshot.
   under one lock from reading through reporting, so a final is always in the transcript before its
   speech reads as settled. Interim text never reaches Activity or the transcript. Mandarin output
   has the gaps between its characters closed. `PendingSpeechWindow` tracks pending work; word ranges
-  determine both speech boundaries, and `DeepgramLiveSession.AudioClock` rejects mapping across a sent-audio gap. The adapter joins the shared
+  determine both speech boundaries, and `SentAudioClock` rejects mapping across a sent-audio gap. The adapter joins the shared
   socket lifecycle (ready-timeout, ping/pong, reconnect with bounded offline buffering) and salvages
   an open utterance when a socket retires. Deepgram has no custom vocabulary or benchmark arm yet.
 - **The wire sample rate is a per-provider requirement, not a quality knob
@@ -1727,8 +1735,8 @@ The always-on legs are built to survive transient failure rather than die on it:
   overlapping provider turn intervals on the session audio clock, including delayed reconnect
   replay, so a quiet dip inside one provider utterance is not reported as a gap. This evidence stays in the
   owner-only session log: it diagnoses loss but cannot reconstruct words that never reached
-  transcription, and none of it enters model context. VAD-only start/stop events do not
-  restart silence checks without contributing context. Pending items are finalized by bounded
+  transcription, and none of it enters model context. Shared local speech activity drives silence
+  timing independently of transcript publication. Pending items are finalized by bounded
   stopped/active deadlines. On a recoverable socket failure, their old server IDs are cleared and
   their retained PCM is transcribed by the replacement session instead of first emitting a partial
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence

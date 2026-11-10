@@ -458,11 +458,12 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   the newer decision in recall input. The summary size target is soft, with no acceptance ceiling.
   Factual meaning and verification attribution require the separate content review below.
 - **Stored order is not spoken order.** Activity rows and attempt transcripts keep insertion order,
-  and `ConversationChronology` uses measured speech time when available and receipt time otherwise.
-  The model sees a timestamp labelled `estimated from transcript receipt` when measured timing is
-  unavailable. A chronology case compares measured speech times rather than estimated timestamps or
-  positions in a file. Missing timing must preserve finalized words; deterministic regressions cover
-  labelled estimates separately from real-provider accuracy.
+  and `ConversationChronology` uses each resolved transcript segment's start. Formatted context
+  always uses start/end ranges; internal timing provenance distinguishes native offsets, item-bound
+  local utterances, approximate local association, and audio-window fallback. A chronology case
+  requires measured evidence rather than estimated timestamps or positions in a file. Missing timing
+  must preserve finalized words; deterministic regressions cover fallback bounds and internal
+  provenance separately from real-provider accuracy.
 - **Activity rows belong to attempts by time and file order.** An Activity row carries no attempt id,
   and attempt records stamp whole seconds. The checker assigns a row to the attempt whose start and
   finish bracket its second and breaks ties by file order, which is safe because attempts are strictly

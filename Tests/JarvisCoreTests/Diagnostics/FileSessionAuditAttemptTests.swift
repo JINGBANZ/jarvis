@@ -43,7 +43,7 @@ import Testing
         #expect(lines[0]["classification"] as? String == "composite_filler")
         #expect(lines[0]["brain_facing"] as? Bool == false)
         #expect(lines[1]["brain_facing"] as? Bool == true)
-        #expect(lines[1]["at_source"] as? String == "speech")
+        #expect(lines[1]["at_source"] as? String == "providerOffsets")
         #expect(lines[1]["speech_started_at"] as? Double == 2)
         #expect(lines[1]["speech_ended_at"] as? Double == 2)
         #expect(events[1]["terminal"] as? String == "stay_silent")
@@ -53,7 +53,7 @@ import Testing
     @Test func recordsActualRequestInclusionIndependentlyFromClassification() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = await FileSessionAudit.readyForTesting(directory: dir)
-        let line = TranscriptLine(speaker: .them, text: "Uh. Hmm.", observedAt: 12, speechInterval: nil)
+        let line = TranscriptLine(speaker: .them, text: "Uh. Hmm.", interval: SpeechInterval(startedAt: 10, endedAt: 12)!, timingSource: .audioWindowEstimate)
         log.recordStarted(
             attemptID: 1,
             wake: .trigger,
@@ -73,9 +73,35 @@ import Testing
         let recorded = try #require((event["transcript"] as? [[String: Any]])?.first)
         #expect(recorded["classification"] as? String == "composite_filler")
         #expect(recorded["brain_facing"] as? Bool == true)
-        #expect(recorded["at"] as? Double == 12)
-        #expect(recorded["at_source"] as? String == "transcript_receipt_estimate")
+        #expect(recorded["at"] as? Double == 10)
+        #expect(recorded["ended_at"] as? Double == 12)
+        #expect(recorded["at_source"] as? String == "audioWindowEstimate")
         #expect(recorded["speech_started_at"] is NSNull)
         #expect(recorded["speech_ended_at"] is NSNull)
     }
+    @Test(arguments: [TranscriptTimingSource.localUtterance, .localActivityEstimate])
+    func localRangeAlignmentStaysExplicitInAudit(_ source: TranscriptTimingSource) async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
+        let line = TranscriptLine(speaker: .me, text: "local words",
+                                  interval: SpeechInterval(startedAt: 3, endedAt: 5)!, timingSource: source)
+        log.recordStarted(attemptID: 1, wake: .trigger, reason: .turnEnd,
+            target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), transcriptStartIndex: 0,
+            transcriptLines: [line], classifications: [TurnSubstance.classification(of: line.text)], brainFacingTranscriptIndices: [0])
+        _ = await log.closeForTesting()
+        let data = try Data(contentsOf: dir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename))
+        let event = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let recorded = try #require((event["transcript"] as? [[String: Any]])?.first)
+        #expect(recorded["at"] as? Double == 3)
+        #expect(recorded["ended_at"] as? Double == 5)
+        #expect(recorded["at_source"] as? String == source.rawValue)
+        if source == .localUtterance {
+            #expect(recorded["speech_started_at"] as? Double == 3)
+            #expect(recorded["speech_ended_at"] as? Double == 5)
+        } else {
+            #expect(recorded["speech_started_at"] is NSNull)
+            #expect(recorded["speech_ended_at"] is NSNull)
+        }
+    }
+
 }

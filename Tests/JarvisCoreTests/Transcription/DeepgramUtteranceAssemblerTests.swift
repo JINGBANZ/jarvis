@@ -197,9 +197,24 @@ extension DeepgramUtteranceAssemblerTests {
         #expect(assembler.publishedSpeechInterval == nil)
     }
 
+    @Test func partialNativeWordBoundariesSurviveForEstimatedFallback() {
+        var assembler = Self.liveAssembler()
+        _ = assembler.receive(.results(.init(transcript: "known start", isFinal: true, speechFinal: true,
+            start: 0, end: 4, firstWordStart: 1)))
+        #expect(assembler.publishedSpeechInterval == nil)
+        #expect(assembler.publishedSpeechStart == 1)
+        #expect(assembler.publishedSpeechEnd == nil)
+        assembler.finishPublishing()
+        _ = assembler.receive(.results(.init(transcript: "known end", isFinal: true, speechFinal: true,
+            start: 4, end: 8, lastWordEnd: 6)))
+        #expect(assembler.publishedSpeechInterval == nil)
+        #expect(assembler.publishedSpeechStart == nil)
+        #expect(assembler.publishedSpeechEnd == 6)
+    }
+
     @Test func captureRestartPreservesMeasuredSpeechOnBothSidesOfTheBreak() {
         var sequence = AudioCaptureSequence()
-        var clock = DeepgramLiveSession.AudioClock()
+        var clock = SentAudioClock()
         clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 10, duration: 1)
         sequence.markDiscontinuity()
         clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 20, duration: 1)
@@ -213,7 +228,7 @@ extension DeepgramUtteranceAssemblerTests {
 
     @Test func finalCrossingCaptureRestartRetainsTextWithEstimatedTiming() throws {
         var sequence = AudioCaptureSequence()
-        var clock = DeepgramLiveSession.AudioClock()
+        var clock = SentAudioClock()
         clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 10, duration: 1)
         sequence.markDiscontinuity()
         clock.recordSentAudio(sequenceNumber: sequence.next(), capturedAt: 20, duration: 1)
@@ -236,12 +251,12 @@ extension DeepgramUtteranceAssemblerTests {
         coordinator.stop()
         #expect(transcript.count == 1)
         #expect(transcript.renderFrom(index: 0).text.contains("Keep these words"))
-        #expect(transcript.renderFrom(index: 0).text.contains("estimated from transcript receipt"))
-        #expect(transcript.renderFrom(index: 0).lines.first?.timingIsEstimated == true)
+        #expect(transcript.renderFrom(index: 0).text.contains("[00:"))
+        #expect(transcript.renderFrom(index: 0).lines.first?.timingSource == .audioWindowEstimate)
     }
 
     @Test func sentAudioGapRejectsCrossingFinalsButLaterMeasuredSpeechRecovers() {
-        var clock = DeepgramLiveSession.AudioClock()
+        var clock = SentAudioClock()
         let words = SpeechInterval(startedAt: 0.1, endedAt: 0.2)
         clock.recordSentAudio(sequenceNumber: 10, capturedAt: 10, duration: 0.1)
         clock.recordSentAudio(sequenceNumber: 11, capturedAt: 10.15, duration: 0.1)

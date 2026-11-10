@@ -25,6 +25,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private var transcriptBatchRevision = 0
     private var silenceRevision = 0
     private var silencePausedLogged = false
+    private var timing = TranscriptTimingResolver()
 
     public init(
         speaker: Speaker,
@@ -64,12 +65,14 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         let generation = generation
         let reportSettled = transcriptionWork != .settled
         stopped = false
+        transcript.finishLocalSpeech(speaker: speaker)
         transcriptionWork = .settled
         pendingLatestSpeechTime = nil
         pendingTranscriptBoundary = nil
         transcriptBatchRevision &+= 1
         silenceRevision &+= 1
         pending.clear()
+        timing = TranscriptTimingResolver()
         lock.unlock()
 
         if reportSettled { onTranscriptionWorkChanged(.settled) }
@@ -80,6 +83,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         stopped = true
+        transcript.finishLocalSpeech(speaker: speaker)
         generation &+= 1
         transcriptBatchRevision &+= 1
         silenceRevision &+= 1
@@ -93,38 +97,61 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         if reportSettled { onTranscriptionWorkChanged(.settled) }
     }
 
+    public func recordAudioWindow(startedAt: TimeInterval, endedAt: TimeInterval) {
+        lock.lock(); defer { lock.unlock() }
+        guard !stopped else { return }
+        timing.recordAudio(startedAt: startedAt, endedAt: endedAt)
+    }
+
+    public func resetAudioWindow() {
+        lock.lock(); defer { lock.unlock() }
+        timing.resetAudioWindow()
+    }
+
+    /// Accepts capture-clock edges converted to session-relative times by the provider adapter.
+    public func recordLocalSpeech(_ event: LocalSpeechEvent) {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        timing.recordLocalSpeech(event)
+        transcript.recordLocalSpeech(event, speaker: speaker)
+        let generation = generation
+        lock.unlock()
+        restartSilenceTimer(generation: generation)
+    }
+
     /// `source` goes only to the debug log, never to Activity.
     @discardableResult
     public func recordFinalizedTranscript(
         _ rawText: String,
         spokenAt: TimeInterval?,
         spokenEndAt: TimeInterval?,
-        source: String
+        source: String,
+        timingSource: TranscriptTimingSource = .providerOffsets,
+        useLocalActivityEstimate: Bool = false
     ) -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.contains(where: { $0.isLetter || $0.isNumber }) else { return false }
-        let speech = spokenAt.flatMap { start in
-            spokenEndAt.flatMap { SpeechInterval(startedAt: start, endedAt: $0) }
-        }
         let observedAt = clock.now() - sessionStart
-        let at = speech?.startedAt ?? observedAt
 
         lock.lock()
         guard !stopped else { lock.unlock(); return false }
-        let transcriptBoundary = transcript.append(
-            .init(speaker: speaker, text: text, observedAt: observedAt, speechInterval: speech))
+        let resolved = timing.resolve(
+            startedAt: spokenAt, endedAt: spokenEndAt, observedAt: observedAt,
+            source: timingSource, useLocalActivityEstimate: useLocalActivityEstimate)
+        let line = TranscriptLine(speaker: speaker, text: text, interval: resolved.interval,
+                                  timingSource: resolved.source)
+        let at = line.at
+        let transcriptBoundary = transcript.append(line)
         pending.append(text)
         pendingLatestSpeechTime = max(pendingLatestSpeechTime ?? at, at)
         pendingTranscriptBoundary = max(pendingTranscriptBoundary ?? 0, transcriptBoundary)
         let generation = generation
-        // Receipt-based estimates use the same chronology in Activity and model context.
         activity?.record(
             .heard(speaker: speaker, text: text),
             at: Date(timeIntervalSince1970: sessionStart + at))
         jlog("🗣 heard (\(speaker.rawValue)): \"\(text)\" (\(source))")
         lock.unlock()
 
-        restartSilenceTimer(generation: generation)
         scheduleTranscriptBatch(generation: generation)
         return true
     }

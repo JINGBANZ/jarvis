@@ -215,6 +215,9 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         sequenceNumber: UInt64,
         capturedAt: TimeInterval
     ) {
+        coachingCoordinator.recordAudioWindow(
+            startedAt: max(0, capturedAt - sessionStart),
+            endedAt: max(0, capturedAt - sessionStart) + TranscriptionAudioFormat.pcm16Mono24k.duration(forByteCount: pcm.count))
         guard isLive else { return }
         continuityReporter.recordDelivery(
             sequence: sequenceNumber,
@@ -239,6 +242,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     }
 
     func recordLocalSpeechEvent(_ event: LocalSpeechEvent, throughSequenceNumber: UInt64) {
+        coachingCoordinator.recordLocalSpeech(event.relative(to: sessionStart))
         let generation = currentGeneration
         audioQueue.async { [weak self] in
             guard let self, self.isLive(generation: generation) else { return }
@@ -491,10 +495,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let timelineOffset = analyzerTimelineOffset ?? 0
         let resultStart = CMTimeGetSeconds(result.range.start)
         let resultEnd = CMTimeGetSeconds(CMTimeRangeGetEnd(result.range))
-        let speech = SpeechInterval(startedAt: timelineOffset + resultStart,
-                                    endedAt: timelineOffset + resultEnd)
-        let spokenAt = speech?.startedAt
-        let spokenEnd = speech?.endedAt
+        let spokenAt = SpeechInterval(startedAt: timelineOffset + resultStart,
+                                      endedAt: timelineOffset + resultStart)?.startedAt
+        let spokenEnd = SpeechInterval(startedAt: timelineOffset + resultEnd,
+                                       endedAt: timelineOffset + resultEnd)?.endedAt
         let benchmarkItemID: String?
         if benchmark == nil {
             benchmarkItemID = nil

@@ -14,6 +14,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         public let spokenEndAt: TimeInterval?
         public let recoveredFromDeltas: Bool
         public let isTranscriptUnavailable: Bool
+        public var timingSource: TranscriptTimingSource = .providerOffsets
     }
 
     private struct Item {
@@ -22,6 +23,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         var timelineOrigin: TimeInterval?
         var deltas = ""
         var speechStopped = false
+        var timingSource: TranscriptTimingSource = .providerOffsets
 
         var spokenAt: TimeInterval? {
             guard let audioStartMilliseconds, let timelineOrigin else { return nil }
@@ -54,7 +56,8 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
 
     @discardableResult
     public func recordSpeechStarted(itemID: String, audioStartMilliseconds: Int,
-                                    timelineOrigin: TimeInterval) -> Bool {
+                                    timelineOrigin: TimeInterval,
+                                    timingSource: TranscriptTimingSource = .providerOffsets) -> Bool {
         guard !itemID.isEmpty, audioStartMilliseconds >= 0,
               timelineOrigin.isFinite, timelineOrigin >= 0 else { return false }
         lock.lock(); defer { lock.unlock() }
@@ -62,6 +65,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         var item = items[itemID] ?? Item()
         item.audioStartMilliseconds = audioStartMilliseconds
         item.timelineOrigin = timelineOrigin
+        item.timingSource = timingSource
         let spokenAt = item.spokenAt
         if let spokenAt {
             let resolvedStarts = finalizedStartsAwaitingLaterBoundary.filter { $0 < spokenAt }
@@ -120,7 +124,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         if let final = TranscriptFiltering.meaningfulTranscript(transcript, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: final, spokenAt: item.spokenAt,
                                  spokenEndAt: item.spokenEndAt,
-                                 recoveredFromDeltas: false, isTranscriptUnavailable: false)
+                                 recoveredFromDeltas: false, isTranscriptUnavailable: false, timingSource: item.timingSource)
         }
         guard let partial = TranscriptFiltering.meaningfulTranscript(item.deltas, speaker: speaker) else {
             guard let duration = item.detectedSpeechDurationMilliseconds,
@@ -130,11 +134,11 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
             return FinalizedItem(itemID: itemID, text: nil,
                                  spokenAt: item.spokenAt, spokenEndAt: item.spokenEndAt,
                                  recoveredFromDeltas: false,
-                                 isTranscriptUnavailable: true)
+                                 isTranscriptUnavailable: true, timingSource: item.timingSource)
         }
         return FinalizedItem(itemID: itemID, text: partial, spokenAt: item.spokenAt,
                              spokenEndAt: item.spokenEndAt,
-                             recoveredFromDeltas: true, isTranscriptUnavailable: false)
+                             recoveredFromDeltas: true, isTranscriptUnavailable: false, timingSource: item.timingSource)
     }
 
     public func recordFailed(itemID: String, speaker: Speaker) -> FinalizedItem? {
@@ -251,7 +255,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         if let partial = TranscriptFiltering.meaningfulTranscript(item.deltas, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: partial, spokenAt: item.spokenAt,
                                  spokenEndAt: item.spokenEndAt,
-                                 recoveredFromDeltas: true, isTranscriptUnavailable: false)
+                                 recoveredFromDeltas: true, isTranscriptUnavailable: false, timingSource: item.timingSource)
         }
         // As in `recordCompleted`, a short blip returns nil. It is still finalized above, so a late
         // terminal event can't append a duplicate.
@@ -261,7 +265,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         }
         return FinalizedItem(itemID: itemID, text: nil,
                              spokenAt: item.spokenAt, spokenEndAt: item.spokenEndAt,
-                             recoveredFromDeltas: false, isTranscriptUnavailable: true)
+                             recoveredFromDeltas: false, isTranscriptUnavailable: true, timingSource: item.timingSource)
     }
 
     private func recordFinalizedAudioEndLocked(_ end: TimeInterval?) {

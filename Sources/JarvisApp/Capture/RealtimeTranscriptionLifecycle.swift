@@ -125,7 +125,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let startMilliseconds = startedAt.flatMap(Self.milliseconds)
         let endMilliseconds = endedAt.flatMap(Self.milliseconds)
         let didStart = startMilliseconds.map {
-            ledger.recordSpeechStarted(itemID: itemID, audioStartMilliseconds: $0, timelineOrigin: 0)
+            ledger.recordSpeechStarted(itemID: itemID, audioStartMilliseconds: $0, timelineOrigin: 0, timingSource: .localUtterance)
         } ?? false
         let didStop = ledger.recordSpeechStopped(
             itemID: itemID,
@@ -430,7 +430,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             text,
             spokenAt: item.spokenAt,
             spokenEndAt: item.spokenEndAt,
-            source: "item \(item.itemID)\(detail)")
+            source: "item \(item.itemID)\(detail)",
+            timingSource: item.timingSource)
     }
 
     /// Publish under `lock` so concurrent socket and timeout callbacks cannot reorder transitions.

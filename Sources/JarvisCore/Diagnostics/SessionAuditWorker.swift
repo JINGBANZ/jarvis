@@ -581,14 +581,16 @@ final class SessionAuditWorker: @unchecked Sendable {
                 event.transcriptLines, event.classifications).enumerated().map { offset, pair in
                     let (line, classification) = pair
                     let index = event.transcriptStartIndex + offset
+                    let aligned = line.timingSource == .providerOffsets || line.timingSource == .localUtterance
                     return [
                         "index": index,
                         "speaker": line.speaker.rawValue,
                         "text": line.text,
                         "at": line.at,
-                        "at_source": line.timingIsEstimated ? "transcript_receipt_estimate" : "speech",
-                        "speech_started_at": line.timingIsEstimated ? NSNull() : line.at as Any,
-                        "speech_ended_at": line.timingIsEstimated ? NSNull() : line.endedAt as Any,
+                        "ended_at": line.endedAt,
+                        "at_source": line.timingSource.rawValue,
+                        "speech_started_at": aligned ? line.at as Any : NSNull(),
+                        "speech_ended_at": aligned ? line.endedAt as Any : NSNull(),
                         "classification": classification.rawValue,
                         "brain_facing": event.brainFacingTranscriptIndices.contains(index),
                     ]

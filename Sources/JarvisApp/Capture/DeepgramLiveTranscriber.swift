@@ -40,7 +40,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
     private var assembler = DeepgramUtteranceAssembler()
     /// Local activity supplies pending-work boundaries; finalized words supply speech timing.
     private var pendingSpeech = PendingSpeechWindow()
-    private var socketAudioClock = DeepgramLiveSession.AudioClock()
+    private var socketAudioClock = SentAudioClock()
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var stopped = true
 
@@ -188,6 +188,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         isSending = false
+        coachingCoordinator.resetAudioWindow()
         assembler.reset(socket: lease.generation)
         socketAudioClock = .init()
         lock.unlock()
@@ -207,6 +208,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         isSending = false
+        pendingSpeech.recordRecognitionFinalized()
         lock.unlock()
         updateWorkFlag()
     }
@@ -217,6 +219,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         isSending = false
+        pendingSpeech.recordRecognitionFinalized()
         lock.unlock()
         updateWorkFlag()
         onTerminalFailure?(failure)
@@ -264,6 +267,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
     }
 
     func recordLocalSpeechEvent(_ event: LocalSpeechEvent, throughSequenceNumber: UInt64) {
+        coachingCoordinator.recordLocalSpeech(event.relative(to: sessionStart))
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         switch event {
@@ -285,6 +289,9 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
            let lease = connection.readyLease {
             socketAudioClock.recordSentAudio(
                 sequenceNumber: first.sequence, capturedAt: first.capturedAt, duration: audioFormat.duration(forByteCount: first.data.count))
+            coachingCoordinator.recordAudioWindow(
+                startedAt: first.capturedAt,
+                endedAt: first.capturedAt + audioFormat.duration(forByteCount: first.data.count))
             frame = first.data
             frameToken = first.token
             socketLease = lease
@@ -380,27 +387,27 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         if heardSpeech { pendingSpeech.recordRecognitionObserved(at: observedAt) }
         // The assembler drops a retired socket's events: its audio clock is not the replacement's.
         let segments = assembler.receive(event, socket: lease.generation)
-        let interval = measuredSpeechIntervalLocked()
+        let timing = measuredSpeechTimingLocked()
         lock.unlock()
-        publish(segments, interval: interval, reason: reason)
+        publish(segments, timing: timing, reason: reason)
         updateWorkFlag()
     }
 
     private func salvageUtterance(reason: String) {
         lock.lock()
         let segments = assembler.closeAll()
-        let interval = measuredSpeechIntervalLocked()
+        let timing = measuredSpeechTimingLocked()
         lock.unlock()
-        publish(segments, interval: interval, reason: reason)
+        publish(segments, timing: timing, reason: reason)
     }
 
     /// Settles even an utterance `TranscriptFiltering` rejects, because the server is done with
     /// the audio. The assembler holds the speech unresolved until the line is in the transcript.
-    private func publish(_ segments: [String], interval: SpeechInterval?, reason: String) {
+    private func publish(_ segments: [String], timing: (start: TimeInterval?, end: TimeInterval?), reason: String) {
         guard !segments.isEmpty else { return }
         if let text = DeepgramLiveSession.joinedTranscript(segments, speaker: speaker) {
             coachingCoordinator.recordFinalizedTranscript(
-                text, spokenAt: interval?.startedAt, spokenEndAt: interval?.endedAt, source: "deepgram-live (\(reason))")
+                text, spokenAt: timing.start, spokenEndAt: timing.end, source: "deepgram-live (\(reason))")
         }
         lock.lock()
         assembler.finishPublishing()
@@ -408,8 +415,13 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.unlock()
     }
 
-    private func measuredSpeechIntervalLocked() -> SpeechInterval? {
-        socketAudioClock.sessionInterval(assembler.publishedSpeechInterval)
+    private func measuredSpeechTimingLocked() -> (start: TimeInterval?, end: TimeInterval?) {
+        if let interval = socketAudioClock.sessionInterval(assembler.publishedSpeechInterval) {
+            return (interval.startedAt, interval.endedAt)
+        }
+        let start = assembler.publishedSpeechStart.flatMap { socketAudioClock.sessionTime(forOffset: $0) }
+        let end = assembler.publishedSpeechEnd.flatMap { socketAudioClock.sessionTime(forOffset: $0) }
+        return (start, start == nil ? end : nil)
     }
 
     private var source: ProviderFailure.Source { .transcription(.deepgram) }

@@ -263,6 +263,9 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     }
 
     func sendAudio(_ pcm: Data, sequenceNumber: UInt64, capturedAt: TimeInterval) {
+        coachingCoordinator.recordAudioWindow(
+            startedAt: max(0, capturedAt - sessionStart),
+            endedAt: max(0, capturedAt - sessionStart) + TranscriptionAudioFormat.pcm16Mono24k.duration(forByteCount: pcm.count))
         let observedAt = clock.now() - sessionStart
         let sessionRelativeCaptureAt = capturedAt - sessionStart
         let chunk = PCMBuffer.Chunk(
@@ -297,6 +300,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64
     ) {
+        coachingCoordinator.recordLocalSpeech(event.relative(to: sessionStart))
         guard model.turnDetectionStrategy == .clientCommit else { return }
         switch event {
         case .started(let startedAt):
