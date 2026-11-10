@@ -31,6 +31,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Tests/Support/ScenarioHarness/` + `Tests/JarvisScenarioHarnessTests/`: shared scenario contracts, replay, grading, and suite execution with offline harness tests ([test code ownership](./live-e2e-tests.md#code-ownership)).
 - `Sources/JarvisApp/Testing/`: debug-only signed-app scenario, References, Settings, and capture-privacy adapters ([live-e2e-tests.md](./live-e2e-tests.md#code-ownership)).
 - `Tests/JarvisLiveTests/` + `scripts/run-live-tests.sh`: real-provider and signed-app entry points, the suite catalog, scenarios, fixtures, and command; the Gate compiles the target but never runs it.
+- `Tests/ReleaseReadiness/` + `scripts/probe-release-ui.py`: external normal-app UI and basic synthetic-audio readiness checks on disposable hosted Macs ([external installed-app readiness](./live-e2e-tests.md#external-installed-app-readiness)).
 - `scripts/run-tests.sh` + `scripts/run-ci-tests.sh` + `scripts/test-script-workflows.py` + `scripts/test-test-display.py` + `scripts/test-display/`: ordinary/hosted test entrypoints and the [command ownership and retained display](./test-command-ownership.md) shared by local harnesses.
 - `Sources/JarvisCore/Brain/`: the provider-neutral brain domain: client and attempt-scoped conversation contracts, route targets, and the model catalog.
 - `Sources/JarvisCore/Providers/`: provider failure classification, redaction, and credential checks shared by brain, transcription, and Settings.

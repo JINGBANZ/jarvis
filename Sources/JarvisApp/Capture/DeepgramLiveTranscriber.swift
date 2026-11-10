@@ -39,7 +39,6 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
     private let workReportLock = NSLock()
     private var assembler = DeepgramUtteranceAssembler()
     /// Local activity supplies pending-work boundaries; finalized words supply speech timing.
-    private var activityTracker = PCM16SpeechActivityTracker()
     private var pendingSpeech = PendingSpeechWindow()
     private var socketAudioClock = DeepgramLiveSession.AudioClock()
     private var isSending = false         // one in-flight audio send at a time, preserves order
@@ -126,7 +125,6 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.lock()
         stopped = false; isSending = false
         assembler = DeepgramUtteranceAssembler()
-        _ = activityTracker.reset()
         pendingSpeech.reset()
         lock.unlock()
         coachingCoordinator.start()
@@ -148,7 +146,6 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         isSending = false
         assembler = DeepgramUtteranceAssembler()
         // No further audio arrives to release the detector, so close the window here too.
-        _ = activityTracker.reset()
         pendingSpeech.reset()
         bufferedAudio.removeAll(keepingCapacity: false)
         bufferedByteCount = 0
@@ -247,10 +244,6 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
             sequence: sequenceNumber, pcm16: pcm, at: clock.now() - sessionStart)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        if let active = activityTracker.observe(pcm16: pcm, at: capturedAt, sampleRate: audioFormat.sampleRate) {
-            let boundary = active ? capturedAt : activityTracker.lastSpeechEndedAt
-            if let boundary { pendingSpeech.recordLocalSpeech(active: active, at: boundary - sessionStart) }
-        }
         let token = nextChunkToken
         nextChunkToken += 1
         bufferedAudio.append((token: token, sequence: sequenceNumber, data: pcm, capturedAt: capturedAt - sessionStart))
@@ -268,6 +261,19 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         }
         updateWorkFlag()
         pumpIfPossible()
+    }
+
+    func recordLocalSpeechEvent(_ event: LocalSpeechEvent, throughSequenceNumber: UInt64) {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        switch event {
+        case .started(let at):
+            pendingSpeech.recordLocalSpeech(active: true, at: max(0, at - sessionStart))
+        case .ended(_, let endedAt, let commitAt):
+            pendingSpeech.recordLocalSpeech(active: false, at: max(0, (endedAt ?? commitAt) - sessionStart))
+        }
+        lock.unlock()
+        updateWorkFlag()
     }
 
     private func pumpIfPossible() {

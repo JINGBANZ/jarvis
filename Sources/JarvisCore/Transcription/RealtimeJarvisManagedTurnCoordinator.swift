@@ -36,12 +36,14 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
 
     public mutating func recordTurn(
         startedAt: TimeInterval,
-        endedAt: TimeInterval,
+        endedAt: TimeInterval? = nil,
         committedThroughAt: TimeInterval,
         throughSequenceNumber: UInt64
     ) {
-        let interval = committedThroughAt.isFinite && committedThroughAt >= endedAt
-            ? SpeechInterval(startedAt: startedAt, endedAt: endedAt) : nil
+        let interval = endedAt.flatMap { end in
+            committedThroughAt.isFinite && committedThroughAt >= end
+                ? SpeechInterval(startedAt: startedAt, endedAt: end) : nil
+        }
         pendingTurns.append(Turn(
             id: nextTurnID,
             startedAt: interval?.startedAt,

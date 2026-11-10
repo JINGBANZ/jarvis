@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 
 workflow=".github/workflows/release.yml"
 ci_workflow=".github/workflows/ci.yml"
+ready_workflow=".github/workflows/release-ready.yml"
 release_header=".github/release-header.md"
 package_script="scripts/package-app.sh"
 bundle_script="scripts/lib/app-bundle.sh"
@@ -16,7 +17,7 @@ appcast_script="scripts/generate-appcast.sh"
 package_guard_call="./scripts/check-release-sdk.sh \"\$BIN_PATH\""
 verify_guard_call="./scripts/check-release-sdk.sh \"\$EXTRACTED_BIN\""
 
-for path in "$workflow" "$ci_workflow" "$release_header" "$package_script" "$verify_script" \
+for path in "$workflow" "$ci_workflow" "$ready_workflow" "$release_header" "$package_script" "$verify_script" \
     "$bundle_script" "$sdk_guard" "$dmg_settings" "$dmg_layout_guard" "$release_requirements" "$appcast_script"; do
   if [[ ! -f "$path" || -L "$path" ]]; then
     echo "Release configuration guard: $path must be a regular file." >&2
@@ -24,15 +25,15 @@ for path in "$workflow" "$ci_workflow" "$release_header" "$package_script" "$ver
   fi
 done
 
-if ! /usr/bin/grep -Eq '^[[:space:]]*runs-on:[[:space:]]*macos-26[[:space:]]*$' "$workflow"; then
-  echo "Release publish job must use the Apple-silicon macos-26 runner." >&2
+if ! /usr/bin/grep -Eq '^[[:space:]]*runs-on:[[:space:]]*macos-26[[:space:]]*$' "$ready_workflow"; then
+  echo "Release candidate job must use the Apple-silicon macos-26 runner." >&2
   exit 1
 fi
 if ! /usr/bin/grep -Eq '^[[:space:]]*environment:[[:space:]]*release[[:space:]]*$' "$workflow"; then
-  echo "Release publish job must bind the environment-scoped signing secrets." >&2
+  echo "Release publication must use the protected release environment." >&2
   exit 1
 fi
-for checkout_workflow in "$workflow" "$ci_workflow"; do
+for checkout_workflow in "$workflow" "$ci_workflow" "$ready_workflow"; do
   if ! /usr/bin/grep -Eq \
       '^[[:space:]]*-[[:space:]]*uses:[[:space:]]*actions/checkout@[0-9a-f]{40}[[:space:]]*#[[:space:]]*v([5-9]|[1-9][0-9]+)\.' \
       "$checkout_workflow"; then
@@ -40,8 +41,8 @@ for checkout_workflow in "$workflow" "$ci_workflow"; do
     exit 1
   fi
 done
-if ! /usr/bin/grep -Eq '^[[:space:]]*timeout-minutes:[[:space:]]*75[[:space:]]*$' "$workflow"; then
-  echo "Release publish timeout must cover both bounded notarization waits." >&2
+if ! /usr/bin/grep -Eq '^[[:space:]]*timeout-minutes:[[:space:]]*75[[:space:]]*$' "$ready_workflow"; then
+  echo "Release candidate timeout must cover both bounded notarization waits." >&2
   exit 1
 fi
 if ! /usr/bin/grep -Fq "$package_guard_call" "$package_script"; then
@@ -83,9 +84,9 @@ if /usr/bin/grep -Fq 'hide_extensions' "$dmg_settings" \
 fi
 if ! /usr/bin/grep -Fq -- '--only-binary=:all:' "$release_requirements" \
     || ! /usr/bin/grep -Fq 'dmgbuild==1.6.7' "$release_requirements" \
-    || ! /usr/bin/grep -Fq -- '--require-hashes' "$workflow" \
-    || ! /usr/bin/grep -Fq -- '--requirement scripts/requirements-release.txt' "$workflow" \
-    || ! /usr/bin/grep -Fq 'DMGBUILD_PYTHON=$RELEASE_TOOLS/bin/python' "$workflow"; then
+    || ! /usr/bin/grep -Fq -- '--require-hashes' "$ready_workflow" \
+    || ! /usr/bin/grep -Fq -- '--requirement scripts/requirements-release.txt' "$ready_workflow" \
+    || ! /usr/bin/grep -Fq 'DMGBUILD_PYTHON=$RELEASE_TOOLS/bin/python' "$ready_workflow"; then
   echo "Release workflow must install the hash-pinned DMG layout tool in its own environment." >&2
   exit 1
 fi
@@ -105,9 +106,9 @@ if ! /usr/bin/grep -Fq 'EXTRACTED_SPARKLE="$EXTRACTED_APP/Contents/Frameworks/Sp
   echo "Final release verification must inspect the embedded updater and every nested signature." >&2
   exit 1
 fi
-if ! /usr/bin/grep -Fq './scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_HTML"' "$workflow" \
+if ! /usr/bin/grep -Fq './scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_HTML"' "$ready_workflow" \
     || ! /usr/bin/grep -Fq 'SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}' \
-      "$workflow"; then
+      "$ready_workflow"; then
   echo "Release publication must sign the update feed with the release-scoped Sparkle key." >&2
   exit 1
 fi
@@ -188,6 +189,16 @@ fi
 if /usr/bin/grep -Fq 'SHA256SUMS' "$workflow" \
     || /usr/bin/grep -Fq 'Jarvis-*.zip' "$workflow"; then
   echo "Release publication must not add legacy zip or checksum assets." >&2
+  exit 1
+fi
+if /usr/bin/grep -Eq 'swift build|package-app.sh|notarytool|SPARKLE_ED_PRIVATE_KEY' "$workflow" \
+    || ! /usr/bin/grep -Fq 'release-promotion.py select-promotion' "$workflow" \
+    || ! /usr/bin/grep -Fq 'release-promotion.py verify-promotion' "$workflow" \
+    || ! /usr/bin/grep -Fq 'digest-mismatch: error' "$workflow" \
+    || ! /usr/bin/grep -Fq 'types: [in_progress]' "$ready_workflow" \
+    || ! /usr/bin/grep -Fq 'os: [macos-15, macos-26, macos-15-intel]' "$ready_workflow" \
+    || ! /usr/bin/grep -Fq 'release-promotion.py wait-ready' "$ci_workflow"; then
+  echo "Release publication must promote only the exact premerge artifact accepted on all required native Macs." >&2
   exit 1
 fi
 if ! /usr/bin/grep -Fq '@JARVIS_DOWNLOAD_URL@' "$release_header" \

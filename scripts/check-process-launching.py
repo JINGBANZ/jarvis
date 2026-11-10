@@ -79,6 +79,14 @@ def check_boundary(root, package):
         if re.search(r'\b(?:JarvisCore|JarvisBrainProviders|JarvisEvaluation|JarvisScenarioHarness)\b', path.read_text()):
             raise ValueError(f'{path.relative_to(root)}: process ownership must remain independent of coaching and evaluation')
 
+    for path in (root / 'Sources').rglob('*.swift'):
+        if re.search(r'\b(?:ReleaseReadiness\w*|JARVIS_READINESS_\w*)\b|'
+                     r'(?:probe-release-ui|prepare-release-ui-account)\.py', path.read_text()):
+            raise ValueError(f'{path.relative_to(root)}: release UI checks must remain external to the product')
+    for path in (root / 'Tests/ReleaseReadiness').rglob('*.swift'):
+        if re.search(r'^\s*(?:@testable\s+)?import\s+Jarvis\w+', path.read_text(), re.MULTILINE):
+            raise ValueError(f'{path.relative_to(root)}: release UI checks cannot import product modules')
+
 
 if __name__ == '__main__':
     root = Path(__file__).resolve().parent.parent

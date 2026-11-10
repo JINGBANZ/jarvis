@@ -164,4 +164,4 @@ if [[ -n "${EXPECTED_RELEASE_TAG:-}" ]]; then
   verify_args+=("$EXPECTED_RELEASE_TAG")
 fi
 ./scripts/verify-release.sh "${verify_args[@]}"
-echo "✅ $DMG is notarized and ready to distribute (Apple silicon and Intel, macOS 14.2+)"
+echo "✅ $DMG is notarized and ready to distribute (Apple silicon and Intel, macOS 15+)"

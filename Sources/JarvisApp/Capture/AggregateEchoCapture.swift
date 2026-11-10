@@ -104,14 +104,14 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         // A client-commit session without detectors would stream audio but never commit a turn.
         let localTurnDetectionReady = !usesLocalTurnDetection
             || (micTurnDetector != nil && systemTurnDetector != nil)
-        if #available(macOS 14.2, *), aec != nil, micDown != nil, sysDown != nil,
+        if aec != nil, micDown != nil, sysDown != nil,
            localTurnDetectionReady {
             reason = buildAudioLocked()
             if reason == nil { registerRouteListenersLocked() }
         } else {
-            jlog("Jarvis: one-clock capture unavailable — needs macOS 14.2+, AEC/resampler, and configured VAD")
+            jlog("Jarvis: one-clock capture unavailable — needs AEC/resampler and configured VAD")
             reason = localTurnDetectionReady
-                ? "Jarvis needs macOS 14.2 or later for echo-cancelled capture."
+                ? "Couldn't prepare echo-cancelled audio capture."
                 : "Couldn't prepare local speech detection for this transcription model."
         }
         lock.unlock()
@@ -136,7 +136,6 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
 
     /// Self-cleaning: on failure it tears down whatever it created and returns the reason.
     private func buildAudioLocked() -> String? {
-        guard #available(macOS 14.2, *) else { return "Jarvis needs macOS 14.2 or later." }
         guard let micUID = Self.defaultInputDeviceUID() else {
             jlog("Jarvis: capture — no default input device")
             return "No microphone is available. Connect an input device and press Start."
@@ -213,7 +212,7 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
             AudioDeviceDestroyIOProcID(aggregateID, proc)
         }
         if aggregateID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateID) }
-        if #available(macOS 14.2, *), tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
+        if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
         procID = nil; aggregateID = kAudioObjectUnknown; tapID = kAudioObjectUnknown
     }
 

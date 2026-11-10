@@ -81,7 +81,7 @@ Mark breaking changes with `!` (`feat!:`) or a `BREAKING CHANGE:` footer. One lo
 ## Project overview
 
 Jarvis is a voice-only macOS menu-bar agent, currently focused on technical-conversation coaching,
-built with Swift 6, SwiftPM, and macOS 14+ APIs. Keep
+built with Swift 6, SwiftPM, and macOS 15+ APIs. Keep
 Foundation-only product logic in `JarvisCore`; keep AppKit, audio, capture, and other OS-bound code thin in
 `JarvisOverlay` or `JarvisApp`. The event loop starts at `Sources/JarvisCore/Coach/CoachDriver.swift`.
 

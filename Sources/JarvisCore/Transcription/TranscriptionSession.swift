@@ -34,7 +34,7 @@ public protocol TranscriptionSession: AnyObject, Sendable {
 }
 
 public extension TranscriptionSession {
-    /// Providers with their own turn detector ignore capture-side speech edges.
+    /// Adapters may use native provider boundaries while still receiving shared capture observations.
     func recordLocalSpeechEvent(
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64

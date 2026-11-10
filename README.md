@@ -8,7 +8,7 @@
   <a href="https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg"><img src="https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download the macOS version"></a>
   <a href="https://t.me/+-FDYU99oXTBlZmQx"><img src="https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&amp;logo=telegram&amp;logoColor=white" alt="Join us on Telegram"></a>
   <br>
-  <sub>Apple silicon and Intel · macOS 14.2 or later</sub>
+  <sub>Apple silicon and Intel · macOS 15 or later</sub>
 </p>
 
 **Your voice-only AI agent. Like Jarvis for Tony Stark.** Think out loud, ask a question, or just
@@ -47,7 +47,7 @@ flowchart TD
 
 ## Developer quick start
 
-Use an Apple silicon or Intel Mac with macOS 14.2+, Swift 6, Python 3, and the macOS
+Use an Apple silicon or Intel Mac with macOS 15+, Swift 6, Python 3, and the macOS
 [Command Line Tools](./wiki/build-and-run.md#toolchain), with a logged-in macOS GUI session.
 
 ```bash

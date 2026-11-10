@@ -330,9 +330,9 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             guard !stopped else { lock.unlock(); return }
             jarvisManagedSpeechBuffer?.speechEnded()
             jarvisManagedTurnCoordinator?.recordTurn(
-                startedAt: startedAt - sessionStart,
-                endedAt: endedAt - sessionStart,
-                committedThroughAt: commitAt - sessionStart,
+                startedAt: max(0, startedAt - sessionStart),
+                endedAt: endedAt.map { max(0, $0 - sessionStart) },
+                committedThroughAt: max(0, commitAt - sessionStart),
                 throughSequenceNumber: throughSequenceNumber)
             lock.unlock()
             pumpAudioIfReady()

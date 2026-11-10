@@ -60,6 +60,8 @@ import Testing
         let acknowledgedFirst = coordinator.acknowledgeCommittedItem(itemID: "old-item")
         let firstBinding = try #require(acknowledgedFirst)
         #expect(firstBinding.needsInitialItemBinding)
+        #expect(firstBinding.endedAt == 1.2)
+        #expect(firstBinding.committedThroughAt == 2)
 
         #expect(coordinator.prepareForReconnect(oldestAvailableSequenceNumber: 1).isEmpty)
         coordinator.recordAudioSent(sequenceNumber: 4)
@@ -69,6 +71,8 @@ import Testing
         let acknowledgedReplay = coordinator.acknowledgeCommittedItem(itemID: "replacement-item")
         let replayBinding = try #require(acknowledgedReplay)
         #expect(!replayBinding.needsInitialItemBinding)
+        #expect(replayBinding.endedAt == 1.2)
+        #expect(replayBinding.committedThroughAt == 2)
     }
 
     @Test func sentBoundaryRemainsCommitEligibleWhenNextChunkIsQueued() throws {

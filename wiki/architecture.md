@@ -96,9 +96,9 @@ moments the model judges worthwhile.
    OpenAI's item ledger supplies it when every pending item has timing. On GPT Transcribe and GPT
    Live, speech still in progress adds its Silero onset, the same start its committed item carries.
    Reconnect recovery and an ended local turn the server has not yet bound to an item remain
-   unknown. Apple PCM silence requests `SpeechAnalyzer.finalize` and
+   unknown. Apple requests `SpeechAnalyzer.finalize` at shared local Silero endpoints and
    remains unsettled until matching final-result progress is consumed from the module stream; its
-   start is the local activity tracker's onset, held until that pass settles. Apple finalizes
+   start is the shared Silero detector's onset, held until that pass settles. Apple finalizes
    phrases mid-sentence, and moving the start forward with each final would let Jarvis coach on half
    a question while the speaker is still talking, so a mid-sentence phrase waits for the pause that
    ends the sentence, as on the OpenAI path. Gemini final transcript frames can omit speech offsets, so
@@ -741,7 +741,7 @@ automatic mode.
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
 | **SessionComposition** | Own one session from an accepted Start to coaching ready, capture-heartbeat handling, and Stop, over an `AudioSource` (`Sources/JarvisApp/Capture/AudioSource.swift`) the caller supplies. Production passes `AggregateEchoCapture` and keeps the default screen capture, `WindowScopedScreenCapture`; the [live e2e mode](./live-e2e-tests.md) passes `FixtureAudioSource` and `FixtureScreenCapture`. One composition lets the live e2e run exercise the production Start path with supplied audio and screen ports. The focused cache scenario also supplies configuration, a synthetic skill catalog, and a bounded provider sender through defaulted constructor ports; the normal app uses their production defaults. `AppDelegate` keeps Start validation and preflight, readiness rendering, the global shortcuts, the menu, Settings, and Activity; `JarvisReadiness.activeSession` is the one live readiness token both check callbacks against, and a pending replacement Start's guards also accept its candidate token (`isCurrent`). | Composition over the components below. |
-| **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. When a client-commit model is selected, separate Silero VAD instances score these post-AEC streams (resampled to 16 kHz) on the delivery queue rather than the IOProc, and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3** + **Silero VAD** via Core ML. |
+| **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. Separate Silero VAD instances score these post-AEC streams for every provider (resampled to 16 kHz) on the delivery queue rather than the IOProc, and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3** + **Silero VAD** via Core ML. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `ProviderFailure` feeds attempt outcomes into the finite provider route; cycle exhaustion uses the session recovery policy. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. A Start while live prepares as a replacement candidate whose preflight checks never touch the live status or token; only committing it, immediately before the old pipeline's teardown, hands readiness over. A refused or cancelled replacement therefore leaves the live session's capture and endpoint monitoring working, and its fatal preflight notices (missing key or permission) are reported as warnings so they cannot stop that session. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
@@ -781,6 +781,16 @@ indistinguishable from a headset, so a wrong bypass re-admits the echo. AEC3 the
 all routes — it's a near-passthrough on earbuds (no acoustic echo to cancel). Caveat: AirPods *as a
 mic* are HFP narrowband and low-fidelity regardless of resampling; for input quality, use the
 built-in mic.
+
+Local speech detection is one capture-side implementation (`LocalTurnDetector`), with independent
+model and endpoint state for microphone and system audio. It runs on the serial delivery queue,
+never the realtime IOProc, for every transcription provider. `SpeechEndpointDetector` records the
+last positive speech frame separately from the silence-confirmed endpoint; `LocalSpeechEvent`
+carries that measured end separately from the delivered chunk's commit boundary. Apple uses these
+observations for analyzer finalization, Gemini and Deepgram for pending speech, and OpenAI client-commit models
+for their acknowledged item boundaries. Native provider IDs and audio clocks remain adapter-owned.
+Level-based capture and continuity diagnostics keep their separate delivery checks. A missing local
+model or resampler blocks capture startup rather than silently changing speech detection.
 
 ### Onboarding
 
@@ -1232,7 +1242,7 @@ rather than a per-turn screenshot.
   pipeline replaces a running one, and final results alone enter Activity/model context. Apple
   documents `SpeechDetector` as an optional power-saving gate that may trade away transcription
   accuracy, while its result stream does not expose usable VAD boundaries; Jarvis therefore sends
-  all audio to the transcriber and uses its existing content-free PCM activity detector only to
+  all audio to the transcriber and uses shared content-free Silero observations only to
   request finalization and postpone coaching until the matching final-result boundary is consumed.
   Both adapters apply the client-side transcript-batching window to group rapid final fragments;
   automatic model admission is controlled separately by provider work state, never by extending
@@ -1772,9 +1782,8 @@ The always-on legs are built to survive transient failure rather than die on it:
   memory-only input stream. Apple uses one locale for the whole session; OpenAI is the intended path
   for English/Mandarin code-switching rather than parallel Apple analyzers.
   Setup uses the same bounded pre-ready audio budget as OpenAI; overflow is diagnostic. Final
-  provider ranges supply spoken timestamps and continuity boundaries. The local activity tracker
-  retains only adaptive level state, not PCM, and requests analyzer finalization rather than gating
-  transcription input; model admission remains parked until finalization and matching consumed result
+  provider ranges supply spoken timestamps and continuity boundaries. Shared local Silero events
+  request analyzer finalization rather than gating transcription input; model admission remains parked until finalization and matching consumed result
   progress agree. An analyzer, result-stream, conversion, or input-stream failure stays inside the Apple
   boundary and follows the terminal/degraded lifecycle above—never an implicit OpenAI fallback.
 - **The logical coaching attempt** is single-flighted (a turn can't double-speak) and runs under a Core-owned
