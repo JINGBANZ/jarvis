@@ -322,7 +322,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             }
             reportBufferEviction(evicted, connectionUnavailable: connectionUnavailable)
             pumpAudioIfReady()
-        case .ended(let startedAt, let commitAt):
+        case .ended(let startedAt, let endedAt, let commitAt):
             jlog("Jarvis realtime [\(speaker.rawValue)]: local speech ended "
                  + "(through sequence \(throughSequenceNumber))")
             transcriptionLifecycle.recordLocalSpeechEnded()
@@ -331,6 +331,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             jarvisManagedSpeechBuffer?.speechEnded()
             jarvisManagedTurnCoordinator?.recordTurn(
                 startedAt: max(0, startedAt - sessionStart),
+                endedAt: endedAt.map { max(0, $0 - sessionStart) },
                 committedThroughAt: max(0, commitAt - sessionStart),
                 throughSequenceNumber: throughSequenceNumber)
             lock.unlock()

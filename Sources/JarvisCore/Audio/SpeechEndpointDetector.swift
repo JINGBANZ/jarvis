@@ -6,7 +6,7 @@ import Foundation
 public struct SpeechEndpointDetector: Sendable {
     public enum Event: Equatable, Sendable {
         case started(at: TimeInterval)
-        case ended(startedAt: TimeInterval, detectedAt: TimeInterval)
+        case ended(startedAt: TimeInterval, endedAt: TimeInterval, detectedAt: TimeInterval)
     }
 
     private let frameDuration: TimeInterval
@@ -19,6 +19,7 @@ public struct SpeechEndpointDetector: Sendable {
     private var candidateSpeechFrames = 0
     private var activeStartedAt: TimeInterval?
     private var trailingSilenceFramesSeen = 0
+    private var lastSpeechEndedAt: TimeInterval?
 
     /// Durations are in seconds. The 32 ms frame default is Silero's streaming chunk.
     public init(
@@ -49,14 +50,16 @@ public struct SpeechEndpointDetector: Sendable {
 
         if let activeStartedAt {
             if probability >= releaseThreshold {
+                lastSpeechEndedAt = frameStartedAt + frameDuration
                 trailingSilenceFramesSeen = 0
                 return nil
             }
             trailingSilenceFramesSeen += 1
             guard trailingSilenceFramesSeen >= trailingSilenceFrames else { return nil }
             let detectedAt = frameStartedAt + frameDuration
+            let endedAt = lastSpeechEndedAt ?? activeStartedAt
             reset()
-            return .ended(startedAt: activeStartedAt, detectedAt: detectedAt)
+            return .ended(startedAt: activeStartedAt, endedAt: endedAt, detectedAt: detectedAt)
         }
 
         guard probability >= activationThreshold else {
@@ -69,6 +72,7 @@ public struct SpeechEndpointDetector: Sendable {
         guard candidateSpeechFrames >= minimumSpeechFrames,
               let startedAt = candidateStartedAt else { return nil }
         activeStartedAt = startedAt
+        lastSpeechEndedAt = frameStartedAt + frameDuration
         candidateStartedAt = nil
         candidateSpeechFrames = 0
         trailingSilenceFramesSeen = 0
@@ -81,6 +85,7 @@ public struct SpeechEndpointDetector: Sendable {
         candidateStartedAt = nil
         candidateSpeechFrames = 0
         activeStartedAt = nil
+        lastSpeechEndedAt = nil
         trailingSilenceFramesSeen = 0
     }
 }
