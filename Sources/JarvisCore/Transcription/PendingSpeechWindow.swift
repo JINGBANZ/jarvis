@@ -13,6 +13,11 @@ public struct PendingSpeechWindow: Sendable {
 
     public init() {}
 
+    public mutating func recordLocalSpeech(_ event: LocalSpeechEvent) {
+        let activity = event.activity
+        recordLocalSpeech(active: activity.active, at: activity.at)
+    }
+
     /// An open window keeps its earliest onset: a later episode belongs to the same unresolved run.
     public mutating func recordLocalSpeech(active: Bool, at time: TimeInterval) {
         localSpeechActive = active

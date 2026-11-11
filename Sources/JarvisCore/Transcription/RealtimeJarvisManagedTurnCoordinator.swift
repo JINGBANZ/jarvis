@@ -4,6 +4,7 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
     public struct Turn: Equatable, Sendable {
         public let id: UInt64
         public let startedAt: TimeInterval
+        public let endedAt: TimeInterval?
         public let committedThroughAt: TimeInterval
         public let throughSequenceNumber: UInt64
         /// False once bound to a server `item_id`, so a replayed turn can't consume the
@@ -11,7 +12,7 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
         public let needsInitialItemBinding: Bool
 
         fileprivate func markingItemBound() -> Turn {
-            Turn(id: id, startedAt: startedAt, committedThroughAt: committedThroughAt,
+            Turn(id: id, startedAt: startedAt, endedAt: endedAt, committedThroughAt: committedThroughAt,
                  throughSequenceNumber: throughSequenceNumber,
                  needsInitialItemBinding: false)
         }
@@ -35,6 +36,7 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
 
     public mutating func recordTurn(
         startedAt: TimeInterval,
+        endedAt: TimeInterval? = nil,
         committedThroughAt: TimeInterval,
         throughSequenceNumber: UInt64
     ) {
@@ -43,6 +45,7 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
         pendingTurns.append(Turn(
             id: nextTurnID,
             startedAt: startedAt,
+            endedAt: endedAt,
             committedThroughAt: committedThroughAt,
             throughSequenceNumber: throughSequenceNumber,
             needsInitialItemBinding: true))

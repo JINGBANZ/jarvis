@@ -305,9 +305,7 @@ final class SessionComposition {
         }
 
         let localTurnDetectionSilenceDuration: TimeInterval? =
-            transcriptionConfiguration.turnDetectionStrategy == .clientCommit
-            ? TimeInterval(config.localEndpointSilenceDurationMs) / 1_000
-            : nil
+            TimeInterval(config.localEndpointSilenceDurationMs) / 1_000
         let source = makeAudioSource(
             transcriptionConfiguration.provider.audioFormat,
             localTurnDetectionSilenceDuration,

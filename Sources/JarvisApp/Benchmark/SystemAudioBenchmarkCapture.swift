@@ -122,7 +122,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
             fromHz: sampleRate,
             toHz: Double(audioFormat.sampleRate)),
               let turnDetector = LocalTurnDetector(
-                inputSampleRate: sampleRate, trailingSilenceDuration: 1.0) else {
+                inputSampleRate: sampleRate, trailingSilenceDuration: TimeInterval(Config().localEndpointSilenceDurationMs) / 1_000) else {
             throw Failure.conversionUnavailable
         }
         self.downToWire = downToWire
@@ -187,7 +187,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
                 .map { event -> LocalSpeechEvent in
                     switch event {
                     case .started(let startedAt): .started(at: startedAt)
-                    case .ended(let startedAt, _): .ended(startedAt: startedAt, commitAt: commitAt)
+                    case .ended(let startedAt, let endedAt, _): .ended(startedAt: startedAt, endedAt: endedAt, commitAt: commitAt)
                     }
                 }
             onChunk(data, sequence, sampleCount, capturedAt, speechEvents)

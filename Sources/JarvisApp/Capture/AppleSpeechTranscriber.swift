@@ -68,7 +68,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     private var bufferedAudio: [BufferedAudio] = []
     private var bufferedByteCount = 0
-    private var activityTracker = PCM16SpeechActivityTracker()
     private var finalizationState = TranscriptionFinalizationState()
     private var analyzerReadyForFinalization = false
     private var analyzerTimeScale: CMTimeScale = 1
@@ -136,7 +135,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             submittedAnalyzerFrameCount = 0
             activeFinalization = nil
             latestConsumedResultsFinalizationTime = nil
-            _ = activityTracker.reset()
         }
         lock.lock()
         stopped = false
@@ -186,7 +184,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             self?.converter = nil
             self?.bufferedAudio.removeAll(keepingCapacity: false)
             self?.bufferedByteCount = 0
-            _ = self?.activityTracker.reset()
             _ = self?.finalizationState.reset()
             self?.analyzerReadyForFinalization = false
             self?.analyzerTimeScale = 1
@@ -226,12 +223,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let generation = currentGeneration
         audioQueue.async { [weak self] in
             guard let self, self.isLive(generation: generation) else { return }
-            if let active = self.activityTracker.observe(pcm16: pcm, at: capturedAt) {
-                self.setSpeechActivity(
-                    active,
-                    at: capturedAt - self.sessionStart,
-                    generation: generation)
-            }
             guard self.inputContinuation != nil, self.converter != nil else {
                 self.buffer(.init(
                     data: pcm,
@@ -244,6 +235,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
                 sequenceNumber: sequenceNumber,
                 capturedAt: capturedAt,
                 generation: generation)
+        }
+    }
+
+    func recordLocalSpeechEvent(_ event: LocalSpeechEvent, throughSequenceNumber: UInt64) {
+        let generation = currentGeneration
+        audioQueue.async { [weak self] in
+            guard let self, self.isLive(generation: generation) else { return }
+            let activity = event.relative(to: self.sessionStart).activity
+            self.setSpeechActivity(activity.active, at: activity.at, generation: generation)
         }
     }
 

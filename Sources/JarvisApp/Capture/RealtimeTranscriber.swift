@@ -298,10 +298,10 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         throughSequenceNumber: UInt64
     ) {
         guard model.turnDetectionStrategy == .clientCommit else { return }
-        switch event {
+        switch event.relative(to: sessionStart) {
         case .started(let startedAt):
             jlog("Jarvis realtime [\(speaker.rawValue)]: local speech started")
-            transcriptionLifecycle.recordLocalSpeechStarted(at: max(0, startedAt - sessionStart))
+            transcriptionLifecycle.recordLocalSpeechStarted(at: startedAt)
             lock.lock()
             guard !stopped else { lock.unlock(); return }
             let connectionUnavailable = !streamReady
@@ -322,7 +322,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             }
             reportBufferEviction(evicted, connectionUnavailable: connectionUnavailable)
             pumpAudioIfReady()
-        case .ended(let startedAt, let commitAt):
+        case .ended(let startedAt, let endedAt, let commitAt):
             jlog("Jarvis realtime [\(speaker.rawValue)]: local speech ended "
                  + "(through sequence \(throughSequenceNumber))")
             transcriptionLifecycle.recordLocalSpeechEnded()
@@ -330,8 +330,9 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             guard !stopped else { lock.unlock(); return }
             jarvisManagedSpeechBuffer?.speechEnded()
             jarvisManagedTurnCoordinator?.recordTurn(
-                startedAt: max(0, startedAt - sessionStart),
-                committedThroughAt: max(0, commitAt - sessionStart),
+                startedAt: startedAt,
+                endedAt: endedAt,
+                committedThroughAt: commitAt,
                 throughSequenceNumber: throughSequenceNumber)
             lock.unlock()
             pumpAudioIfReady()

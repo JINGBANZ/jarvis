@@ -24,7 +24,7 @@ import Testing
 
     @Test func acknowledgementBindsTurnOnlyOnceAcrossReplay() throws {
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
-        coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 4)
+        coordinator.recordTurn(startedAt: 1, endedAt: 1.2, committedThroughAt: 2, throughSequenceNumber: 4)
         coordinator.recordAudioSent(sequenceNumber: 4)
         let readyFirstCommit = coordinator.takeReadyCommit()
         let firstCommit = try #require(readyFirstCommit)
@@ -32,6 +32,8 @@ import Testing
         let acknowledgedFirst = coordinator.acknowledgeCommittedItem(itemID: "old-item")
         let firstBinding = try #require(acknowledgedFirst)
         #expect(firstBinding.needsInitialItemBinding)
+        #expect(firstBinding.endedAt == 1.2)
+        #expect(firstBinding.committedThroughAt == 2)
 
         #expect(coordinator.prepareForReconnect(oldestAvailableSequenceNumber: 1).isEmpty)
         coordinator.recordAudioSent(sequenceNumber: 4)
@@ -41,6 +43,8 @@ import Testing
         let acknowledgedReplay = coordinator.acknowledgeCommittedItem(itemID: "replacement-item")
         let replayBinding = try #require(acknowledgedReplay)
         #expect(!replayBinding.needsInitialItemBinding)
+        #expect(replayBinding.endedAt == 1.2)
+        #expect(replayBinding.committedThroughAt == 2)
     }
 
     @Test func sentBoundaryRemainsCommitEligibleWhenNextChunkIsQueued() throws {

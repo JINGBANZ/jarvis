@@ -103,6 +103,7 @@ final class FixtureAudioSource: AudioSource, @unchecked Sendable {
         if chunk.clipEnded {
             events.append(.ended(
                 startedAt: clipStartedAt[chunk.stream] ?? capturedAt,
+                endedAt: capturedAt + Self.chunkDuration,
                 commitAt: capturedAt + Self.chunkDuration))
             clipStartedAt[chunk.stream] = nil
         }

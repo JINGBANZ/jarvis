@@ -47,7 +47,6 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
     private var recognitionInFlight = false
     /// Gemini times no utterance, so the pending start and a final's spoken time come from
     /// content-free local activity.
-    private var activityTracker = PCM16SpeechActivityTracker()
     private var pendingSpeech = PendingSpeechWindow()
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var draining = false
@@ -142,7 +141,6 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
     func connect() {
         lock.lock()
         stopped = false; draining = false; isSending = false; recognitionInFlight = false
-        _ = activityTracker.reset()
         pendingSpeech.reset()
         lock.unlock()
         coachingCoordinator.start()
@@ -165,7 +163,6 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         isSending = false
         recognitionInFlight = false
         // No further audio arrives to release the detector, so close the window here too.
-        _ = activityTracker.reset()
         pendingSpeech.reset()
         bufferedAudio.removeAll(keepingCapacity: false)
         bufferedByteCount = 0
@@ -284,9 +281,6 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
             sequence: sequenceNumber, pcm16: pcm, at: clock.now() - sessionStart)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        if let active = activityTracker.observe(pcm16: pcm, at: capturedAt) {
-            pendingSpeech.recordLocalSpeech(active: active, at: capturedAt - sessionStart)
-        }
         let token = nextChunkToken
         nextChunkToken += 1
         bufferedAudio.append((token: token, data: pcm, capturedAt: capturedAt - sessionStart))
@@ -304,6 +298,14 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         }
         updateWorkFlag()
         pumpIfPossible()
+    }
+
+    func recordLocalSpeechEvent(_ event: LocalSpeechEvent, throughSequenceNumber: UInt64) {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        pendingSpeech.recordLocalSpeech(event.relative(to: sessionStart))
+        lock.unlock()
+        updateWorkFlag()
     }
 
     private func pumpIfPossible() {
