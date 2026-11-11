@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/JINGBANZ/jarvis/compare/v0.5.14...v0.6.0) (2026-11-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **release:** Jarvis requires macOS 15 or later on Apple silicon and Intel.
+
+### Bug Fixes
+
+* **test:** reap native hosts and contain overlay windows ([#505](https://github.com/JINGBANZ/jarvis/issues/505)) ([035f5ed](https://github.com/JINGBANZ/jarvis/commit/035f5ed023889e3b709a70d8a294f0b5c02f2397))
+
+
+### Continuous Integration
+
+* **release:** require premerge release ready checks and promote tested artifacts ([#508](https://github.com/JINGBANZ/jarvis/issues/508)) ([8fabf0d](https://github.com/JINGBANZ/jarvis/commit/8fabf0dc35334c7b7ca7eb7a0475a147ad725fc8))
+
 ## [0.5.14](https://github.com/JINGBANZ/jarvis/compare/v0.5.13...v0.5.14) (2026-11-08)
 
 
