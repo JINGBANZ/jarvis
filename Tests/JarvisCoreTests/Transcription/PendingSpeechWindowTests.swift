@@ -36,13 +36,14 @@ import Testing
 
     @Test func aClosedWindowOpensAtTheNextOnset() {
         var window = PendingSpeechWindow()
-        window.recordLocalSpeech(active: true, at: 9)
+        window.recordLocalSpeech(LocalSpeechEvent.started(at: 109).relative(to: 100))
         _ = window.state(queuedSince: nil, isRecognizing: true)
-        window.recordLocalSpeech(active: false, at: 10)
+        window.recordLocalSpeech(LocalSpeechEvent.ended(startedAt: 109, endedAt: 110, commitAt: 110.8)
+            .relative(to: 100))
         window.recordRecognitionFinalized()
         #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
 
-        window.recordLocalSpeech(active: true, at: 14)
+        window.recordLocalSpeech(LocalSpeechEvent.started(at: 114).relative(to: 100))
         #expect(window.state(queuedSince: nil, isRecognizing: true) == .pending(since: 14))
     }
 

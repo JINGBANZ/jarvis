@@ -7,6 +7,13 @@ public enum LocalSpeechEvent: Equatable, Sendable {
 }
 
 public extension LocalSpeechEvent {
+    var activity: (active: Bool, at: TimeInterval) {
+        switch self {
+        case .started(let at): (true, at)
+        case .ended(_, let endedAt, let commitAt): (false, endedAt ?? commitAt)
+        }
+    }
+
     func relative(to origin: TimeInterval) -> LocalSpeechEvent {
         switch self {
         case .started(let at):

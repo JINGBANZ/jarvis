@@ -304,12 +304,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         coachingCoordinator.recordLocalSpeech(event.relative(to: sessionStart))
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        switch event {
-        case .started(let at):
-            pendingSpeech.recordLocalSpeech(active: true, at: max(0, at - sessionStart))
-        case .ended(_, let endedAt, let commitAt):
-            pendingSpeech.recordLocalSpeech(active: false, at: max(0, (endedAt ?? commitAt) - sessionStart))
-        }
+        pendingSpeech.recordLocalSpeech(event.relative(to: sessionStart))
         lock.unlock()
         updateWorkFlag()
     }

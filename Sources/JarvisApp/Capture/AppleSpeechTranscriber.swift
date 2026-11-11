@@ -246,13 +246,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let generation = currentGeneration
         audioQueue.async { [weak self] in
             guard let self, self.isLive(generation: generation) else { return }
-            switch event {
-            case .started(let at):
-                self.setSpeechActivity(true, at: max(0, at - self.sessionStart), generation: generation)
-            case .ended(_, let endedAt, let commitAt):
-                self.setSpeechActivity(
-                    false, at: max(0, (endedAt ?? commitAt) - self.sessionStart), generation: generation)
-            }
+            let activity = event.relative(to: self.sessionStart).activity
+            self.setSpeechActivity(activity.active, at: activity.at, generation: generation)
         }
     }
 
