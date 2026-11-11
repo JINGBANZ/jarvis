@@ -13,10 +13,12 @@ public enum DeepgramLiveSession {
         public let start: TimeInterval
         public let end: TimeInterval
         public let lastWordEnd: TimeInterval?
+        public let firstWordStart: TimeInterval?
 
         public init(
             transcript: String, isFinal: Bool, speechFinal: Bool,
-            start: TimeInterval, end: TimeInterval, lastWordEnd: TimeInterval? = nil
+            start: TimeInterval, end: TimeInterval, lastWordEnd: TimeInterval? = nil,
+            firstWordStart: TimeInterval? = nil
         ) {
             self.transcript = transcript
             self.isFinal = isFinal
@@ -24,6 +26,7 @@ public enum DeepgramLiveSession {
             self.start = start
             self.end = end
             self.lastWordEnd = lastWordEnd
+            self.firstWordStart = firstWordStart
         }
     }
 
@@ -91,7 +94,8 @@ public enum DeepgramLiveSession {
                 speechFinal: object["speech_final"] as? Bool ?? false,
                 start: start,
                 end: start + (number(object["duration"]) ?? 0),
-                lastWordEnd: words.last.flatMap { number($0["end"]) }))
+                lastWordEnd: words.last.flatMap { number($0["end"]) },
+                firstWordStart: words.first.flatMap { number($0["start"]) }))
         case "UtteranceEnd":
             // Deepgram sends -1 when the words were finalized before the gap elapsed.
             guard let end = number(object["last_word_end"]), end >= 0 else { return .other }

@@ -55,6 +55,14 @@ lives in [`BrainCacheObservation`](../Sources/JarvisCore/Diagnostics/BrainCacheO
 and [`CoachingRequestContext`](../Sources/JarvisCore/Diagnostics/CoachingRequestAttribution.swift);
 recording it shares the same optional evidence contract as the raw traffic.
 
+Attempt transcript records retain the same start/end range used in formatted context plus internal
+`TranscriptTimingSource` provenance in `at_source`. Native offsets, item-bound local utterances,
+approximate local-activity association, and audio-window fallback remain distinguishable in audit
+records. Generic `at` and `ended_at` retain every resolved range; aligned `speech_started_at` and
+`speech_ended_at` stay nullable for approximate local and audio-window estimates. The model receives
+only ranges and words. Local detector endpoints describe activity;
+approximate association does not establish exact word timing or before/after-reply chronology.
+
 ## Contract
 
 - Producers submit typed values to one process-level bounded worker. Timestamp rendering, JSON

@@ -47,7 +47,7 @@ import Testing
                 capturedAt: ready.capturedAt, duration: ready.duration)
         }
         gate.speechEnded()
-        coordinator.recordTurn(startedAt: 0.1, committedThroughAt: 0.3, throughSequenceNumber: 3)
+        coordinator.recordTurn(startedAt: 0.1, endedAt: 0.3, committedThroughAt: 0.3, throughSequenceNumber: 3)
 
         for sequence in 4...10 {
             #expect(gate.append(chunk(UInt64(sequence), duration: 0.1)).isEmpty)

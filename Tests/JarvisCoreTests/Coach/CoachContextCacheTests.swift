@@ -55,9 +55,12 @@ import JarvisBrainProviders
         ]
         var outcomes: [TurnOutcome] = []
         for (index, trigger) in triggers.enumerated() {
-            transcript.append(.init(speaker: .them,
+            if index != 2 && index != 6 {
+                transcript.append(.init(speaker: .them,
                 text: "Ledger question \(index + 1): explain checkpoint ownership when a duplicate arrives after a worker transfer.",
-                at: Double(100 + index)))
+                interval: SpeechInterval(startedAt: Double(100 + index), endedAt: Double(100 + index))!,
+                timingSource: index == 1 ? .audioWindowEstimate : .providerOffsets))
+            }
             outcomes.append(await driver.handleTrigger(trigger))
         }
         #expect(outcomes == [.spoke, .spoke, .silentByModel, .spoke,
@@ -83,6 +86,11 @@ import JarvisBrainProviders
         let initialIndices = captured.indices.filter { captured[$0].phase == .initial }
         #expect(initialIndices.count == 8)
         let initialRequests = initialIndices.map { requests[$0] }
+        let estimatedRequest = try canonical(items(initialRequests[1], provider: provider))
+        let estimatedWire = String(decoding: estimatedRequest, as: UTF8.self)
+        #expect(estimatedWire.contains("[01:41-01:41]"))
+        #expect(!estimatedWire.contains("audioWindowEstimate"))
+        #expect(!estimatedWire.contains("estimated from"))
         #expect(try prefixResults(initialRequests, provider: provider) == Array(repeating: true, count: 7))
         let instructionsKey = switch provider {
         case .claudeSubscription: "system"
@@ -111,6 +119,16 @@ import JarvisBrainProviders
         for request in initialRequests.dropFirst() {
             #expect(try output("a1_skill", in: request, provider: provider).contains(codingSkill.body))
             #expect(try output("a1_tool", in: request, provider: provider).contains(searchReferencesTool.parametersJSON))
+        }
+        for (index, id) in [(3, "a3_silent"), (7, "a7_silent")] {
+            #expect(try output(id, in: initialRequests[index], provider: provider) == "Silent at 00:00.")
+            let call = try #require(items(initialRequests[index], provider: provider).first { item in
+                let callID = item[provider == .openAI ? "call_id" : "id"] as? String ?? ""
+                return item["name"] as? String == "stay_silent" && (callID == id || callID.hasPrefix(id + "_"))
+            })
+            #expect(["function_call", "tool_use"].contains(call["type"] as? String ?? ""))
+            if provider == .openAI { #expect(call["arguments"] as? String == "{}") }
+            else { #expect((call[provider == .claudeSubscription ? "input" : "arguments"] as? [String: Any])?.isEmpty == true) }
         }
         let withMovingFooter = try initialRequests.map { try addingTransientFooter(to: $0, provider: provider) }
         #expect(try prefixResults(withMovingFooter, provider: provider) == Array(repeating: false, count: 7))

@@ -5,6 +5,28 @@ import JarvisProcess
 import Testing
 
 @Suite struct EvaluationSuiteRunnerTests {
+    @Test func identicalCoachAndJudgeModelsProduceAnActionableRunError() async throws {
+        let directory = tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let config = TestProviderConfiguration.shared
+        let runner = EvaluationSuiteRunner(environment: [
+            "JARVIS_EVALUATION_SUITE": "coaching/intervention", "JARVIS_EVALUATION_REPEAT": "1",
+            "JARVIS_LIVE_E2E_PROVIDER": config.defaultJudgeProvider.rawValue,
+            "JARVIS_EVALUATION_MODEL": config.modelID(for: config.defaultJudgeProvider, judge: true),
+            "JARVIS_LIVE_E2E_RUN_DIR": directory.path,
+        ], repository: repository, launcher: UnusedScenarioLauncher(), screen: UnusedScenarioScreen()) { _, _ in
+            throw EvaluationSuiteRunner.Failure.invalidConfiguration
+        }
+        await #expect(throws: EvaluationSuiteRunner.Failure.self) { try await runner.run() }
+        let report = try JSONDecoder().decode(EvaluationSuiteReport.self,
+            from: Data(contentsOf: directory.appendingPathComponent("evaluation.json")))
+        #expect(!report.passed)
+        #expect(report.runErrors.first?.contains("different model IDs") == true)
+        #expect(report.runErrors.first?.contains("JARVIS_EVALUATION_JUDGE_MODEL") == true)
+    }
+
     @Test func signedAppRepeatsPreserveFailuresAndEmptyEvidence() async throws {
         let directory = tmp()
         defer { try? FileManager.default.removeItem(at: directory) }

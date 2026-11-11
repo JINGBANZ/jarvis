@@ -229,3 +229,24 @@ import Foundation
         #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": "9.5"]]) == nil)  // no "s" suffix
     }
 }
+
+extension GeminiLiveSessionTests {
+    @Test func nativeFinalOffsetsAreOptionalDurationsAndNeverComeFromInterim() {
+        let final: [String: Any] = ["serverContent": ["inputTranscription": [
+            "text": "native timing", "startOffset": "3.25s", "endOffset": "4.5s"]]]
+        let offsets = GeminiLiveSession.finalTranscriptOffsets(from: final)
+        #expect(offsets.start == 3.25)
+        #expect(offsets.end == 4.5)
+        let partial: [String: Any] = ["serverContent": ["inputTranscription": [
+            "text": "partial timing", "startOffset": "2s"]]]
+        #expect(GeminiLiveSession.finalTranscriptOffsets(from: partial).start == 2)
+        #expect(GeminiLiveSession.finalTranscriptOffsets(from: partial).end == nil)
+        for invalid: Any in ["NaNs", "infs", "-1s", "3", 3] {
+            let event: [String: Any] = ["serverContent": ["inputTranscription": ["startOffset": invalid]]]
+            #expect(GeminiLiveSession.finalTranscriptOffsets(from: event).start == nil)
+        }
+        let interim: [String: Any] = ["serverContent": ["interimInputTranscription": [
+            "text": "speculative", "startOffset": "1s", "endOffset": "2s"]]]
+        #expect(GeminiLiveSession.finalTranscriptOffsets(from: interim).start == nil)
+    }
+}

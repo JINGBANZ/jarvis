@@ -30,7 +30,7 @@ import Testing
         ]
         for speaker in [Speaker.me, .them] {
             for text in replies {
-                let line = TranscriptLine(speaker: speaker, text: text, at: 1)
+                let line = TranscriptLine(speaker: speaker, text: text, at: 1, endedAt: 1)
                 #expect(TurnSubstance.isSubstantive(line), "expected substance: \(text)")
             }
         }

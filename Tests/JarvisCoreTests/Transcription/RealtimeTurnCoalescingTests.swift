@@ -48,6 +48,7 @@ import Testing
 
         ledger.recordSpeechStarted(itemID: "first", audioStartMilliseconds: 1_000,
                                    timelineOrigin: 0)
+        ledger.recordSpeechStopped(itemID: "first", audioEndMilliseconds: 1_900)
         let first = try #require(ledger.recordCompleted(
             itemID: "first", transcript: "Keep this question.", speaker: .them))
         pending.append(try #require(first.text))

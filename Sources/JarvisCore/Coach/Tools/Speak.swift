@@ -14,7 +14,8 @@ public let speakTool = ToolDef(
         """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
     guidance: """
         Answer the user's current request directly. Follow applicable loaded skills for delivery.
-        Ground replies in the available evidence. Never invent personal experience or screen details.
+        Ground replies in the available evidence and stated constraints. Qualify assumptions your answer
+        depends on. Never invent personal experience or screen details.
 
         # Hint
         One direct, connected reply of at most 36 words. Lead with the most useful answer or advice.
@@ -48,7 +49,15 @@ public let speakTool = ToolDef(
 )
 
 extension JarvisPrompts.Coach {
-    static func tipShown(dropped: [String] = []) -> String {
-        dropped.isEmpty ? "shown to the user" : "shown to the user; " + dropped.joined(separator: "; ")
+    static func tipShown(at completedAt: TimeInterval, firstShownAt: TimeInterval? = nil,
+                         dropped: [String] = []) -> String {
+        let complete = RollingTranscript.stamp(completedAt)
+        let receipt: String
+        if let firstShownAt {
+            receipt = "Shown to user from \(RollingTranscript.stamp(firstShownAt)); complete at \(complete)."
+        } else {
+            receipt = "Shown to user at \(complete)."
+        }
+        return dropped.isEmpty ? receipt : receipt + " " + dropped.joined(separator: "; ")
     }
 }

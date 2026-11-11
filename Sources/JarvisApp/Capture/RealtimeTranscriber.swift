@@ -263,6 +263,9 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     }
 
     func sendAudio(_ pcm: Data, sequenceNumber: UInt64, capturedAt: TimeInterval) {
+        coachingCoordinator.recordAudioWindow(
+            startedAt: max(0, capturedAt - sessionStart),
+            endedAt: max(0, capturedAt - sessionStart) + TranscriptionAudioFormat.pcm16Mono24k.duration(forByteCount: pcm.count))
         let observedAt = clock.now() - sessionStart
         let sessionRelativeCaptureAt = capturedAt - sessionStart
         let chunk = PCMBuffer.Chunk(
@@ -297,8 +300,10 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64
     ) {
+        let event = event.relative(to: sessionStart)
+        coachingCoordinator.recordLocalSpeech(event)
         guard model.turnDetectionStrategy == .clientCommit else { return }
-        switch event.relative(to: sessionStart) {
+        switch event {
         case .started(let startedAt):
             jlog("Jarvis realtime [\(speaker.rawValue)]: local speech started")
             transcriptionLifecycle.recordLocalSpeechStarted(at: startedAt)
@@ -489,7 +494,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
                     speaker: self.speaker.rawValue,
                     generation: socketGeneration,
                     itemID: "local-turn-\(turn.id)",
-                    audioBoundaryAt: self.sessionStart + turn.committedThroughAt,
+                    audioBoundaryAt: turn.committedThroughAt.map { self.sessionStart + $0 },
                     observedAt: self.clock.now()))
                 self.pumpAudioIfReady()
             }
@@ -576,12 +581,12 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
                 .speechStopped,
                 audioTimeMilliseconds: nil,
                 itemID: itemID,
-                sessionAudioTime: turn.committedThroughAt,
+                sessionAudioTime: turn.endedAt,
                 socketGeneration: socketGeneration)
             let recorded = transcriptionLifecycle.recordCommittedLocalTurn(
                 itemID: itemID,
                 startedAt: turn.startedAt,
-                committedThroughAt: turn.committedThroughAt,
+                endedAt: turn.endedAt,
                 consumesUnboundTurn: turn.needsInitialItemBinding,
                 socketGeneration: socketGeneration)
             if recorded {

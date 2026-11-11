@@ -39,6 +39,40 @@ import Testing
         #expect(!recovery.blocksCoaching)
     }
 
+    @Test func replacementCompletionWithoutEndTimingConsumesFallbackOnce() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        recovery.begin(interruptedItems: [fallback("retained partial")],
+                       duplicateRiskItemCount: 0, replayAvailable: true)
+        _ = recovery.markReplacementReady()
+        ledger.recordSpeechStarted(itemID: "replacement", audioStartMilliseconds: 1_000,
+                                   timelineOrigin: 0)
+        let final = try #require(ledger.recordCompleted(itemID: "replacement", transcript: "actual final", speaker: .me))
+        #expect(final.text == "actual final")
+        #expect(final.spokenEndAt == nil)
+        #expect(!ledger.hasPendingItems)
+        #expect(recovery.resolveReplacement(hasUsableText: final.text != nil) == .appendReplacement)
+        #expect(!recovery.blocksCoaching)
+        #expect(recovery.timeout().isEmpty)
+        #expect(ledger.recordCompleted(itemID: "replacement", transcript: "duplicate", speaker: .me) == nil)
+    }
+
+    @Test func filteredReplacementWithoutTimingConsumesExactlyOneFallback() {
+        let ledger = RealtimeTranscriptionLedger()
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        let first = fallback("first partial"), second = fallback("second partial")
+        recovery.begin(interruptedItems: [first, second], duplicateRiskItemCount: 0, replayAvailable: true)
+        _ = recovery.markReplacementReady()
+        let item = ledger.recordCompleted(itemID: "filtered", transcript: "Thank you.", speaker: .me)
+        #expect(item == nil)
+        #expect(!ledger.hasPendingItems)
+        #expect(recovery.resolveReplacement(hasUsableText: item?.text != nil) == .useFallback(first))
+        #expect(recovery.unresolvedItemCount == 1)
+        #expect(ledger.resolveStoppedItemTimeout(itemID: "filtered", speaker: .me) == nil)
+        #expect(recovery.resolveReplacement(hasUsableText: true) == .appendReplacement)
+        #expect(recovery.timeout().isEmpty)
+    }
+
     @Test func coverageLossOrNoReplayImmediatelySalvagesInterruptedItems() {
         var beforeReady = RealtimeReconnectTranscriptionRecovery()
         let partial = fallback("partial")

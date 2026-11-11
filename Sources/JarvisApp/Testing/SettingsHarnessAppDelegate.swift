@@ -254,7 +254,7 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
 
     private func request(_ brain: BrainComposition) async throws {
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "Explain a binary search invariant.", at: 0))
+        transcript.append(.init(speaker: .them, text: "Explain a binary search invariant.", at: 0, endedAt: 0))
         let route = brain.makeConfiguredRoute(brain.preferences.route, proxy: nil,
             keys: [.openAIAPIKey: "synthetic-key"], effort: .low, sessionDirectory: output)
         let driver = CoachDriver(config: .default, transcript: transcript, route: route,

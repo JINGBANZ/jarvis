@@ -14,6 +14,10 @@ assemble_app() {
   for resource in Jarvis_JarvisApp.bundle Jarvis_JarvisCore.bundle; do
     ditto "$artifacts/$resource" "$app/Contents/Resources/$resource"
   done
+  if [[ "$configuration" == debug ]]; then
+    ditto "$artifacts/Jarvis_JarvisScenarioHarness.bundle" \
+      "$app/Contents/Resources/Jarvis_JarvisScenarioHarness.bundle"
+  fi
   # Both aliases must go: Sparkle's sandbox-only services would leave a dangling link.
   rm -rf "$app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" \
          "$app/Contents/Frameworks/Sparkle.framework/XPCServices"

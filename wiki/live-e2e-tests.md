@@ -195,9 +195,14 @@ The coaching replay adapter injects synthetic Mandarin and English transcript ev
 transcriber-to-`CoachDriver` boundary. It uses the production context builder, tools, provider
 adapters, and model; a recording overlay retains every visible streamed snapshot, including
 provisional replies subsequently withdrawn. One streamed reply counts once. The catalog contains
-24 isolated decisions and four short sequential episodes. Later turns retain actual generated
-hints in production history. Candidate lines address the interviewer naturally and do not ask
-Jarvis about its hint. Hidden expectations and grading goals go only to the independent judge.
+24 isolated decisions and eight sequential episodes, with 47 graded decisions including the queued follow-up. Later turns retain actual generated
+hints and silence decisions in production history. The delayed English and Mandarin stories each
+contain four rounds: help, silence on a late covered need, help on a new error, and silence during
+correct reconstruction. Contrast stories require immediate help for an uncovered late need and an
+error immediately after a narrower hint. Rounds are conversation turns; repetitions rerun the fixed catalog.
+Most candidate lines address the interviewer naturally and do not ask Jarvis about its hint.
+Direct-request contrasts explicitly address Jarvis. Hidden expectations and grading goals go only
+to the independent judge.
 
 The Foundation replay engine lives in `Tests/Support/ScenarioHarness/Suites/`; its screen port is
 injected. The live adapter supplies a neutral synthetic viewport and explicit synthetic screen text.
@@ -206,16 +211,25 @@ session clock controls spoken/arrival chronology. A request-boundary milestone h
 provider request while in-flight speech queues a real pending trigger; the follow-up has its own
 expectation and result. Provider wall time is recorded separately and is never a cooldown criterion.
 Each decision has a bounded wall deadline. Invalid chronology, speakers, duplicate IDs, or unresolved
-speech state are rejected before provider work.
+speech state are rejected before provider work. Every synthetic transcript event declares measured
+start/end times, both no later than its arrival; hidden grading goals never enter coach context.
 
 Replay uses the normal test-command admission and tracked process launcher, but its manifest executor
 classification does not create or require a test display, signed app, TCC grants, audio, or ASR.
 Subscription targets provision the same pinned, privacy-patched helper used by app builds and use
 saved sign-ins. API targets use the owner-only secret store with the normal environment fallback.
-`JARVIS_EVALUATION_MODEL` and `JARVIS_EVALUATION_EFFORT` select the replay coach;
+Replay uses `LiveE2EScenario.target(for:modelID:)`, the same default as signed scenarios and CACHE.
+Provider and model defaults live in the shared
+[`test-providers.json`](../Tests/Support/ScenarioHarness/Resources/test-providers.json) resource.
+Scenario target selection, replay judge selection, and the shell runner read that configuration.
+The runner provisions the subscription helper when either effective provider needs it, including
+an API coach paired with a subscription judge.
+`JARVIS_EVALUATION_MODEL` and `JARVIS_EVALUATION_EFFORT` override the replay coach;
 `JARVIS_EVALUATION_JUDGE_PROVIDER`, `JARVIS_EVALUATION_JUDGE_MODEL`, and
-`JARVIS_EVALUATION_JUDGE_EFFORT` select the independent judge. The default judge uses the selected
-provider's default model in a separate invocation with no coaching conversation state. Unknown
+`JARVIS_EVALUATION_JUDGE_EFFORT` select the independent judge. A provider override without a model
+uses that provider's configured judge model, falling back to its configured coaching model.
+The judge runs at low effort by default in a separate invocation with no coaching
+conversation state. Its model ID must differ from the coach's. Unknown
 provider/effort values fail before calls. Provider-native effort floors still apply.
 
 The versioned `intervention-v1` acceptance contract requires every decision to pass:
@@ -239,7 +253,9 @@ reports remain unsealed until audit closure. No run is retried until green, and 
 repetition is retained.
 
 `JARVIS_EVALUATION_CALIBRATE_JUDGE=1` also evaluates the checked-in `judge-calibration.json` examples
-and records verdicts before the replay. These are developer-authored positive, incorrect, redundant,
+and records verdicts before the replay. A mismatch skips that repetition's coach requests and seals
+a failed report with zero graded decisions and explicit calibration errors. These are
+developer-authored positive, incorrect, redundant,
 uncertain, and overwhelming-guidance contracts; independent human calibration remains outstanding.
 Deterministic Gate tests verify verdict handling, exported results, production-loop replay,
 pending-trigger/history behavior, rubric isolation, and streamed withdrawal accounting. Those tests
@@ -395,7 +411,8 @@ and the Gate checks it with synthetic credentials for every selectable provider.
 - **Isolated preferences.** Brain route and capability switches go to the private defaults suite
   `com.jarvis.coach.dev.live-e2e`, cleared per scenario, so a run never reads or changes the
   developer's own settings. [`LiveE2EScenario.target(for:modelID:)`](../Tests/Support/ScenarioHarness/Scenarios/LiveE2EScenario+Target.swift)
-  owns the default model for each coaching provider, shared by scenario preferences, brain switches,
+  resolves each provider's model from the shared test configuration described under
+  [Evaluation suites](#evaluation-suites), shared by scenario preferences, brain switches,
   and CACHE validation. Ordinary scenarios can select explicit model IDs; CACHE uses that provider's
   shared default. Transcription provider, model or locale, and expected languages come from the
   scenario. Existing scenarios default to OpenAI; Scenario L enumerates the shared remote target
@@ -441,8 +458,12 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   the newer decision in recall input. The summary size target is soft, with no acceptance ceiling.
   Factual meaning and verification attribution require the separate content review below.
 - **Stored order is not spoken order.** Activity rows and attempt transcripts keep insertion order,
-  and `ConversationChronology` orders them by speech time for the viewer and the model, so a
-  chronology case compares speech times rather than positions in a file.
+  and `ConversationChronology` uses each resolved transcript segment's start. Formatted context
+  always uses start/end ranges; internal timing provenance distinguishes native offsets, item-bound
+  local utterances, approximate local association, and audio-window fallback. A chronology case
+  requires measured evidence rather than estimated timestamps or positions in a file. Missing timing
+  must preserve finalized words; deterministic regressions cover fallback bounds and internal
+  provenance separately from real-provider accuracy.
 - **Activity rows belong to attempts by time and file order.** An Activity row carries no attempt id,
   and attempt records stamp whole seconds. The checker assigns a row to the attempt whose start and
   finish bracket its second and breaks ties by file order, which is safe because attempts are strictly

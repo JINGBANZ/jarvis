@@ -495,7 +495,7 @@ import Testing
             reason: .turnEnd,
             target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"),
             transcriptStartIndex: 0,
-            transcriptLines: [TranscriptLine(speaker: .me, text: "hello", at: 1)],
+            transcriptLines: [TranscriptLine(speaker: .me, text: "hello", at: 1, endedAt: 1)],
             classifications: [],
             brainFacingTranscriptIndices: [])
         recordTraffic(audit, tag: "saved-after-serialization-failure")

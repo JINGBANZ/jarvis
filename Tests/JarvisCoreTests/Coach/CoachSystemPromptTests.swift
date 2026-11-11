@@ -42,12 +42,12 @@ import Testing
         #expect(!bare.contains("# Skills and tool discovery"))
         #expect(!bare.contains("# Available additional tools"))
         #expect(bare.contains("1. When \"me\" addresses Jarvis"))
-        #expect(bare.contains("6. When the user appears stuck"))
+        #expect(bare.contains("6. When help is warranted"))
 
         let offered = JarvisPrompts.Coach.system(capabilities: withCatalog)
         #expect(offered.contains("# Skills and tool discovery"))
         #expect(offered.contains("1. When \"me\" addresses Jarvis"))
-        #expect(offered.contains("6. When the user appears stuck"))
+        #expect(offered.contains("6. When help is warranted"))
     }
 
     @Test func aDeferredToolIsCatalogedButNotExplained() {

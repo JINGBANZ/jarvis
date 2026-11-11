@@ -100,7 +100,7 @@ import Testing
             if call == 2 { driver.updatePlan(installed) }
         }
 
-        transcript.append(.init(speaker: .me, text: "look at this", at: 1))
+        transcript.append(.init(speaker: .me, text: "look at this", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
         #expect(screen.selections.count == 2)
@@ -126,10 +126,10 @@ import Testing
         ])
         let (driver, transcript) = makeDriver(screen: screen, brain: brain, plan: started)
 
-        transcript.append(.init(speaker: .me, text: "first turn", at: 1))
+        transcript.append(.init(speaker: .me, text: "first turn", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         driver.updatePlan(installed)
-        transcript.append(.init(speaker: .me, text: "second turn", at: 2))
+        transcript.append(.init(speaker: .me, text: "second turn", at: 2, endedAt: 2))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
         #expect(screen.selections == [started.screen, installed.screen])

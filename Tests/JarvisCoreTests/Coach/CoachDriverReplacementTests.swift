@@ -34,12 +34,12 @@ import Testing
         let screen = FakeScreen()
         let overlay = FakeOverlay()
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "Explain binary search.", at: 0))
+        transcript.append(.init(speaker: .them, text: "Explain binary search.", at: 0, endedAt: 0))
         let driver = driver(brain: brain, transcript: transcript, screen: screen, overlay: overlay)
         driver.setMode(mode)
         let running = Task { await driver.handleTrigger(reason) }
         await pause.entered.waitUntilEntered()
-        transcript.append(.init(speaker: .them, text: "Include the loop invariant.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Include the loop invariant.", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(reason) == .busy)
         await pause.cancelled.enter()
         #expect(await waitFor { await brain.calls.count == 2 }, "replacement starts before old cleanup finishes")
@@ -65,7 +65,7 @@ import Testing
             return replacementReply("code")
         }
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "Implement binary search.", at: 0))
+        transcript.append(.init(speaker: .them, text: "Implement binary search.", at: 0, endedAt: 0))
         let overlay = FakeOverlay()
         let screen = FakeScreen()
         let driver = driver(brain: brain, transcript: transcript, screen: screen, overlay: overlay)
@@ -123,11 +123,11 @@ import Testing
         clock.advance(by: 2)
         #expect(await driver.handleTrigger(.manualExplanation) == .busy)
         driver.updateTranscriptionWork(.pending(since: 3), for: .me)
-        transcript.append(.init(speaker: .them, text: "Explain the termination proof.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Explain the termination proof.", at: 1, endedAt: 1))
         driver.updateTranscriptionWork(.settled, for: .them)
         try await waitForSettlement(driver)
         #expect(await brain.calls.isEmpty)
-        transcript.append(.init(speaker: .me, text: "Each iteration shrinks the interval.", at: 3))
+        transcript.append(.init(speaker: .me, text: "Each iteration shrinks the interval.", at: 3, endedAt: 3))
         driver.updateTranscriptionWork(.settled, for: .me)
         #expect(await running.value == .spoke)
         let calls = await brain.calls
@@ -214,7 +214,7 @@ import Testing
         let driver = driver(brain: brain, transcript: transcript, screen: screen, overlay: overlay)
         driver.setMode(mode)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        transcript.append(.init(speaker: .them, text: "Explain the invariant.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Explain the invariant.", at: 1, endedAt: 1))
         let running = Task { await driver.handleTrigger(.manualHint) }
         await overlay.painted.enter()
         for reason: TriggerReason in [.manualHint, .manualCode, .manualExplanation, .manualExplanation] {
@@ -248,7 +248,7 @@ import Testing
         let transcript = RollingTranscript()
         let driver = driver(brain: brain, transcript: transcript, overlay: overlay)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        transcript.append(.init(speaker: .them, text: "Now show the implementation.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Now show the implementation.", at: 1, endedAt: 1))
         let running = Task { await driver.handleTrigger(.manualHint) }
         await pause.entered.waitUntilEntered()
         await overlay.painted.enter()
@@ -277,7 +277,7 @@ import Testing
         }
         let overlay = FakeOverlay()
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "Read the reference before answering.", at: 0))
+        transcript.append(.init(speaker: .them, text: "Read the reference before answering.", at: 0, endedAt: 0))
         let driver = driver(brain: brain, transcript: transcript, overlay: overlay, documents: documents)
         let running = Task { await driver.handleTrigger(.turnEnd) }
         await documents.pause.entered.waitUntilEntered()
@@ -310,7 +310,7 @@ import Testing
     @Test @MainActor func aReplacementBeforeTheFirstPaintRejectsBufferedText() async {
         let overlay = ReplacementOverlay()
         let scope = CoachAttemptScope()
-        let relay = ReplyProgressRelay(overlay: overlay, scope: scope)
+        let relay = ReplyProgressRelay(overlay: overlay, scope: scope, clock: ManualClock(now: 100), sessionStart: 100)
         relay.beginRequest()
         _ = relay.sink(.init(index: 0, name: "speak", arguments: #"{"hint":"buffered"#))
         #expect(scope.replace())
@@ -327,7 +327,7 @@ import Testing
     @MainActor func whitespaceThatCannotOpenAnOverlayEntryDoesNotProtectTheAttempt(arguments: String) async {
         let overlay = ReplacementOverlay()
         let scope = CoachAttemptScope()
-        let relay = ReplyProgressRelay(overlay: overlay, scope: scope)
+        let relay = ReplyProgressRelay(overlay: overlay, scope: scope, clock: ManualClock(now: 100), sessionStart: 100)
         relay.beginRequest()
         _ = relay.sink(.init(index: 0, name: "speak", arguments: arguments))
         _ = await relay.endRequest()
@@ -407,7 +407,7 @@ import Testing
     func scopeReplacementDuringCaptureDoesNotRecordScreenActivity(reason: TriggerReason, returnsImage: Bool) async {
         let scope = CoachAttemptScope()
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "Explain the binary search invariant.", at: 0))
+        transcript.append(.init(speaker: .them, text: "Explain the binary search invariant.", at: 0, endedAt: 0))
         let brain = ScriptedBrain(script: reason.isManual ? [replacementReply("stale")] : [
             .init(toolCalls: [.captureScreen(callId: "capture")]), replacementReply("stale"),
         ])
@@ -444,7 +444,7 @@ import Testing
         let scope = CoachAttemptScope()
         let documents = ScopeReplacingDocuments(scope: scope)
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "Find the binary search invariant in the reference.", at: 0))
+        transcript.append(.init(speaker: .them, text: "Find the binary search invariant in the reference.", at: 0, endedAt: 0))
         let brain = ScriptedBrain(script: [.init(toolCalls: [call]), replacementReply("stale")])
         let activity = RecordingActivity()
         let ledger = CoachTranscriptLedger()

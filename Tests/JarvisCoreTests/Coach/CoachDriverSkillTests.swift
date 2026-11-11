@@ -68,7 +68,7 @@ import Testing
         let brain = ScriptedBrain(script: [loadCall("behavioral"), speak])
         let (driver, transcript) = makeDriver(
             brain: brain, capabilities: offered, activity: activity)
-        transcript.append(.init(speaker: .them, text: "Tell me about a conflict you had.", at: 100))
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict you had.", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -98,7 +98,7 @@ import Testing
         ])
         let (driver, transcript) = makeDriver(
             brain: brain, capabilities: offered, activity: activity)
-        transcript.append(.init(speaker: .them, text: "Tell me about a conflict you had.", at: 100))
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict you had.", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -116,7 +116,7 @@ import Testing
             capabilities: .compose(disabledTools: [], disabledSkills: ["system-design"],
                                    referencesAdmitted: false, skills: skills),
             activity: activity)
-        transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 100))
+        transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 

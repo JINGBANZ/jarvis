@@ -111,7 +111,7 @@ import Testing
         #expect(!h.snapshot().contains { $0.rawItemsJSON != nil || $0.toolCalls != nil })
     }
 
-    @Test func staySilentCallsAndTheirResultsNeverEnterMemory() {
+    @Test func nativeCallsAndTheirSuccessOrRefusalResultsRemainLinked() {
         let h = CoachHistory()
         h.commit([
             .user("a"),
@@ -129,10 +129,10 @@ import Testing
         ])
 
         let snap = h.snapshot()
-        #expect(snap.count == 5)
+        #expect(snap.count == 8)
         #expect(snap.first?.text == "a")
-        #expect(snap.flatMap { $0.toolCalls ?? [] }.map(\.name) == ["load_skill", "speak"])
-        #expect(snap.compactMap(\.toolCallId) == ["l1", "s1"])
+        #expect(snap.flatMap { $0.toolCalls ?? [] }.map(\.name) == ["stay_silent", "load_skill", "stay_silent", "speak"])
+        #expect(snap.compactMap(\.toolCallId) == ["q1", "l1", "q2", "s1"])
     }
 
     @Test func compactionPrefixBoundsRespectTheTail() {

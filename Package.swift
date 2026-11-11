@@ -27,7 +27,7 @@ let package = Package(
         .target(name: "JarvisTestProcesses", dependencies: ["JarvisProcess"], path: "Tests/Support/ProcessOwnership"),
         .target(name: "JarvisTestDisplay", path: "Tests/Support/TestDisplay"),
         .target(name: "JarvisTestHost", path: "Tests/Support/TestHost"),
-        .target(name: "JarvisScenarioHarness", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"], path: "Tests/Support/ScenarioHarness", swiftSettings: liveE2ESettings),
+        .target(name: "JarvisScenarioHarness", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"], path: "Tests/Support/ScenarioHarness", resources: [.copy("Resources/test-providers.json")], swiftSettings: liveE2ESettings),
         .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore", "JarvisProcess"]),
         .target(name: "JarvisEvaluation", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"]),
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
