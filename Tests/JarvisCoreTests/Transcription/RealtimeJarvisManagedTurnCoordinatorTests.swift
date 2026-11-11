@@ -52,7 +52,7 @@ import Testing
 
     @Test func acknowledgementBindsTurnOnlyOnceAcrossReplay() throws {
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
-        coordinator.recordTurn(startedAt: 1, endedAt: 2, committedThroughAt: 2, throughSequenceNumber: 4)
+        coordinator.recordTurn(startedAt: 1, endedAt: 1.2, committedThroughAt: 2, throughSequenceNumber: 4)
         coordinator.recordAudioSent(sequenceNumber: 4)
         let readyFirstCommit = coordinator.takeReadyCommit()
         let firstCommit = try #require(readyFirstCommit)
