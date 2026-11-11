@@ -301,10 +301,11 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
     }
 
     func recordLocalSpeechEvent(_ event: LocalSpeechEvent, throughSequenceNumber: UInt64) {
-        coachingCoordinator.recordLocalSpeech(event.relative(to: sessionStart))
+        let event = event.relative(to: sessionStart)
+        coachingCoordinator.recordLocalSpeech(event)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        pendingSpeech.recordLocalSpeech(event.relative(to: sessionStart))
+        pendingSpeech.recordLocalSpeech(event)
         lock.unlock()
         updateWorkFlag()
     }

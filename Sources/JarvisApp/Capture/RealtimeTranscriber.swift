@@ -300,9 +300,10 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64
     ) {
-        coachingCoordinator.recordLocalSpeech(event.relative(to: sessionStart))
+        let event = event.relative(to: sessionStart)
+        coachingCoordinator.recordLocalSpeech(event)
         guard model.turnDetectionStrategy == .clientCommit else { return }
-        switch event.relative(to: sessionStart) {
+        switch event {
         case .started(let startedAt):
             jlog("Jarvis realtime [\(speaker.rawValue)]: local speech started")
             transcriptionLifecycle.recordLocalSpeechStarted(at: startedAt)

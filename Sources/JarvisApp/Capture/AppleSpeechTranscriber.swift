@@ -242,11 +242,12 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     }
 
     func recordLocalSpeechEvent(_ event: LocalSpeechEvent, throughSequenceNumber: UInt64) {
-        coachingCoordinator.recordLocalSpeech(event.relative(to: sessionStart))
+        let event = event.relative(to: sessionStart)
+        coachingCoordinator.recordLocalSpeech(event)
         let generation = currentGeneration
         audioQueue.async { [weak self] in
             guard let self, self.isLive(generation: generation) else { return }
-            let activity = event.relative(to: self.sessionStart).activity
+            let activity = event.activity
             self.setSpeechActivity(activity.active, at: activity.at, generation: generation)
         }
     }
