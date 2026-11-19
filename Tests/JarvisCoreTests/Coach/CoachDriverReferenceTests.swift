@@ -57,7 +57,7 @@ func referenceHit(name: String, text: String) -> ReferenceSearchHit {
                             capabilities: CoachCapabilities? = nil,
                             screen: any ScreenCapturing = FakeScreen()) -> CoachDriver {
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "Please read my design reference.", at: 100))
+        transcript.append(.init(speaker: .them, text: "Please read my design reference.", at: 100, endedAt: 100))
         return CoachDriver(config: .init(historyCompactionTokenThreshold: 100000), transcript: transcript,
             route: .init(targets: [.init(target: .init(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id), brain: brain)]),
             screen: screen, overlay: FakeOverlay(), clock: ManualClock(now: 100), automaticAttemptDelay: { _ in },

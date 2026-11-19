@@ -8,8 +8,8 @@ import Testing
     @Test func linesAppearInSpokenOrderNotArrivalOrder() {
         let content = TranscriptPaneContent.make(
             lines: [
-                .init(speaker: .me, text: "Sure.", at: 9),
-                .init(speaker: .them, text: "Can you hear me?", at: 4),
+                .init(speaker: .me, text: "Sure.", at: 9, endedAt: 9),
+                .init(speaker: .them, text: "Can you hear me?", at: 4, endedAt: 4),
             ],
             firstIndex: 0, handledCount: 0, live: [:], now: 10)
 
@@ -20,9 +20,9 @@ import Testing
     @Test func linesBeforeTheHandledBoundaryAreHandled() {
         let content = TranscriptPaneContent.make(
             lines: [
-                .init(speaker: .them, text: "Design a cache.", at: 1),
-                .init(speaker: .me, text: "What size?", at: 3),
-                .init(speaker: .them, text: "A few gigabytes.", at: 5),
+                .init(speaker: .them, text: "Design a cache.", at: 1, endedAt: 1),
+                .init(speaker: .me, text: "What size?", at: 3, endedAt: 3),
+                .init(speaker: .them, text: "A few gigabytes.", at: 5, endedAt: 5),
             ],
             firstIndex: 10, handledCount: 12, live: [:], now: 6)
 
@@ -33,8 +33,8 @@ import Testing
         // Index 1 finalized late but was spoken first; only index 0 has been handled.
         let content = TranscriptPaneContent.make(
             lines: [
-                .init(speaker: .me, text: "I'd use LRU.", at: 8),
-                .init(speaker: .them, text: "Any eviction policy?", at: 6),
+                .init(speaker: .me, text: "I'd use LRU.", at: 8, endedAt: 8),
+                .init(speaker: .them, text: "Any eviction policy?", at: 6, endedAt: 6),
             ],
             firstIndex: 0, handledCount: 1, live: [:], now: 9)
 
@@ -62,7 +62,7 @@ import Testing
 
     @Test func interimTextIsShownAsTheInProgressRowAfterTheFinalizedLines() {
         let content = TranscriptPaneContent.make(
-            lines: [.init(speaker: .me, text: "Okay.", at: 1)],
+            lines: [.init(speaker: .me, text: "Okay.", at: 1, endedAt: 1)],
             firstIndex: 0, handledCount: 1,
             live: [.me: .speaking(since: 2), .them: .interim("let's talk about ind")], now: 4)
 

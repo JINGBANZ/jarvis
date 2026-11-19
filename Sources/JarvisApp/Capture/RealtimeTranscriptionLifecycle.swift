@@ -113,8 +113,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
 
     func recordCommittedLocalTurn(
         itemID: String,
-        startedAt: TimeInterval,
-        committedThroughAt: TimeInterval,
+        startedAt: TimeInterval?,
+        endedAt: TimeInterval?,
         consumesUnboundTurn: Bool,
         socketGeneration: Int
     ) -> Bool {
@@ -122,12 +122,11 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         guard !stopped, isCurrentGeneration(socketGeneration) else {
             lock.unlock(); return false
         }
-        let startMilliseconds = max(0, Int((startedAt * 1_000).rounded()))
-        let endMilliseconds = max(startMilliseconds, Int((committedThroughAt * 1_000).rounded()))
-        let didStart = ledger.recordSpeechStarted(
-            itemID: itemID,
-            audioStartMilliseconds: startMilliseconds,
-            timelineOrigin: 0)
+        let startMilliseconds = startedAt.flatMap(Self.milliseconds)
+        let endMilliseconds = endedAt.flatMap(Self.milliseconds)
+        let didStart = startMilliseconds.map {
+            ledger.recordSpeechStarted(itemID: itemID, audioStartMilliseconds: $0, timelineOrigin: 0, timingSource: .localUtterance)
+        } ?? false
         let didStop = ledger.recordSpeechStopped(
             itemID: itemID,
             audioEndMilliseconds: endMilliseconds)
@@ -141,6 +140,12 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         }
         if didStop { scheduleTerminalDeadline(itemID: itemID, socketGeneration: socketGeneration) }
         return didStart || didStop
+    }
+
+    private static func milliseconds(_ seconds: TimeInterval) -> Int? {
+        let value = (seconds * 1_000).rounded()
+        guard value.isFinite, value >= 0, value < Double(Int.max) else { return nil }
+        return Int(value)
     }
 
     func discardUnboundLocalTurns(_ count: Int) {
@@ -170,7 +175,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         discardServerConfirmedAudioLocked()
         let handled = reconcileReplacementItemLocked(
             item, reason: item?.recoveredFromDeltas == true ? "completed without usable final" : nil)
-        if !handled {
+        if !handled, item != nil {
             jlog("Jarvis realtime [\(speaker.rawValue)] transcription completed "
                  + "with no usable text (item \(itemID))")
         }
@@ -296,7 +301,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
             guard let self else { return }
             self.lock.lock()
-            guard !self.stopped, self.isReady(socketGeneration) else { self.lock.unlock(); return }
+            guard !self.stopped, self.isReady(socketGeneration), self.ledger.isPending(itemID: itemID) else {
+                self.lock.unlock(); return
+            }
             let item = self.ledger.resolveStoppedItemTimeout(itemID: itemID, speaker: self.speaker)
             guard let item else {
                 let handled = self.reconcileReplacementItemLocked(
@@ -422,7 +429,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         coachingCoordinator.recordFinalizedTranscript(
             text,
             spokenAt: item.spokenAt,
-            source: "item \(item.itemID)\(detail)")
+            spokenEndAt: item.spokenEndAt,
+            source: "item \(item.itemID)\(detail)",
+            timingSource: item.timingSource)
     }
 
     /// Publish under `lock` so concurrent socket and timeout callbacks cannot reorder transitions.

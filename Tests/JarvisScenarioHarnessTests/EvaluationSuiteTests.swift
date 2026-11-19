@@ -1,8 +1,34 @@
 import Foundation
+import JarvisCore
 import Testing
 @testable import JarvisScenarioHarness
 
 @Suite struct EvaluationSuiteTests {
+    @Test func sharedConfigurationCoversEverySupportedProvider() {
+        let config = TestProviderConfiguration.shared
+        #expect(config.defaultProvider == .codexSubscription)
+        #expect(config.defaultJudgeProvider == .codexSubscription)
+        #expect(config.models.count == BrainProvider.allCases.count)
+        for provider in BrainProvider.allCases {
+            #expect(BrainModelCatalog.models(for: provider).contains { $0.id == config.modelID(for: provider) })
+            #expect(BrainModelCatalog.models(for: provider).contains { $0.id == config.modelID(for: provider, judge: true) })
+        }
+    }
+
+    @Test(arguments: BrainProvider.allCases)
+    func judgeDefaultsMatchTheirProvider(provider: BrainProvider) {
+        let target = EvaluationSuiteRunner.judgeTarget(for: provider)
+        #expect(target.provider == provider)
+        #expect(BrainModelCatalog.models(for: provider).contains { $0.id == target.modelID })
+        if provider == .codexSubscription {
+            #expect(target.modelID == "gpt-5.6-terra")
+        } else {
+            #expect(target == LiveE2EScenario.target(for: provider))
+        }
+        #expect(EvaluationSuiteRunner.judgeTarget(for: provider, modelID: "explicit-model")
+            == BrainTarget(provider: provider, modelID: "explicit-model"))
+    }
+
     @Test func incompleteRunNeverPassesAsSilence() throws {
         let result = EvaluationDecisionResult(
             id: "quiet", expectation: .silenceRequired,
@@ -75,8 +101,8 @@ extension EvaluationSuiteTests {
     @Test func checkedInCatalogValidatesAndRubricIsSeparateFromModelEvents() throws {
         let base = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let catalog = try CoachingReplayCatalog.load(from: base.appendingPathComponent("JarvisLiveTests/Scenarios/coaching-intervention.json"))
-        #expect(catalog.episodes.count == 28)
-        #expect(catalog.episodes.flatMap(\.decisions).count == 36)
+        #expect(catalog.episodes.count == 32)
+        #expect(catalog.episodes.flatMap(\.decisions).count == 46)
         #expect(catalog.episodes.flatMap(\.decisions).flatMap(\.events).allSatisfy { !($0.text ?? "").contains("gradingGoal") })
     }
 }

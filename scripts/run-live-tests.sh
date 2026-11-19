@@ -26,7 +26,14 @@ LIST=0
 SCENARIO="all"
 EVALUATE=0
 KEEP_GOING=0
-PROVIDER="codex-subscription"
+PROVIDER_DEFAULTS="$(python3 - <<'PROVIDERS'
+import json
+from pathlib import Path
+config = json.loads(Path('Tests/Support/ScenarioHarness/Resources/test-providers.json').read_text())
+print(config['defaultProvider'], config['defaultJudgeProvider'])
+PROVIDERS
+)"
+read -r PROVIDER DEFAULT_JUDGE_PROVIDER <<< "$PROVIDER_DEFAULTS"
 EVALUATION_AGENT="${EVAL_AGENT:-codex}"
 RUN_ARGUMENTS=("$@")
 while (( $# > 0 )); do
@@ -99,7 +106,7 @@ if [[ -n "$SUITE" ]]; then
     export JARVIS_LIVE_E2E_APP="$PWD/Jarvis Dev.app"
     source scripts/lib/live-test-cancellation.sh
   fi
-  if [[ "$SUITE_EXECUTOR" == coachingReplay && ( "$PROVIDER" == *-subscription || "${JARVIS_EVALUATION_JUDGE_PROVIDER:-$PROVIDER}" == *-subscription ) ]]; then
+  if [[ "$SUITE_EXECUTOR" == coachingReplay && ( "$PROVIDER" == *-subscription || "${JARVIS_EVALUATION_JUDGE_PROVIDER:-$DEFAULT_JUDGE_PROVIDER}" == *-subscription ) ]]; then
     source scripts/lib/cliproxyapi.sh
     build_cliproxyapi
     export JARVIS_PROXY_EXECUTABLE="$CLIPROXYAPI_BUILT_DIRECTORY/cliproxyapi"

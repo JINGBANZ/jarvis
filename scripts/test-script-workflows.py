@@ -252,6 +252,9 @@ class ScriptTests(unittest.TestCase):
         scenarios.mkdir(parents=True)
         for name in ('evaluation-suites.json', 'coaching-intervention.json'):
             shutil.copy2(REPOSITORY / 'Tests/JarvisLiveTests/Scenarios' / name, scenarios / name)
+        provider_config = Path('Tests/Support/ScenarioHarness/Resources/test-providers.json')
+        (self.root / provider_config).parent.mkdir(parents=True)
+        shutil.copy2(REPOSITORY / provider_config, self.root / provider_config)
         # Replace admission only inside this copied fixture checkout. Production has no bypass.
         (self.root / "scripts/lib/test-display.sh").write_text("""isolate_test_display() { :; }
 launch_test_app() { open -W -n "$@"; }
@@ -535,7 +538,7 @@ class GuardTests(ScriptTests):
 
     def test_missing_source_cannot_pass_audio_guard(self):
         for name in ("Sources", "Resources", "Tests/Support"):
-            shutil.copytree(REPOSITORY / name, self.root / name)
+            shutil.copytree(REPOSITORY / name, self.root / name, dirs_exist_ok=True)
         shutil.copy2(REPOSITORY / "Package.swift", self.root / "Package.swift")
         baseline = self.run_script("check-audio-capture-config.sh")
         self.assertEqual(baseline.returncode, 0, baseline.stderr)
@@ -641,6 +644,13 @@ print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
                 self.assertFalse((self.root / 'admission.jsonl').exists())
 
     def test_replay_suite_keeps_admission_without_building_app(self):
+        config = self.root / 'Tests/Support/ScenarioHarness/Resources/test-providers.json'
+        defaults = json.loads(config.read_text())
+        api_provider = next(provider for provider in defaults['models'] if not provider.endswith('-subscription'))
+        defaults['defaultProvider'] = api_provider
+        defaults['defaultJudgeProvider'] = api_provider
+        config.write_text(json.dumps(defaults))
+        self.environment.pop('JARVIS_EVALUATION_JUDGE_PROVIDER', None)
         self.executable(self.bin / 'swift', f'''#!{sys.executable}
 import json, os
 from pathlib import Path
@@ -650,7 +660,7 @@ print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
         base = self.root / '.jarvis/live-e2e'
         for index in range(11):
             (base / f'2000-01-{index + 1:02d}').mkdir(parents=True)
-        arguments = ['--suite', 'coaching/intervention', '--provider', 'openai', '--repeat', '3']
+        arguments = ['--suite', 'coaching/intervention', '--repeat', '3']
         result = self.run_script('run-live-tests.sh', *arguments)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         rows = [json.loads(row) for row in (self.root / 'admission.jsonl').read_text().splitlines()]
@@ -662,6 +672,36 @@ print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
         self.assertEqual(len(list(base.iterdir())), 10)
         self.assertFalse((base / '2000-01-01').exists())
         self.assertFalse((base / '2000-01-02').exists())
+
+    def test_replay_suite_provisions_helper_for_effective_subscription_targets(self):
+        self.environment.pop('JARVIS_PROXY_EXECUTABLE', None)
+        (self.root / 'scripts/lib/cliproxyapi.sh').write_text('''build_cliproxyapi() {
+  echo helper > helper-built
+  CLIPROXYAPI_BUILT_DIRECTORY="$PWD/fixture-proxy"
+}
+''')
+        self.executable(self.bin / 'swift', f'''#!{sys.executable}
+import json, os
+from pathlib import Path
+Path('suite-proxy.json').write_text(json.dumps(os.environ.get('JARVIS_PROXY_EXECUTABLE')))
+print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
+''')
+        for coach, judge, needs_helper in (('openai', None, True), ('gemini', None, True),
+                                            ('openai', 'gemini', False),
+                                            ('codex-subscription', 'openai', True)):
+            with self.subTest(coach=coach, judge=judge):
+                self.environment.pop('JARVIS_EVALUATION_JUDGE_PROVIDER', None)
+                if judge is not None:
+                    self.environment['JARVIS_EVALUATION_JUDGE_PROVIDER'] = judge
+                marker = self.root / 'helper-built'
+                marker.unlink(missing_ok=True)
+                result = self.run_script('run-live-tests.sh', '--suite', 'coaching/intervention',
+                                         '--provider', coach)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(marker.exists(), needs_helper)
+                executable = json.loads((self.root / 'suite-proxy.json').read_text())
+                self.assertEqual(executable, str(self.root / 'fixture-proxy/cliproxyapi')
+                                 if needs_helper else None)
 
     def test_valid_arguments_survive_reentry_and_reference_transition(self):
         cases = (
@@ -695,6 +735,10 @@ class AppBundleTests(ScriptTests):
         for name in ("Jarvis_JarvisApp.bundle", "Jarvis_JarvisCore.bundle", "ZIPFoundation_ZIPFoundation.bundle"):
             (artifacts / name).mkdir()
             (artifacts / name / "PrivacyInfo.xcprivacy").write_text("synthetic resource")
+        harness = artifacts / "Jarvis_JarvisScenarioHarness.bundle"
+        harness.mkdir()
+        shutil.copy2(self.root / 'Tests/Support/ScenarioHarness/Resources/test-providers.json',
+                     harness / 'test-providers.json')
         sparkle = artifacts / "Sparkle.framework"
         (sparkle / "Versions/Current/XPCServices").mkdir(parents=True)
         (sparkle / "XPCServices").symlink_to("Versions/Current/XPCServices")
@@ -723,11 +767,20 @@ class AppBundleTests(ScriptTests):
         self.assertIn("SUFeedURL", production)
         resources = bundle / "Contents/Resources"
         for name in ("Jarvis.icns", "Jarvis_JarvisApp.bundle", "Jarvis_JarvisCore.bundle",
+                     "Jarvis_JarvisScenarioHarness.bundle/test-providers.json",
                      "ZIPFoundation_ZIPFoundation.bundle/PrivacyInfo.xcprivacy",
                      "ReferenceHelper/JarvisReferenceHelper"):
             self.assertTrue((resources / name).exists(), name)
         for name in ("XPCServices", "Versions/Current/XPCServices"):
             self.assertFalse(os.path.lexists(bundle / "Contents/Frameworks/Sparkle.framework" / name))
+        release = subprocess.run(['/bin/bash', '-c', '''set -e
+source scripts/lib/app-bundle.sh
+bundle_reference_helper() { :; }
+bundle_cliproxyapi() { :; }
+assemble_app "ReleaseFixture.app" "$SYNTHETIC_ARTIFACTS" release
+'''], cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=15)
+        self.assertEqual(release.returncode, 0, release.stderr)
+        self.assertFalse((self.root / 'ReleaseFixture.app/Contents/Resources/Jarvis_JarvisScenarioHarness.bundle').exists())
 
     def test_appcast_uses_the_bundled_minimum_system_version(self):
         shutil.copytree(REPOSITORY / "Resources", self.root / "Resources")

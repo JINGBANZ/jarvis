@@ -29,20 +29,18 @@ public final class CoachHistory: @unchecked Sendable {
         }
     }
 
-    /// Drops `stay_silent` calls and refused prose, which would otherwise replay on every later
-    /// request, and stubs screenshots. New screen text collapses all older screen text, breaking
+    /// Drops refused prose and stubs screenshots. New screen text collapses all older screen text, breaking
     /// the cache prefix on purpose: stale dumps led the model to "fix" code the user had already
     /// fixed.
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        // Raw items go first so a `stay_silent` call among them is dropped too. Their reasoning matters
-        // only within the tool loop and would be re-billed on every later request.
-        var turn = Self.droppingRefusedProse(Self.droppingSilence(turn.compactMap { m -> ChatMessage? in
+        // Reasoning is only reused inside its tool loop; retain native calls and results in history.
+        var turn = Self.droppingRefusedProse(turn.compactMap { m -> ChatMessage? in
             guard m.rawItemsJSON != nil else { return m }
             guard let calls = m.toolCalls, !calls.isEmpty else { return nil }
             return .assistantToolCalls(calls)
-        }))
+        })
         let screenTextHeader = JarvisPrompts.Coach.screenTextHeader
         if let newest = turn.lastIndex(where: { $0.text?.contains(screenTextHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededScreenText)
@@ -59,24 +57,6 @@ public final class CoachHistory: @unchecked Sendable {
                 ? .user(JarvisPrompts.Coach.earlierImageStub)
                 : m
         })
-    }
-
-    private static func droppingSilence(_ turn: [ChatMessage]) -> [ChatMessage] {
-        let silent = Set(turn.flatMap { $0.toolCalls ?? [] }
-            .filter { $0.name == staySilentTool.name }
-            .map(\.id))
-        guard !silent.isEmpty else { return turn }
-        return turn.compactMap { m in
-            if let id = m.toolCallId, silent.contains(id) { return nil }
-            guard let calls = m.toolCalls, calls.contains(where: { silent.contains($0.id) }) else {
-                return m
-            }
-            let kept = calls.filter { !silent.contains($0.id) }
-            guard !kept.isEmpty || m.text != nil else { return nil }
-            return ChatMessage(
-                role: m.role, text: m.text, imageBase64JPEG: m.imageBase64JPEG,
-                toolCallId: m.toolCallId, toolCalls: kept.isEmpty ? nil : kept)
-        }
     }
 
     private static func droppingRefusedProse(_ turn: [ChatMessage]) -> [ChatMessage] {

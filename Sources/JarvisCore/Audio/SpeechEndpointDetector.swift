@@ -57,7 +57,7 @@ public struct SpeechEndpointDetector: Sendable {
             trailingSilenceFramesSeen += 1
             guard trailingSilenceFramesSeen >= trailingSilenceFrames else { return nil }
             let detectedAt = frameStartedAt + frameDuration
-            let endedAt = lastSpeechEndedAt ?? activeStartedAt
+            guard let endedAt = lastSpeechEndedAt else { return nil }
             reset()
             return .ended(startedAt: activeStartedAt, endedAt: endedAt, detectedAt: detectedAt)
         }

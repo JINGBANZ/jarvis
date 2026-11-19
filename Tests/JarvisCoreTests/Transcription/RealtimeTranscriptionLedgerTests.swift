@@ -311,3 +311,30 @@ import Testing
         #expect(ledger.safeReplayDiscardTime == 11)
     }
 }
+
+
+extension RealtimeTranscriptionLedgerTests {
+    @Test(arguments: [true, false])
+    func completedTextWithoutFullTimingIsPublishedOnce(startKnown: Bool) throws {
+        let ledger = RealtimeTranscriptionLedger()
+        if startKnown {
+            ledger.recordSpeechStarted(itemID: "item", audioStartMilliseconds: 1_000, timelineOrigin: 10)
+        }
+        let item = try #require(ledger.recordCompleted(itemID: "item", transcript: "retained words", speaker: .me))
+        #expect(item.text == "retained words")
+        #expect(item.spokenAt == (startKnown ? 11 : nil))
+        #expect(item.spokenEndAt == nil)
+        #expect(ledger.coachingWorkState == .settled)
+        #expect(!ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 3_000))
+        #expect(ledger.recordCompleted(itemID: "item", transcript: "duplicate", speaker: .me) == nil)
+    }
+
+    @Test func completeMeasuredRangeIsRetained() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        ledger.recordSpeechStarted(itemID: "item", audioStartMilliseconds: 1_000, timelineOrigin: 10)
+        ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 3_000)
+        let item = try #require(ledger.recordCompleted(itemID: "item", transcript: "timed words", speaker: .me))
+        #expect(item.spokenAt == 11)
+        #expect(item.spokenEndAt == 13)
+    }
+}

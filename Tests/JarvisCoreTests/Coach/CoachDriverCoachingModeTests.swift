@@ -34,7 +34,7 @@ import Testing
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "s")])])
         let (driver, transcript) = makeDriver(brain: brain)
         driver.setMode(.manual)
-        let boundary = transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 1))
+        let boundary = transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 1, endedAt: 1))
 
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary) == .paused)
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 40)) == .paused)
@@ -47,9 +47,9 @@ import Testing
         ])
         let (driver, transcript) = makeDriver(brain: brain)
         driver.setMode(.manual)
-        let question = transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 1))
+        let question = transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: question) == .paused)
-        let reply = transcript.append(.init(speaker: .me, text: "Let me clarify the scale first.", at: 5))
+        let reply = transcript.append(.init(speaker: .me, text: "Let me clarify the scale first.", at: 5, endedAt: 5))
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: reply) == .paused)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -67,11 +67,11 @@ import Testing
             .init(toolCalls: [.staySilent(callId: "second")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain)
-        transcript.append(.init(speaker: .them, text: "Tell me about yourself.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Tell me about yourself.", at: 1, endedAt: 1))
         let inFlight = Task { await driver.handleTrigger(.turnEnd) }
         await gate.waitUntilEntered()
 
-        let later = transcript.append(.init(speaker: .me, text: "Sure, I lead a platform team.", at: 4))
+        let later = transcript.append(.init(speaker: .me, text: "Sure, I lead a platform team.", at: 4, endedAt: 4))
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: later) == .busy)
         driver.setMode(.manual)
         await gate.release()
@@ -84,7 +84,7 @@ import Testing
         let gate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, transcript) = makeDriver(brain: brain)
-        transcript.append(.init(speaker: .them, text: "What's the time complexity?", at: 1))
+        transcript.append(.init(speaker: .them, text: "What's the time complexity?", at: 1, endedAt: 1))
         let inFlight = Task { await driver.handleTrigger(.turnEnd) }
         await gate.waitUntilEntered()
 
@@ -99,7 +99,7 @@ import Testing
         let gate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, transcript) = makeDriver(brain: brain)
-        transcript.append(.init(speaker: .them, text: "What's the time complexity?", at: 1))
+        transcript.append(.init(speaker: .them, text: "What's the time complexity?", at: 1, endedAt: 1))
         let inFlight = Task { await driver.handleTrigger(.turnEnd) }
         await gate.waitUntilEntered()
 
@@ -116,11 +116,11 @@ import Testing
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "s")])])
         let (driver, transcript) = makeDriver(brain: brain)
         driver.setMode(.manual)
-        let heard = transcript.append(.init(speaker: .them, text: "Walk me through your design.", at: 1))
+        let heard = transcript.append(.init(speaker: .them, text: "Walk me through your design.", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: heard) == .paused)
 
         driver.setMode(.automatic)
-        let next = transcript.append(.init(speaker: .me, text: "I'd start with the API.", at: 6))
+        let next = transcript.append(.init(speaker: .me, text: "I'd start with the API.", at: 6, endedAt: 6))
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: next) == .silentByModel)
 
         #expect(brain.calls.count == 1)
@@ -153,13 +153,13 @@ import Testing
         let (driver, transcript) = makeDriver(
             brain: brain, clock: clock, manualSettlementGrace: .seconds(60))
         driver.setMode(.manual)
-        transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 1, endedAt: 1))
         driver.updateTranscriptionWork(.pending(since: 2), for: .them)
         clock.advance(by: 3)
 
         let press = Task { await driver.handleTrigger(.manualHint) }
         #expect(!(await eventually { brain.calls.count == 1 }), "the press must wait for the utterance in progress")
-        transcript.append(.init(speaker: .them, text: "It should handle a billion links.", at: 2))
+        transcript.append(.init(speaker: .them, text: "It should handle a billion links.", at: 2, endedAt: 2))
         driver.updateTranscriptionWork(.settled, for: .them)
 
         #expect(await press.value == .spoke)
@@ -220,7 +220,7 @@ import Testing
         #expect(await driver.handleTrigger(.manualHint) == .busy)
         await gate.release()
         #expect(!(await eventually { brain.callCount == 2 }), "the queued press must wait")
-        transcript.append(.init(speaker: .them, text: "And what about writes?", at: 2))
+        transcript.append(.init(speaker: .them, text: "And what about writes?", at: 2, endedAt: 2))
         driver.updateTranscriptionWork(.settled, for: .them)
 
         #expect(await running.value == .spoke)
@@ -265,7 +265,7 @@ import Testing
         await gate.release()
         #expect(await driver.handleTrigger(.manualHint) == .busy)
         #expect(!(await eventually { brain.calls.count == 2 }), "the press must wait before the retry")
-        transcript.append(.init(speaker: .them, text: "What's the time complexity?", at: 2))
+        transcript.append(.init(speaker: .them, text: "What's the time complexity?", at: 2, endedAt: 2))
         driver.updateTranscriptionWork(.settled, for: .them)
 
         #expect(await failing.value == .spoke)
@@ -285,7 +285,7 @@ import Testing
         clock.advance(by: 2)
         #expect(await driver.handleTrigger(.manualHint) == .busy)
         #expect(!(await eventually { brain.calls.count == 1 }), "the second press must not end the wait")
-        transcript.append(.init(speaker: .them, text: "Assume ten million users.", at: 2))
+        transcript.append(.init(speaker: .them, text: "Assume ten million users.", at: 2, endedAt: 2))
         driver.updateTranscriptionWork(.settled, for: .them)
 
         #expect(await first.value == .spoke)

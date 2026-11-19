@@ -135,6 +135,17 @@ Foundation-only product logic in `JarvisCore`; keep AppKit, audio, capture, and 
   with cache-read, cache-write, uncached-input, and output accounting. A stable cache key alone is
   not evidence of reuse. See [context composition](wiki/architecture.md#context-composition).
 
+## Pull-request review follow-through
+
+- Inspect current review threads, including outdated threads, when addressing PR feedback.
+- Once a finding is addressed on the pushed revision, reply with the fixing commit and available
+  validation evidence, then resolve its GitHub review thread. Editing code or the PR description
+  alone does not complete the follow-through.
+- If a finding is demonstrably invalid, explain the supporting evidence and resolve it. Leave
+  uncertain findings and outstanding validation requirements open; do not resolve them just to
+  clear the queue. Follow the user's test restrictions and state any unrun validation explicitly.
+- Recheck thread state before handing the PR back and report anything still unresolved.
+
 ## Runtime safety boundaries
 
 - During the live pipeline and teardown, no autonomous path may activate Jarvis, present UI beyond

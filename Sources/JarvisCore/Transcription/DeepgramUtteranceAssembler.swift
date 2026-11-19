@@ -16,7 +16,10 @@ public struct DeepgramUtteranceAssembler: Sendable {
     /// Floating-point slack when comparing Deepgram's audio times.
     private static let tolerance: TimeInterval = 0.01
 
-    private var segments: [(text: String, end: TimeInterval)] = []
+    private var segments: [(text: String, end: TimeInterval, speech: SpeechInterval?, nativeStart: TimeInterval?, nativeEnd: TimeInterval?)] = []
+    public private(set) var publishedSpeechInterval: SpeechInterval?
+    public private(set) var publishedSpeechStart: TimeInterval?
+    public private(set) var publishedSpeechEnd: TimeInterval?
     /// Audio time through which Deepgram has finalized, words or no words.
     private var finalizedThrough = -TimeInterval.infinity
     /// The end of the latest word an interim result heard.
@@ -53,7 +56,11 @@ public struct DeepgramUtteranceAssembler: Sendable {
             }
             finalizedThrough = max(finalizedThrough, result.end)
             if !text.isEmpty {
-                segments.append((text: text, end: result.lastWordEnd ?? result.end))
+                let speech = result.firstWordStart.flatMap { start in
+                    result.lastWordEnd.flatMap { SpeechInterval(startedAt: start, endedAt: $0) }
+                }
+                segments.append((text: text, end: result.lastWordEnd ?? result.end, speech: speech,
+                                 nativeStart: result.firstWordStart, nativeEnd: result.lastWordEnd))
             }
             return result.speechFinal ? close(through: .infinity) : []
         case .utteranceEnd(let lastWordEnd):
@@ -82,6 +89,9 @@ public struct DeepgramUtteranceAssembler: Sendable {
     public mutating func reset(socket: Int) {
         self.socket = socket
         segments.removeAll()
+        publishedSpeechInterval = nil
+        publishedSpeechStart = nil
+        publishedSpeechEnd = nil
         finalizedThrough = -.infinity
         latestHeardWordEnd = nil
         latestSpeechStart = nil
@@ -92,6 +102,14 @@ public struct DeepgramUtteranceAssembler: Sendable {
         guard !closed.isEmpty else { return [] }
         segments.removeFirst(closed.count)
         publishing += 1
+        publishedSpeechStart = closed.first?.nativeStart
+        publishedSpeechEnd = closed.last?.nativeEnd
+        if let start = closed.first?.speech?.startedAt, let end = closed.last?.speech?.endedAt,
+           closed.allSatisfy({ $0.speech != nil }) {
+            publishedSpeechInterval = SpeechInterval(startedAt: start, endedAt: end)
+        } else {
+            publishedSpeechInterval = nil
+        }
         return closed.map(\.text)
     }
 }

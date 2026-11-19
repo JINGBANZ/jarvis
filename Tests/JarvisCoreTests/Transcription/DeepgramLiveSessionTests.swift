@@ -57,7 +57,7 @@ import Foundation
         """
         #expect(DeepgramLiveSession.parseEvent(Data(json.utf8)) == .results(.init(
             transcript: "hello world", isFinal: true, speechFinal: true,
-            start: 1.5, end: 3.75, lastWordEnd: 3.4)))
+            start: 1.5, end: 3.75, lastWordEnd: 3.4, firstWordStart: 1.6)))
     }
 
     @Test func parsesAnInterimResult() {

@@ -20,13 +20,18 @@ final class ReplyProgressRelay: @unchecked Sendable {
 
     private let overlay: OverlayRendering
     private let scope: CoachAttemptScope
+    private let clock: Clock
+    private let sessionStart: TimeInterval
+    private var firstVisibleAt: TimeInterval?
     private let lock = NSLock()
     private var request: Request?
     private var cancelled = false
 
-    init(overlay: OverlayRendering, scope: CoachAttemptScope) {
+    init(overlay: OverlayRendering, scope: CoachAttemptScope, clock: Clock, sessionStart: TimeInterval) {
         self.overlay = overlay
         self.scope = scope
+        self.clock = clock
+        self.sessionStart = sessionStart
     }
 
     /// The conversation's sink for the whole attempt; it feeds whichever request is open.
@@ -38,9 +43,12 @@ final class ReplyProgressRelay: @unchecked Sendable {
         let (stream, continuation) = AsyncStream.makeStream(
             of: BrainReplyProgress.self, bufferingPolicy: .bufferingNewest(1))
         lock.withLock {
+            firstVisibleAt = nil
             request = Request(started: Date(), stream: stream, continuation: continuation)
         }
     }
+
+    var firstShownAt: TimeInterval? { lock.withLock { firstVisibleAt } }
 
     func cancel() {
         lock.withLock {
@@ -104,6 +112,11 @@ final class ReplyProgressRelay: @unchecked Sendable {
                 }
                 guard !Task.isCancelled, scope.acceptOutput() else { return }
                 overlay.showReplyProgress(snapshot)
+                self.lock.withLock {
+                    if self.firstVisibleAt == nil {
+                        self.firstVisibleAt = self.clock.now() - self.sessionStart
+                    }
+                }
                 lastPaint = .now
             }
         }

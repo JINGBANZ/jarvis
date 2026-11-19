@@ -3,6 +3,7 @@ import Foundation
 import JarvisCore
 
 public struct InterventionVerdict: Codable, Sendable {
+    public static let judgeInstructionVersion = "intervention-v1-evidence"
     public let confident: Bool
     public let grounded: Bool
     public let helpful: Bool
@@ -33,9 +34,9 @@ public struct InterventionVerdict: Codable, Sendable {
             Evaluate the actual visible content against the stated conversational facts and hidden grading goal.
             Grounded means technically correct and supported by the evidence, without invented facts.
             Helpful means materially advances the candidate's current gap directly and accurately, with proportionate guidance the candidate can read and use at this conversational moment. An unsolicited overwhelming solution dump is not helpful even when technically correct.
-            Redundant means repeats a prior visible hint that is still sufficient, or interrupts progress without new value.
+            Redundant has two independent cases: it repeats a prior visible hint that is still sufficient; or it interrupts healthy progress without addressing an unmet need. The second case does not require a prior hint: information can be new and technically correct yet unnecessary at this conversational moment. The interruption case requires evidence of healthy progress without an unmet need. Missing dialogue or task context alone is not evidence of progress or redundancy. Do not equate redundant with unhelpful; an incorrect or unsupported reply is not automatically redundant.
             Judge withdrawn provisional text too: the candidate saw it. Do not count stream chunks as separate replies.
-            If evidence is insufficient, set confident false. Cite specific evidence in rationale. Do not infer success from keywords or the coach's claims.
+            Confident means enough task and conversational evidence exists to assess correctness and relevance. If that context is absent, set confident false even when unsupportedness is clear. A visible omission from an otherwise specified task can be assessed confidently and must affect helpful. Cite specific evidence in rationale. Do not infer success from keywords or the coach's claims.
             Return ONLY a JSON object with exactly confident, grounded, helpful, redundant (booleans), rationale (nonempty string).
             """), .user(input),
         ], tools: [], toolChoice: .auto)

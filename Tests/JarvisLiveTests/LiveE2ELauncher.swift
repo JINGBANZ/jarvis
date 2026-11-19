@@ -67,7 +67,7 @@ struct LiveE2ELauncher {
             } else {
                 transcriptionData = source
             }
-            let selection = environment["JARVIS_LIVE_E2E_PROVIDER"] ?? BrainProvider.codexSubscription.rawValue
+            let selection = environment["JARVIS_LIVE_E2E_PROVIDER"] ?? TestProviderConfiguration.shared.defaultProvider.rawValue
             if selection == "scenario" {
                 scenarioData = transcriptionData
             } else if let provider = BrainProvider(rawValue: selection) {

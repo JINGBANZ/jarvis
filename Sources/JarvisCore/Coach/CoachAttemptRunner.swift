@@ -256,7 +256,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var requestSequence = 1
         // Owned by this attempt, like the conversation whose streamed deltas it turns into overlay
         // snapshots.
-        let relay = ReplyProgressRelay(overlay: overlay, scope: scope)
+        let relay = ReplyProgressRelay(overlay: overlay, scope: scope, clock: clock, sessionStart: sessionStart)
         let conversation: any BrainConversation
         do {
             let requestContext = CoachingRequestAttribution.context(
@@ -342,6 +342,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     guard !Task.isCancelled else { return false }
                     return scope.commit {
                         let delivered = self.overlay.deliver(hint, detail: parsedDetail)
+                        let completedAt = self.clock.now() - self.sessionStart
                         self.activity?.record(.tip(hint: hint, detail: delivered?.deliveredMarkdown))
                         let arguments: [String: Any] = [
                             "hint": hint, "detail": delivered?.deliveredMarkdown ?? NSNull(),
@@ -354,7 +355,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             argumentsJSON: String(decoding: data, as: UTF8.self))]))
                         committed.append(.init(
                             role: .tool,
-                            text: JarvisPrompts.Coach.tipShown(dropped: parsedDetail?.dropped ?? []),
+                            text: JarvisPrompts.Coach.tipShown(
+                                at: completedAt, firstShownAt: relay.firstShownAt,
+                                dropped: parsedDetail?.dropped ?? []),
                             toolCallId: callID))
                         self.history.commit(committed)
                         self.commitLoads(loads)
@@ -652,7 +655,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     return await speak(callID: callID, hint: hint,
                                        detail: requestedDetail.flatMap(ReplyDetail.init(markdown:)))
 
-                case .staySilent:
+                case .staySilent(let callID):
                     await withdraw()
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before recording silence")
@@ -661,7 +664,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("… nothing useful to add, staying silent")
                     guard scope.commit({
                         activity?.record(.stayedSilent)
-                        commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
+                        history.commit(turnMessages + [
+                            .assistantToolCalls([RawToolCall(id: callID, name: staySilentTool.name,
+                                                           argumentsJSON: "{}")]),
+                            .init(role: .tool, text: "Silent at \(RollingTranscript.stamp(clock.now() - sessionStart)).",
+                                  toolCallId: callID),
+                        ])
                         commitLoads(loadedThisAttempt)
                         ledger.commit(through: delta.upTo)
                     }) else { return .cancelled }
@@ -782,11 +790,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
             startCompactionIfIdle(using: attempt.summarizer ?? attempt.brain)
         }
         return AttemptExecution(id: attemptID, result: result)
-    }
-
-    private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String) {
-        guard !deltaText.isEmpty || turn.count > 1 else { return }
-        history.commit(turn)
     }
 
     /// Call only after the turn is committed.

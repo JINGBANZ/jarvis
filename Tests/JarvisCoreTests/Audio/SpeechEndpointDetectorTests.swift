@@ -70,11 +70,12 @@ import Testing
         #expect(detector.observe(speechProbability: 0.0, frameStartedAt: 0.04) == nil)
         #expect(detector.observe(speechProbability: 0.0, frameStartedAt: 0.05) == nil)
         let ended = detector.observe(speechProbability: 0.0, frameStartedAt: 0.06)
-        guard case .ended(let startedAt, _, let detectedAt) = ended else {
+        guard case .ended(let startedAt, let endedAt, let detectedAt) = ended else {
             Issue.record("expected a speech endpoint")
             return
         }
         #expect(startedAt == 0)
+        #expect(abs(endedAt - 0.04) < 0.000_001)
         #expect(abs(detectedAt - 0.07) < 0.000_001)
     }
 
@@ -94,10 +95,11 @@ import Testing
         }
         #expect(detector.observe(speechProbability: 0.2, frameStartedAt: 0.21) == nil)
         #expect(detector.observe(speechProbability: 0.2, frameStartedAt: 0.22) == nil)
-        guard case .ended = detector.observe(speechProbability: 0.2, frameStartedAt: 0.23) else {
+        guard case .ended(_, let endedAt, _) = detector.observe(speechProbability: 0.2, frameStartedAt: 0.23) else {
             Issue.record("expected the turn to close once probability fell below release")
             return
         }
+        #expect(abs(endedAt - 0.21) < 0.000_001)
     }
 
     /// Keyboard typing measured at p <= 0.023.

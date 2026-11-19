@@ -33,12 +33,12 @@ import Testing
             brain: brain,
             capabilities: .compose(disabledTools: [], referencesAdmitted: true),
             documents: nil)
-        transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100))
+        transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100, endedAt: 100))
 
         _ = await driver.handleTrigger(.turnEnd)
 
         // A session has no late-install interface; later preparation changes only outcomes.
-        transcript.append(.init(speaker: .me, text: "so the map keeps the last index", at: 140))
+        transcript.append(.init(speaker: .me, text: "so the map keeps the last index", at: 140, endedAt: 140))
 
         _ = await driver.handleTrigger(.turnEnd)
 
@@ -52,12 +52,12 @@ import Testing
     @Test func aSessionComposedWithoutReferencesNeverGainsTheTool() async {
         let brain = ScriptedBrain(script: [staySilent, staySilent])
         let (driver, transcript) = makeDriver(brain: brain, documents: nil)
-        transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100))
+        transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100, endedAt: 100))
 
         _ = await driver.handleTrigger(.turnEnd)
 
         // A session has no late-install interface; later preparation changes only outcomes.
-        transcript.append(.init(speaker: .me, text: "so the map keeps the last index", at: 140))
+        transcript.append(.init(speaker: .me, text: "so the map keeps the last index", at: 140, endedAt: 140))
 
         _ = await driver.handleTrigger(.turnEnd)
 

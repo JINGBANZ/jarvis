@@ -37,17 +37,12 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
     private var drainTimer: Timer?
     /// Completions match chunks by `token`, not `Data`: `sendAudio` can evict the head while its
     /// send is in flight, and silent PCM makes byte-identical chunks common.
-    private var bufferedAudio: [(token: UInt64, data: Data, capturedAt: TimeInterval)] = []
+    private var bufferedAudio: [(token: UInt64, sequence: UInt64, data: Data, capturedAt: TimeInterval)] = []
     private var nextChunkToken: UInt64 = 0
     private var bufferedByteCount = 0
-    /// Keeps the turn open while Gemini may still be recognizing sent audio. Set by voice-activity
-    /// start (the earliest signal) and interim frames. Cleared by a finalized transcript, never by
-    /// `ACTIVITY_END`, whose order against the final is not guaranteed. Also cleared on socket
-    /// open, retry, terminate, and stop so a lost final cannot wedge it.
-    private var recognitionInFlight = false
-    /// Gemini times no utterance, so the pending start and a final's spoken time come from
-    /// content-free local activity.
     private var pendingSpeech = PendingSpeechWindow()
+    private var socketAudioClock = SentAudioClock()
+    private var recognitionInFlight = false
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var draining = false
     private var stopped = true
@@ -140,8 +135,9 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
 
     func connect() {
         lock.lock()
-        stopped = false; draining = false; isSending = false; recognitionInFlight = false
+        stopped = false; draining = false; isSending = false
         pendingSpeech.reset()
+        recognitionInFlight = false
         lock.unlock()
         coachingCoordinator.start()
         connection.connect()
@@ -161,9 +157,9 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         stopped = true
         draining = false
         isSending = false
-        recognitionInFlight = false
         // No further audio arrives to release the detector, so close the window here too.
         pendingSpeech.reset()
+        recognitionInFlight = false
         bufferedAudio.removeAll(keepingCapacity: false)
         bufferedByteCount = 0
         lock.unlock()
@@ -212,6 +208,8 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
 
     func connectionWillOpen(_ lease: WebSocketConnection.Lease) {
         lock.lock()
+        socketAudioClock = SentAudioClock()
+        coachingCoordinator.resetAudioWindow()
         guard !stopped else { lock.unlock(); return }
         isSending = false
         recognitionInFlight = false
@@ -242,6 +240,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         guard !stopped else { lock.unlock(); return }
         isSending = false
         recognitionInFlight = false
+        pendingSpeech.recordRecognitionFinalized()
         lock.unlock()
         updateWorkFlag()
     }
@@ -252,6 +251,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         guard !stopped else { lock.unlock(); return }
         isSending = false
         recognitionInFlight = false
+        pendingSpeech.recordRecognitionFinalized()
         lock.unlock()
         updateWorkFlag()
         onTerminalFailure?(failure)
@@ -283,7 +283,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         guard !stopped else { lock.unlock(); return }
         let token = nextChunkToken
         nextChunkToken += 1
-        bufferedAudio.append((token: token, data: pcm, capturedAt: capturedAt - sessionStart))
+        bufferedAudio.append((token: token, sequence: sequenceNumber, data: pcm, capturedAt: capturedAt - sessionStart))
         bufferedByteCount += pcm.count
         var evicted = 0
         while audioFormat.duration(forByteCount: bufferedByteCount) > maxBufferedAudioSeconds,
@@ -301,9 +301,11 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
     }
 
     func recordLocalSpeechEvent(_ event: LocalSpeechEvent, throughSequenceNumber: UInt64) {
+        let event = event.relative(to: sessionStart)
+        coachingCoordinator.recordLocalSpeech(event)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        pendingSpeech.recordLocalSpeech(event.relative(to: sessionStart))
+        pendingSpeech.recordLocalSpeech(event)
         lock.unlock()
         updateWorkFlag()
     }
@@ -315,6 +317,11 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         lock.lock()
         if !stopped, !draining, !isSending, let first = bufferedAudio.first,
            let lease = connection.readyLease {
+            let duration = audioFormat.duration(forByteCount: first.data.count)
+            socketAudioClock.recordSentAudio(sequenceNumber: first.sequence,
+                                             capturedAt: first.capturedAt, duration: duration)
+            coachingCoordinator.recordAudioWindow(startedAt: first.capturedAt,
+                                                   endedAt: first.capturedAt + duration)
             frame = first.data
             frameToken = first.token
             socketLease = lease
@@ -368,6 +375,19 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         }
     }
 
+    private func publishFinalLocked(_ text: String, startedAt: TimeInterval?, endedAt: TimeInterval?, generation: Int) {
+        continuityReporter.recordServerSpeech(
+            .transcriptionCompleted, audioTimeMilliseconds: nil, socketGeneration: generation)
+        let accepted = coachingCoordinator.recordFinalizedTranscript(
+            text, spokenAt: startedAt, spokenEndAt: endedAt, source: "gemini-live",
+            useLocalActivityEstimate: true)
+        benchmark?.observer.record(.init(kind: .finalized,
+            provider: TranscriptionProvider.gemini.rawValue, model: model.rawValue,
+            speaker: speaker.rawValue, generation: generation, text: text,
+            spokenAt: startedAt.map { sessionStart + $0 },
+            spokenEndAt: endedAt.map { sessionStart + $0 }, observedAt: clock.now(), transcriptUnavailable: !accepted))
+    }
+
     private func noteRecognitionInFlight() {
         let observedAt = clock.now() - sessionStart
         lock.lock()
@@ -378,9 +398,8 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
 
     private func updateWorkFlag() {
         lock.lock()
-        let state = pendingSpeech.state(
-            queuedSince: bufferedAudio.first?.capturedAt,
-            isRecognizing: recognitionInFlight)
+        let state = pendingSpeech.state(queuedSince: bufferedAudio.first?.capturedAt,
+                                        isRecognizing: recognitionInFlight)
         lock.unlock()
         coachingCoordinator.updateTranscriptionWork(state)
     }
@@ -443,31 +462,28 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         if GeminiLiveSession.hasFinalizedTranscription(message) {
             // Settle on any final, even one `TranscriptFiltering` rejects: the server is done.
             lock.lock()
+            guard !stopped, connection.isCurrent(lease) else { lock.unlock(); return }
+            let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker)
+            let offsets = GeminiLiveSession.finalTranscriptOffsets(from: message)
+            let interval = offsets.start.flatMap { start in
+                offsets.end.flatMap { end in
+                    socketAudioClock.sessionInterval(SpeechInterval(startedAt: start, endedAt: end))
+                }
+            }
+            let start = interval?.startedAt ?? offsets.start.flatMap { socketAudioClock.sessionTime(forOffset: $0) }
+            let end = interval?.endedAt ?? (start == nil ? offsets.end.flatMap {
+                socketAudioClock.sessionTime(forOffset: $0)
+            } : nil)
+            pendingSpeech.recordRecognitionFinalized()
             recognitionInFlight = false
-            let spokenAt = pendingSpeech.recordFinalized()
+            if let text {
+                publishFinalLocked(text, startedAt: start, endedAt: end, generation: lease.generation)
+            }
             let isDraining = draining
             lock.unlock()
             onInterimTranscript?(nil)
-            if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
-                continuityReporter.recordServerSpeech(
-                    .transcriptionCompleted, audioTimeMilliseconds: nil,
-                    socketGeneration: lease.generation)
-                let accepted = coachingCoordinator.recordFinalizedTranscript(
-                    text, spokenAt: spokenAt, source: "gemini-live")
-                benchmark?.observer.record(.init(
-                    kind: .finalized,
-                    provider: TranscriptionProvider.gemini.rawValue,
-                    model: model.rawValue,
-                    speaker: speaker.rawValue,
-                    generation: lease.generation,
-                    text: text,
-                    observedAt: clock.now(),
-                    transcriptUnavailable: !accepted))
-            }
             updateWorkFlag()
-            if isDraining {
-                rotateNow(lease, reason: "utterance finalized during drain")
-            }
+            if isDraining { rotateNow(lease, reason: "utterance finalized during drain") }
             return
         }
         if GeminiLiveSession.hasInterimTranscription(message) {

@@ -1,5 +1,6 @@
 #if JARVIS_LIVE_E2E
 import Foundation
+import JarvisCore
 
 public struct CoachingReplayCatalog: Codable, Sendable {
     public let version: String
@@ -28,6 +29,7 @@ public struct CoachingReplayCatalog: Codable, Sendable {
         public let kind: Kind
         public let at: Double
         public let spokenAt: Double?
+        public let spokenEndAt: Double?
         public let speaker: String?
         public let text: String?
         public let milestone: String?
@@ -59,6 +61,12 @@ public struct CoachingReplayCatalog: Codable, Sendable {
                           event.milestone == nil || event.milestone == "attemptStarted",
                           event.milestone == nil ? event.at <= decision.triggerAt : event.at >= decision.triggerAt,
                           event.speaker.map({ $0 == "me" || $0 == "them" }) ?? (event.kind == .screen) else { throw Failure.invalidCatalog }
+                    if event.kind == .transcript {
+                        guard let start = event.spokenAt, let end = event.spokenEndAt,
+                              SpeechInterval(startedAt: start, endedAt: end) != nil, end <= event.at else {
+                            throw Failure.invalidCatalog
+                        }
+                    }
                     if event.kind == .transcript || event.kind == .screen {
                         guard event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { throw Failure.invalidCatalog }
                     }

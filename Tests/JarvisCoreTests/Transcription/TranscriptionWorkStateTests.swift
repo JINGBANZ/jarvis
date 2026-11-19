@@ -7,6 +7,7 @@ import Testing
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "question", audioStartMilliseconds: 1_000, timelineOrigin: 0)
         ledger.recordSpeechStarted(itemID: "later", audioStartMilliseconds: 3_000, timelineOrigin: 0)
+        ledger.recordSpeechStopped(itemID: "question", audioEndMilliseconds: 2_000)
         _ = ledger.recordCompleted(itemID: "question", transcript: "What is the complexity?", speaker: .me)
 
         #expect(ledger.coachingWorkState.permitsCoaching(through: 1))
@@ -27,9 +28,11 @@ import Testing
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "earlier", audioStartMilliseconds: 1_000, timelineOrigin: 10)
         ledger.recordSpeechStarted(itemID: "reply", audioStartMilliseconds: 3_000, timelineOrigin: 10)
+        ledger.recordSpeechStopped(itemID: "reply", audioEndMilliseconds: 4_000)
         _ = ledger.recordCompleted(itemID: "reply", transcript: "Yes", speaker: .me)
         #expect(!ledger.coachingWorkState.permitsCoaching(through: 13))
 
+        ledger.recordSpeechStopped(itemID: "earlier", audioEndMilliseconds: 2_000)
         _ = ledger.recordCompleted(itemID: "earlier", transcript: "Is that linear?", speaker: .me)
         #expect(ledger.coachingWorkState.permitsCoaching(through: 13))
     }

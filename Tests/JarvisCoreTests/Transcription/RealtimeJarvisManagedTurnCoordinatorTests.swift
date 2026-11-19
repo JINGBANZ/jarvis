@@ -3,9 +3,35 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct RealtimeJarvisManagedTurnCoordinatorTests {
+    @Test(arguments: [1.5, .nan, .infinity])
+    func unavailableTimingStillCommitsItsOwnAudioBeforeTheNextTurn(commitAt: Double) throws {
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
+        coordinator.recordTurn(startedAt: 1, endedAt: 2,
+                               committedThroughAt: commitAt, throughSequenceNumber: 4)
+        coordinator.recordTurn(startedAt: 3, endedAt: 4,
+                               committedThroughAt: 4.5, throughSequenceNumber: 9)
+        #expect(coordinator.unresolvedTurnCount == 2)
+        #expect(!coordinator.allowsSendingAudio(sequenceNumber: 5))
+        coordinator.recordAudioSent(sequenceNumber: 4)
+        let firstReady = coordinator.takeReadyCommit()
+        let first = try #require(firstReady)
+        #expect(first.throughSequenceNumber == 4)
+        #expect(first.startedAt == nil)
+        #expect(first.endedAt == nil)
+        #expect(!coordinator.allowsSendingAudio(sequenceNumber: 5))
+        coordinator.recordCommitSendCompleted(turnID: first.id)
+        #expect(coordinator.allowsSendingAudio(sequenceNumber: 5))
+        coordinator.recordAudioSent(sequenceNumber: 9)
+        let secondReady = coordinator.takeReadyCommit()
+        let second = try #require(secondReady)
+        #expect(second.startedAt == 3)
+        #expect(second.endedAt == 4)
+        #expect(second.throughSequenceNumber == 9)
+    }
+
     @Test func commitWaitsUntilAudioThroughBoundaryWasSent() throws {
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
-        coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 4)
+        coordinator.recordTurn(startedAt: 1, endedAt: 1.5, committedThroughAt: 2, throughSequenceNumber: 4)
 
         coordinator.recordAudioSent(sequenceNumber: 3)
         #expect(coordinator.takeReadyCommit() == nil)
@@ -16,6 +42,8 @@ import Testing
         let readyTurn = coordinator.takeReadyCommit()
         let turn = try #require(readyTurn)
         #expect(turn.throughSequenceNumber == 4)
+        #expect(turn.endedAt == 1.5)
+        #expect(turn.committedThroughAt == 2)
         #expect(!coordinator.allowsSendingAudio(sequenceNumber: 5))
 
         coordinator.recordCommitSendCompleted(turnID: turn.id)
@@ -52,7 +80,7 @@ import Testing
         buffer.append(Data([4]), sequenceNumber: 4, capturedAt: 4, duration: 1)
         buffer.append(Data([5]), sequenceNumber: 5, capturedAt: 5, duration: 1)
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
-        coordinator.recordTurn(startedAt: 3, committedThroughAt: 5, throughSequenceNumber: 4)
+        coordinator.recordTurn(startedAt: 3, endedAt: 5, committedThroughAt: 5, throughSequenceNumber: 4)
 
         let boundaryClaim = try #require(buffer.claimNext())
         #expect(buffer.completeSend(boundaryClaim) != nil)
@@ -68,7 +96,7 @@ import Testing
 
     @Test func terminalItemIsNotReplayed() throws {
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
-        coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 4)
+        coordinator.recordTurn(startedAt: 1, endedAt: 2, committedThroughAt: 2, throughSequenceNumber: 4)
         coordinator.recordAudioSent(sequenceNumber: 4)
         let readyCommit = coordinator.takeReadyCommit()
         let commit = try #require(readyCommit)
@@ -82,7 +110,7 @@ import Testing
 
     @Test func terminalBeforeAcknowledgementIsNotReplayed() throws {
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
-        coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 8)
+        coordinator.recordTurn(startedAt: 1, endedAt: 2, committedThroughAt: 2, throughSequenceNumber: 8)
         coordinator.recordAudioSent(sequenceNumber: 8)
         let readyCommit = coordinator.takeReadyCommit()
         _ = try #require(readyCommit)
@@ -98,8 +126,8 @@ import Testing
 
     @Test func missingReplayAudioDropsBoundaryInsteadOfCommittingNewerAudio() throws {
         var coordinator = RealtimeJarvisManagedTurnCoordinator()
-        coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 4)
-        coordinator.recordTurn(startedAt: 3, committedThroughAt: 4, throughSequenceNumber: 9)
+        coordinator.recordTurn(startedAt: 1, endedAt: 2, committedThroughAt: 2, throughSequenceNumber: 4)
+        coordinator.recordTurn(startedAt: 3, endedAt: 4, committedThroughAt: 4, throughSequenceNumber: 9)
 
         let dropped = coordinator.discardPendingTurns(before: 7)
         #expect(dropped.map(\.throughSequenceNumber) == [4])

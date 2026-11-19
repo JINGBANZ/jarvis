@@ -15,14 +15,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "How would you find two numbers whose sum is the target?"
+              "text": "How would you find two numbers whose sum is the target?",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "I will scan once, checking target minus the current value in a map of earlier indices, then insert this value."
+              "text": "I will scan once, checking target minus the current value in a map of earlier indices, then insert this value.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -42,14 +44,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "What is the complexity?"
+              "text": "What is the complexity?",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "Each lookup is expected constant time, so total expected time and auxiliary space are linear."
+              "text": "Each lookup is expected constant time, so total expected time and auxiliary space are linear.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -69,14 +73,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "How will you validate your interval merge?"
+              "text": "How will you validate your interval merge?",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "I will test empty input, nested intervals, disjoint intervals and touching closed endpoints before coding further."
+              "text": "I will test empty input, nested intervals, disjoint intervals and touching closed endpoints before coding further.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -96,14 +102,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "Use inclusive low and high bounds to binary search a sorted array."
+              "text": "Use inclusive low and high bounds to binary search a sorted array.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "When the midpoint is smaller than the target, I set low to mid. That always shrinks the interval."
+              "text": "When the midpoint is smaller than the target, I set low to mid. That always shrinks the interval.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -123,14 +131,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "Find the minimum number of coins to make an amount, with unlimited coins."
+              "text": "Find the minimum number of coins to make an amount, with unlimited coins.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "I will sum dp[amount minus coin] over the coins because we want the minimum number of coins."
+              "text": "I will sum dp[amount minus coin] over the coins because we want the minimum number of coins.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -150,14 +160,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "Find the longest strictly increasing path in a grid."
+              "text": "Find the longest strictly increasing path in a grid.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "I understand DFS but I am stuck on how to avoid solving the same suffix path repeatedly from different starts."
+              "text": "I understand DFS but I am stuck on how to avoid solving the same suffix path repeatedly from different starts.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -177,14 +189,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "Tell me more about that design."
+              "text": "Tell me more about that design.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "I am considering the alternatives; we have not yet agreed on the consistency requirement."
+              "text": "I am considering the alternatives; we have not yet agreed on the consistency requirement.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -204,14 +218,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "I will take a minute to read my notes."
+              "text": "I will take a minute to read my notes.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "Sure, take your time."
+              "text": "Sure, take your time.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -231,14 +247,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "Check your loop bounds."
+              "text": "Check your loop bounds.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "I see it: using low equals mid could stall. I am changing it to mid plus one so it makes progress."
+              "text": "I see it: using low equals mid could stall. I am changing it to mid plus one so it makes progress.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -258,14 +276,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "Why does the merge work?"
+              "text": "Why does the merge work?",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "After sorting by start, the output covers the processed prefix and its last interval is the only one the next interval can overlap."
+              "text": "After sorting by start, the output covers the processed prefix and its last interval is the only one the next interval can overlap.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -285,14 +305,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "The two input values are signed 32-bit integers and the sum must be exact."
+              "text": "The two input values are signed 32-bit integers and the sum must be exact.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "I will add them in a signed 32-bit variable; adding two 32-bit integers cannot overflow that type."
+              "text": "I will add them in a signed 32-bit variable; adding two 32-bit integers cannot overflow that type.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -312,14 +334,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "How would you choose between polling and push updates?"
+              "text": "How would you choose between polling and push updates?",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "I would first clarify freshness needs, expected update rate and connection limits before choosing."
+              "text": "I would first clarify freshness needs, expected update rate and connection limits before choosing.",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -339,14 +363,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "如何找到和为目标值的两个数？"
+              "text": "如何找到和为目标值的两个数？",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "我扫一遍，先在之前下标的哈希表里找目标减当前值，再把当前值放进去。"
+              "text": "我扫一遍，先在之前下标的哈希表里找目标减当前值，再把当前值放进去。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -366,14 +392,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "复杂度是多少？"
+              "text": "复杂度是多少？",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "每次查找期望常数时间，所以总期望时间和额外空间都是线性。"
+              "text": "每次查找期望常数时间，所以总期望时间和额外空间都是线性。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -393,14 +421,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "如何验证合并区间？"
+              "text": "如何验证合并区间？",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "我先测试空输入、包含区间、不相交区间和闭区间端点相接，再继续写。"
+              "text": "我先测试空输入、包含区间、不相交区间和闭区间端点相接，再继续写。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -420,14 +450,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "用左右闭区间二分查找有序数组。"
+              "text": "用左右闭区间二分查找有序数组。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "中点比目标小时，我把左边界设为中点，这样每次区间都会缩小。"
+              "text": "中点比目标小时，我把左边界设为中点，这样每次区间都会缩小。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -447,14 +479,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "硬币无限，求组成金额的最少硬币数。"
+              "text": "硬币无限，求组成金额的最少硬币数。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "我把每种硬币对应的 dp[金额减硬币] 加起来，就能求最少硬币。"
+              "text": "我把每种硬币对应的 dp[金额减硬币] 加起来，就能求最少硬币。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -474,14 +508,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "求矩阵中最长严格递增路径。"
+              "text": "求矩阵中最长严格递增路径。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "我理解深搜，但不同起点反复计算同一段后缀路径，这里不知道怎么避免。"
+              "text": "我理解深搜，但不同起点反复计算同一段后缀路径，这里不知道怎么避免。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -501,14 +537,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "再介绍一下这个设计。"
+              "text": "再介绍一下这个设计。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "我在考虑几个方案，我们还没有确定一致性要求。"
+              "text": "我在考虑几个方案，我们还没有确定一致性要求。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -528,14 +566,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "我花一分钟看一下笔记。"
+              "text": "我花一分钟看一下笔记。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "好的，您慢慢看。"
+              "text": "好的，您慢慢看。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -555,14 +595,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "检查循环边界。"
+              "text": "检查循环边界。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "我看到了，左边界等于中点可能卡住。我改成中点加一，保证推进。"
+              "text": "我看到了，左边界等于中点可能卡住。我改成中点加一，保证推进。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -582,14 +624,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "为什么合并算法成立？"
+              "text": "为什么合并算法成立？",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "按起点排序后，结果覆盖已处理前缀，后面的区间只可能和结果最后一个区间重叠。"
+              "text": "按起点排序后，结果覆盖已处理前缀，后面的区间只可能和结果最后一个区间重叠。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -609,14 +653,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "输入是两个有符号32位整数，求精确的和。"
+              "text": "输入是两个有符号32位整数，求精确的和。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "我用有符号32位变量相加，两个32位整数相加不会溢出这种类型。"
+              "text": "我用有符号32位变量相加，两个32位整数相加不会溢出这种类型。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -636,14 +682,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "怎么在轮询和推送之间选择？"
+              "text": "怎么在轮询和推送之间选择？",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 5,
               "spokenAt": 5,
               "speaker": "me",
-              "text": "我会先确认新鲜度、更新频率和连接限制，再做选择。"
+              "text": "我会先确认新鲜度、更新频率和连接限制，再做选择。",
+              "spokenEndAt": 5
             }
           ],
           "triggerAt": 8
@@ -663,14 +711,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "Given distinct positive integers, find the largest subset such that every pair is divisible in one direction."
+              "text": "Given distinct positive integers, find the largest subset such that every pair is divisible in one direction.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 3,
               "spokenAt": 3,
               "speaker": "me",
-              "text": "After sorting I want dynamic programming, but I am stuck defining dp[i] and transitioning from earlier states."
+              "text": "After sorting I want dynamic programming, but I am stuck defining dp[i] and transitioning from earlier states.",
+              "spokenEndAt": 3
             }
           ],
           "triggerAt": 6
@@ -685,7 +735,8 @@
               "at": 10,
               "spokenAt": 4,
               "speaker": "me",
-              "text": "I am still thinking about what dp[i] should represent."
+              "text": "I am still thinking about what dp[i] should represent.",
+              "spokenEndAt": 4
             }
           ],
           "triggerAt": 11
@@ -700,10 +751,27 @@
               "at": 16,
               "spokenAt": 16,
               "speaker": "me",
-              "text": "I now update the length using predecessors that divide the current number. To reconstruct the answer, I will collect every element whose dp equals the maximum length into one subset."
+              "text": "I now update the length using predecessors that divide the current number. To reconstruct the answer, I will collect every element whose dp equals the maximum length into one subset.",
+              "spokenEndAt": 16
             }
           ],
           "triggerAt": 18
+        },
+        {
+          "id": "productive-reconstruction",
+          "expectation": "silenceRequired",
+          "gradingGoal": "The candidate is correctly following one predecessor chain. Let implementation continue without a recap, praise, extra analogy, or unsolicited next step.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 23,
+              "spokenAt": 22,
+              "spokenEndAt": 23,
+              "speaker": "me",
+              "text": "I will follow one predecessor chain from a maximum-length endpoint, collect the numbers and reverse them. I am implementing that now."
+            }
+          ],
+          "triggerAt": 24
         }
       ]
     },
@@ -720,14 +788,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "Binary search with inclusive low and high bounds."
+              "text": "Binary search with inclusive low and high bounds.",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 3,
               "spokenAt": 3,
               "speaker": "me",
-              "text": "When mid is smaller than target, low becomes mid; this always makes progress."
+              "text": "When mid is smaller than target, low becomes mid; this always makes progress.",
+              "spokenEndAt": 3
             }
           ],
           "triggerAt": 6
@@ -742,7 +812,8 @@
               "at": 10,
               "spokenAt": 9,
               "speaker": "me",
-              "text": "I am checking the boundaries as I described."
+              "text": "I am checking the boundaries as I described.",
+              "spokenEndAt": 9
             }
           ],
           "triggerAt": 11
@@ -757,7 +828,8 @@
               "at": 16,
               "spokenAt": 16,
               "speaker": "me",
-              "text": "I found the target in the sorted array. Next I can apply the same binary search directly to an unsorted array, because a midpoint comparison still eliminates half."
+              "text": "I found the target in the sorted array. Next I can apply the same binary search directly to an unsorted array, because a midpoint comparison still eliminates half.",
+              "spokenEndAt": 16
             }
           ],
           "triggerAt": 18
@@ -777,14 +849,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "给定不同的正整数，求最大的子集，任意两个数中一个能整除另一个。"
+              "text": "给定不同的正整数，求最大的子集，任意两个数中一个能整除另一个。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 3,
               "spokenAt": 3,
               "speaker": "me",
-              "text": "排序以后我想做动态规划，但不知道 dp[i] 表示什么，也不知道怎么从前面的状态转移。"
+              "text": "排序以后我想做动态规划，但不知道 dp[i] 表示什么，也不知道怎么从前面的状态转移。",
+              "spokenEndAt": 3
             }
           ],
           "triggerAt": 6
@@ -799,7 +873,8 @@
               "at": 10,
               "spokenAt": 4,
               "speaker": "me",
-              "text": "我还在想 dp[i] 应该表示什么。"
+              "text": "我还在想 dp[i] 应该表示什么。",
+              "spokenEndAt": 4
             }
           ],
           "triggerAt": 11
@@ -814,10 +889,27 @@
               "at": 16,
               "spokenAt": 16,
               "speaker": "me",
-              "text": "我现在知道用能整除当前数的前驱更新长度。恢复答案时，我打算选择所有 dp 等于最大长度的元素，把它们作为同一个子集。"
+              "text": "我现在知道用能整除当前数的前驱更新长度。恢复答案时，我打算选择所有 dp 等于最大长度的元素，把它们作为同一个子集。",
+              "spokenEndAt": 16
             }
           ],
           "triggerAt": 18
+        },
+        {
+          "id": "productive-reconstruction",
+          "expectation": "silenceRequired",
+          "gradingGoal": "The candidate is correctly following one predecessor chain. Let implementation continue without a recap, praise, extra analogy, or unsolicited next step.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 23,
+              "spokenAt": 22,
+              "spokenEndAt": 23,
+              "speaker": "me",
+              "text": "我会从最大长度的下标沿 parent 走同一条链，收集数字再反转，现在我来实现。"
+            }
+          ],
+          "triggerAt": 24
         }
       ]
     },
@@ -834,14 +926,16 @@
               "at": 0,
               "spokenAt": 0,
               "speaker": "them",
-              "text": "用左右闭区间二分查找。"
+              "text": "用左右闭区间二分查找。",
+              "spokenEndAt": 0
             },
             {
               "kind": "transcript",
               "at": 3,
               "spokenAt": 3,
               "speaker": "me",
-              "text": "中点小于目标时左边界设为中点，这样一定推进。"
+              "text": "中点小于目标时左边界设为中点，这样一定推进。",
+              "spokenEndAt": 3
             },
             {
               "kind": "speechPending",
@@ -856,7 +950,8 @@
               "spokenAt": 6.4,
               "speaker": "me",
               "text": "我先检查两个元素的情况。",
-              "milestone": "attemptStarted"
+              "milestone": "attemptStarted",
+              "spokenEndAt": 6.4
             },
             {
               "kind": "speechSettled",
@@ -890,7 +985,8 @@
               "at": 10,
               "spokenAt": 9,
               "speaker": "me",
-              "text": "我正在按刚才说的检查边界。"
+              "text": "我正在按刚才说的检查边界。",
+              "spokenEndAt": 9
             }
           ],
           "triggerAt": 11
@@ -905,10 +1001,191 @@
               "at": 16,
               "spokenAt": 16,
               "speaker": "me",
-              "text": "我先用排序数组二分找到了目标。接下来对未排序数组也能直接用相同的二分查找，因为中点比较仍然能排除一半。"
+              "text": "我先用排序数组二分找到了目标。接下来对未排序数组也能直接用相同的二分查找，因为中点比较仍然能排除一半。",
+              "spokenEndAt": 16
             }
           ],
           "triggerAt": 18
+        }
+      ]
+    },
+    {
+      "id": "sequence-delayed-uncovered-en",
+      "decisions": [
+        {
+          "id": "sort-question",
+          "expectation": "helpRequired",
+          "gradingGoal": "Answer why sorting interval starts helps. The candidate explicitly asks only for that explanation; avoid a solution dump.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 2,
+              "spokenAt": 0,
+              "spokenEndAt": 2,
+              "speaker": "them",
+              "text": "Merge a collection of closed intervals."
+            },
+            {
+              "kind": "transcript",
+              "at": 4,
+              "spokenAt": 3,
+              "spokenEndAt": 4,
+              "speaker": "me",
+              "text": "Jarvis, why sort the starts first? Explain only the purpose of sorting."
+            }
+          ],
+          "triggerAt": 6
+        },
+        {
+          "id": "late-unaddressed-error",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the still-unaddressed proposal to merge disjoint intervals into their spanning interval. Late speech must not be ignored merely because it predates the hint. Explain that this would introduce uncovered points.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 10,
+              "spokenAt": 4,
+              "spokenEndAt": 5,
+              "speaker": "me",
+              "text": "I plan to merge disjoint intervals into one spanning interval too, since that leaves fewer intervals."
+            }
+          ],
+          "triggerAt": 11
+        }
+      ]
+    },
+    {
+      "id": "sequence-immediate-error-en",
+      "decisions": [
+        {
+          "id": "state-question",
+          "expectation": "helpRequired",
+          "gradingGoal": "Define dp[i] for largest divisible subset after sorting; focus on that state definition.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 2,
+              "spokenAt": 0,
+              "spokenEndAt": 2,
+              "speaker": "them",
+              "text": "Find the largest divisible subset."
+            },
+            {
+              "kind": "transcript",
+              "at": 4,
+              "spokenAt": 3,
+              "spokenEndAt": 4,
+              "speaker": "me",
+              "text": "Jarvis, explain only what dp[i] means after sorting."
+            }
+          ],
+          "triggerAt": 6
+        },
+        {
+          "id": "new-error-without-cooldown",
+          "expectation": "helpRequired",
+          "gradingGoal": "A genuine new reconstruction error needs help immediately: maximum-length endpoints need not form a valid chain together. Explain predecessor links or following one chosen chain without imposing a wait.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 7.5,
+              "spokenAt": 7,
+              "spokenEndAt": 7.5,
+              "speaker": "me",
+              "text": "To reconstruct the answer I will put every element whose dp equals the maximum into one subset."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "sequence-delayed-uncovered-zh",
+      "decisions": [
+        {
+          "id": "sort-question",
+          "expectation": "helpRequired",
+          "gradingGoal": "Answer why sorting interval starts helps. The candidate explicitly asks only for that explanation; avoid a solution dump.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 2,
+              "spokenAt": 0,
+              "spokenEndAt": 2,
+              "speaker": "them",
+              "text": "合并一组闭区间。"
+            },
+            {
+              "kind": "transcript",
+              "at": 4,
+              "spokenAt": 3,
+              "spokenEndAt": 4,
+              "speaker": "me",
+              "text": "Jarvis，为什么先按起点排序？只解释排序的作用。"
+            }
+          ],
+          "triggerAt": 6
+        },
+        {
+          "id": "late-unaddressed-error",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the still-unaddressed proposal to merge disjoint intervals into their spanning interval. Late speech must not be ignored merely because it predates the hint. Explain that this would introduce uncovered points.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 10,
+              "spokenAt": 4,
+              "spokenEndAt": 5,
+              "speaker": "me",
+              "text": "我打算把不相交的区间也合并成横跨两者的一个区间，因为这样区间数量更少。"
+            }
+          ],
+          "triggerAt": 11
+        }
+      ]
+    },
+    {
+      "id": "sequence-immediate-error-zh",
+      "decisions": [
+        {
+          "id": "state-question",
+          "expectation": "helpRequired",
+          "gradingGoal": "Define dp[i] for largest divisible subset after sorting; focus on that state definition.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 2,
+              "spokenAt": 0,
+              "spokenEndAt": 2,
+              "speaker": "them",
+              "text": "求最大的整除子集。"
+            },
+            {
+              "kind": "transcript",
+              "at": 4,
+              "spokenAt": 3,
+              "spokenEndAt": 4,
+              "speaker": "me",
+              "text": "Jarvis，只解释排序后 dp[i] 表示什么。"
+            }
+          ],
+          "triggerAt": 6
+        },
+        {
+          "id": "new-error-without-cooldown",
+          "expectation": "helpRequired",
+          "gradingGoal": "A genuine new reconstruction error needs help immediately: maximum-length endpoints need not form a valid chain together. Explain predecessor links or following one chosen chain without imposing a wait.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 7.5,
+              "spokenAt": 7,
+              "spokenEndAt": 7.5,
+              "speaker": "me",
+              "text": "恢复答案时我会把所有 dp 达到最大值的元素放进同一个子集。"
+            }
+          ],
+          "triggerAt": 8
         }
       ]
     }

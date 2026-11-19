@@ -32,8 +32,8 @@ import Testing
 
     private func append(_ text: String, to runner: CoachAttemptRunner, transcript: RollingTranscript,
                         using summarizer: any BrainClient) async -> [ChatMessage] {
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
-        transcript.append(.init(speaker: .me, text: text, at: Double(transcript.count)))
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet-\(transcript.count)")])])
+        transcript.append(.init(speaker: .me, text: text, at: Double(transcript.count), endedAt: Double(transcript.count)))
         let work = CoachAttemptRunner.PendingCoachingWork(reason: .turnEnd)
         let target = BrainTarget(provider: .openAI,
                                  modelID: BrainModelCatalog.defaultModel(for: .openAI).id)

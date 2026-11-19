@@ -3,9 +3,9 @@ import Foundation
 public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
     public struct Turn: Equatable, Sendable {
         public let id: UInt64
-        public let startedAt: TimeInterval
+        public let startedAt: TimeInterval?
         public let endedAt: TimeInterval?
-        public let committedThroughAt: TimeInterval
+        public let committedThroughAt: TimeInterval?
         public let throughSequenceNumber: UInt64
         /// False once bound to a server `item_id`, so a replayed turn can't consume the
         /// capture-side pending marker twice.
@@ -40,13 +40,15 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
         committedThroughAt: TimeInterval,
         throughSequenceNumber: UInt64
     ) {
-        guard startedAt.isFinite, committedThroughAt.isFinite,
-              committedThroughAt >= startedAt else { return }
+        let interval = endedAt.flatMap { end in
+            committedThroughAt.isFinite && committedThroughAt >= end
+                ? SpeechInterval(startedAt: startedAt, endedAt: end) : nil
+        }
         pendingTurns.append(Turn(
             id: nextTurnID,
-            startedAt: startedAt,
-            endedAt: endedAt,
-            committedThroughAt: committedThroughAt,
+            startedAt: interval?.startedAt,
+            endedAt: interval?.endedAt,
+            committedThroughAt: committedThroughAt.isFinite && committedThroughAt >= 0 ? committedThroughAt : nil,
             throughSequenceNumber: throughSequenceNumber,
             needsInitialItemBinding: true))
         nextTurnID &+= 1

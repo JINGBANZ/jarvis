@@ -80,7 +80,7 @@ import Testing
             kind: .providerCall,
             requestContext: nil,
             date: occurred)
-        let transcript = [TranscriptLine(speaker: .them, text: "Explain the tradeoff", at: 1)]
+        let transcript = [TranscriptLine(speaker: .them, text: "Explain the tradeoff", at: 1, endedAt: 1)]
         let startedEvent = CoachingAttemptAuditEvent.started(.init(
             attemptID: 3,
             wake: .trigger,

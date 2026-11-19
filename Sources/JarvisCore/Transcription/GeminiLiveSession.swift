@@ -71,6 +71,17 @@ public enum GeminiLiveSession {
         return TranscriptFiltering.meaningfulTranscript(text, speaker: speaker)
     }
 
+    public static func finalTranscriptOffsets(from event: [String: Any]) -> (start: TimeInterval?, end: TimeInterval?) {
+        guard let content = event["serverContent"] as? [String: Any],
+              let transcription = content["inputTranscription"] as? [String: Any] else { return (nil, nil) }
+        func offset(_ key: String) -> TimeInterval? {
+            guard let raw = transcription[key] as? String, raw.hasSuffix("s"),
+                  let value = TimeInterval(raw.dropLast()), value.isFinite, value >= 0 else { return nil }
+            return value
+        }
+        return (offset("startOffset"), offset("endOffset"))
+    }
+
     /// Use this, not a non-nil `finalTranscript`, to learn that Gemini finished an utterance:
     /// `finalTranscript` is also nil when the hallucination filter rejects the text.
     public static func hasFinalizedTranscription(_ event: [String: Any]) -> Bool {

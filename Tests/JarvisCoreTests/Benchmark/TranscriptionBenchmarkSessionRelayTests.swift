@@ -84,7 +84,7 @@ struct TranscriptionBenchmarkSessionRelayTests {
         let pcm = Data([1, 2, 3, 4])
         let speechEvents: [LocalSpeechEvent] = [
             .started(at: 1),
-            .ended(startedAt: 1, commitAt: 1.5),
+            .ended(startedAt: 1, endedAt: 1.5, commitAt: 1.5),
         ]
 
         relay.install(first) { firstCapture.record(sequence: $0, samples: $1) }

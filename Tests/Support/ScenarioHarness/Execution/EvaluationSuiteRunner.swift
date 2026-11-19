@@ -6,7 +6,18 @@ import JarvisBrainProviders
 import JarvisProcess
 
 public struct EvaluationSuiteRunner {
-    public enum Failure: Error { case invalidConfiguration, missingValue(String) }
+    public enum Failure: LocalizedError {
+        case invalidConfiguration, missingValue(String), sameCoachAndJudgeModel
+
+        public var errorDescription: String? {
+            switch self {
+            case .invalidConfiguration: "Invalid evaluation suite configuration"
+            case .missingValue(let message): message
+            case .sameCoachAndJudgeModel:
+                "Coach and judge must use different model IDs. Set JARVIS_EVALUATION_MODEL or JARVIS_EVALUATION_JUDGE_MODEL."
+            }
+        }
+    }
     let environment: [String: String]
     let repository: URL
     let scenariosDirectory: URL
@@ -75,9 +86,10 @@ public struct EvaluationSuiteRunner {
         let catalogURL = scenariosDirectory.appendingPathComponent(try require(selected.catalog))
         let catalogData = try Data(contentsOf: catalogURL)
         let catalog = try CoachingReplayCatalog.load(from: catalogURL)
-        let target = BrainTarget(provider: provider, modelID: environment["JARVIS_EVALUATION_MODEL"] ?? BrainModelCatalog.defaultModel(for: provider).id)
-        let judgeProvider = try require(BrainProvider(rawValue: environment["JARVIS_EVALUATION_JUDGE_PROVIDER"] ?? provider.rawValue), "Invalid judge provider")
-        let judgeTarget = BrainTarget(provider: judgeProvider, modelID: environment["JARVIS_EVALUATION_JUDGE_MODEL"] ?? BrainModelCatalog.defaultModel(for: judgeProvider).id)
+        let target = LiveE2EScenario.target(for: provider, modelID: environment["JARVIS_EVALUATION_MODEL"])
+        let judgeProvider = try require(BrainProvider(rawValue: environment["JARVIS_EVALUATION_JUDGE_PROVIDER"] ?? TestProviderConfiguration.shared.defaultJudgeProvider.rawValue), "Invalid judge provider")
+        let judgeTarget = Self.judgeTarget(for: judgeProvider, modelID: environment["JARVIS_EVALUATION_JUDGE_MODEL"])
+        guard judgeTarget.modelID != target.modelID else { throw Failure.sameCoachAndJudgeModel }
         let effort = try require(ReasoningEffort(rawValue: environment["JARVIS_EVALUATION_EFFORT"] ?? Defaults.Brain.effort.rawValue), "Invalid coach reasoning effort")
         let judgeEffort = try require(ReasoningEffort(rawValue: environment["JARVIS_EVALUATION_JUDGE_EFFORT"] ?? ReasoningEffort.low.rawValue), "Invalid judge reasoning effort")
         let needsProxy = provider.servedByLocalProxy || judgeProvider.servedByLocalProxy
@@ -101,6 +113,7 @@ public struct EvaluationSuiteRunner {
                 "coachEffort": effort.rawValue, "judgeProvider": judgeProvider.rawValue,
                 "judgeModel": judgeTarget.modelID, "judgeEffort": judgeEffort.rawValue,
                 "rubricVersion": catalog.rubricVersion, "catalogVersion": catalog.version,
+                "judgeInstructionVersion": InterventionVerdict.judgeInstructionVersion,
                 "catalogSHA256": SHA256.hash(data: catalogData).map { String(format: "%02x", $0) }.joined(),
                 "sourceRevision": environment["JARVIS_EVALUATION_SOURCE_REVISION"] ?? "unknown",
                 "config": "Config.default", "saveConversations": "false", "acceptance": selected.acceptance,
@@ -138,7 +151,12 @@ public struct EvaluationSuiteRunner {
                         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                         try encoder.encode(calibration).write(to: directory.appendingPathComponent("judge-calibration.json"))
                     }
-                    var report = try await executor.run(catalog, metadata: metadata, output: directory)
+                    var report: EvaluationSuiteReport
+                    if runErrors.isEmpty {
+                        report = try await executor.run(catalog, metadata: metadata, output: directory)
+                    } else {
+                        report = EvaluationSuiteReport(suite: suite, results: [], metadata: metadata)
+                    }
                     let coachHealth = await coachAudit.close()
                     let judgeHealth = await judgeAudit.close()
                     if coachHealth != .complete { runErrors.append("Coach wire audit incomplete") }
@@ -156,6 +174,11 @@ public struct EvaluationSuiteRunner {
         await proxy.stop()
         return reports
     }
+    static func judgeTarget(for provider: BrainProvider, modelID: String? = nil) -> BrainTarget {
+        LiveE2EScenario.target(for: provider,
+            modelID: modelID ?? TestProviderConfiguration.shared.modelID(for: provider, judge: true))
+    }
+
     private func sourceFingerprint() throws -> String {
         let base = repository
         var hash = SHA256()

@@ -123,9 +123,9 @@ enum CoachingParityHarness {
             activity: observers.activity)
 
         var outcomes: [TurnOutcome] = []
-        transcript.append(.init(speaker: .me, text: "walk the route forward", at: 1))
+        transcript.append(.init(speaker: .me, text: "walk the route forward", at: 1, endedAt: 1))
         outcomes.append(await driver.handleTrigger(.turnEnd))
-        transcript.append(.init(speaker: .me, text: "now exhaust the final target", at: 2))
+        transcript.append(.init(speaker: .me, text: "now exhaust the final target", at: 2, endedAt: 2))
         outcomes.append(await driver.handleTrigger(.turnEnd))
 
         return Snapshot(

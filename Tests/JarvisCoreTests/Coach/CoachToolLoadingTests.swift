@@ -101,7 +101,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         ])
         let (driver, transcript) = makeDriver(
             brain: brain, capabilities: prepConfigured, documents: search, activity: activity)
-        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -126,7 +126,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         let (driver, transcript) = makeDriver(
             brain: brain, capabilities: prepConfigured,
             documents: FakeDocumentSession(), activity: activity)
-        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -142,7 +142,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         let (driver, transcript) = makeDriver(
             brain: brain, capabilities: prepConfigured,
             documents: FakeDocumentSession(), activity: activity)
-        transcript.append(.init(speaker: .me, text: "what should I say here", at: 100))
+        transcript.append(.init(speaker: .me, text: "what should I say here", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -205,7 +205,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         })
     }
 
-    @Test func aSilentQuietCheckLeavesNoTraceInLaterAttempts() async throws {
+    @Test func aSilentQuietCheckRetainsItsLinkedDecisionInLaterAttempts() async throws {
         let runner = makeRunner(capabilities: prepConfigured)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "q1")],
@@ -225,7 +225,9 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             m.role == .user && m.text?.contains("(no speech for") == true
         }
         #expect(brain.calls[0].contains(where: quietProbe))
-        #expect(!brain.calls[1].contains(where: quietProbe))
+        #expect(brain.calls[1].contains(where: quietProbe))
+        #expect(brain.calls[1].contains { $0.toolCalls?.contains { $0.id == "q1" && $0.name == "stay_silent" && $0.argumentsJSON == "{}" } == true })
+        #expect(brain.calls[1].contains { $0.toolCallId == "q1" && $0.text == "Silent at 01:40." })
     }
 
     @Test func aCallToAToolTheSessionDoesNotOfferIsRefused() async throws {
@@ -242,7 +244,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             capabilities: .compose(disabledTools: ["search_references"],
                                    referencesAdmitted: true),
             documents: search, activity: activity)
-        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -261,7 +263,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             speak,
         ])
         let (driver, transcript) = makeDriver(brain: brain, capabilities: prepConfigured, documents: search)
-        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100))
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -297,7 +299,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             speak,
         ])
         let (driver, transcript) = makeDriver(brain: brain, capabilities: prepConfigured)
-        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100))
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -313,7 +315,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             speak,
         ])
         let (driver, transcript) = makeDriver(brain: brain, capabilities: prepConfigured)
-        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100))
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -333,7 +335,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         ])
         let (driver, transcript) = makeDriver(
             brain: brain, capabilities: prepConfigured, documents: nil, activity: activity)
-        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100, endedAt: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 

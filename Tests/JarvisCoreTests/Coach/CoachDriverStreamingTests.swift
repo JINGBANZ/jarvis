@@ -138,7 +138,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
     private func runAttempt(_ reason: TriggerReason, brain: BrainClient, overlay: OverlayRendering)
         async -> CoachAttemptRunner.AttemptResult {
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "How would you merge intervals?", at: 100))
+        transcript.append(.init(speaker: .them, text: "How would you merge intervals?", at: 100, endedAt: 100))
         let runner = CoachAttemptRunner(
             config: .default, transcript: transcript, screen: FakeScreen(),
             overlay: overlay, clock: ManualClock(now: 100), sessionStart: 0,
@@ -214,7 +214,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         })
 
         // The committed turn replays the rebuilt call with the detail as read.
-        transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101))
+        transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101, endedAt: 101))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         let replayed = try #require(brain.calls[1].flatMap { $0.toolCalls ?? [] }.first { $0.name == speakToolName })
         let object = try #require(JSONSerialization.jsonObject(with: Data(replayed.argumentsJSON.utf8)) as? [String: Any])
@@ -336,7 +336,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
             if case .tip(let hint, let detail) = $0 { hint == "Sort by start. Then merge overlaps." && detail == "Sketch it." } else { false }
         })
 
-        transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101))
+        transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101, endedAt: 101))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         let replayed = try #require(brain.calls[1].flatMap { $0.toolCalls ?? [] }.first { $0.name == speakToolName })
         let object = try #require(JSONSerialization.jsonObject(with: Data(replayed.argumentsJSON.utf8)) as? [String: Any])
@@ -363,7 +363,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
             if case .tip(_, let shown) = $0 { shown == detail } else { false }
         })
 
-        transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101))
+        transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101, endedAt: 101))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         let replayed = try #require(brain.calls[1].flatMap { $0.toolCalls ?? [] }.first { $0.name == speakToolName })
         let object = try #require(JSONSerialization.jsonObject(with: Data(replayed.argumentsJSON.utf8)) as? [String: Any])
