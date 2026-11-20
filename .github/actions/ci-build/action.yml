@@ -1,0 +1,85 @@
+name: Build CI products
+description: Build and cache Swift products and restore the pinned subscription helper.
+inputs:
+  runner-label:
+    description: Hosted macOS runner label.
+    required: true
+  configuration:
+    description: Debug with tests, or universal release.
+    default: debug
+  helper:
+    description: Optional subscription helper variant (native or universal).
+    default: ''
+  warm-cache:
+    description: Prepare the caches without running PR checks.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Show toolchain
+      id: toolchain
+      shell: bash
+      run: |
+        sw_vers
+        xcode-select -p
+        swift --version
+        /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$(xcode-select -p)/../Info.plist"
+        fingerprint="$( { xcodebuild -version; swift --version; } | shasum -a 256 | cut -d' ' -f1)"
+        echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Swift build
+      id: swift
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          .build/artifacts
+          .build/checkouts
+          .build/repositories
+          .build/workspace-state.json
+          .build/*-apple-macosx
+          .build/apple
+          .build/build.db
+          .build/debug.yaml
+          .build/release.yaml
+          .build/ci-cache-inputs.json
+        key: swift-v2-${{ inputs.runner-label }}-${{ inputs.configuration }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', '.github/actions/ci-build/action.yml', 'scripts/ci-build-cache.py') }}-${{ github.sha }}
+        restore-keys: |
+          swift-v2-${{ inputs.runner-label }}-${{ inputs.configuration }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', '.github/actions/ci-build/action.yml', 'scripts/ci-build-cache.py') }}-
+
+    - name: Compile targets
+      if: inputs.warm-cache != 'true' || steps.swift.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        BUILD_CONFIGURATION: ${{ inputs.configuration }}
+      run: |
+        python3 scripts/ci-build-cache.py restore
+        case "$BUILD_CONFIGURATION" in
+          debug) swift build --build-tests ;;
+          universal) swift build -c release --arch arm64 --arch x86_64 ;;
+          *) echo "Unknown CI build configuration: $BUILD_CONFIGURATION" >&2; exit 2 ;;
+        esac
+        python3 scripts/ci-build-cache.py snapshot
+
+    - name: Cache subscription helper
+      if: inputs.helper != ''
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          .build/cliproxyapi/*/*/*/cliproxyapi
+          .build/cliproxyapi/*/*/*/binary.sha256
+          .build/cliproxyapi/*/*/*/LICENSE
+        key: helper-${{ inputs.helper }}-v1-${{ inputs.helper == 'native' && format('{0}-', runner.arch) || '' }}${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
+
+    - name: Build subscription helper for the cache
+      if: inputs.warm-cache == 'true' && inputs.helper != ''
+      shell: bash
+      env:
+        HELPER_VARIANT: ${{ inputs.helper }}
+      run: |
+        source scripts/lib/cliproxyapi.sh
+        if [[ "$HELPER_VARIANT" == universal ]]; then
+          build_cliproxyapi arm64
+          build_cliproxyapi x86_64
+        else
+          build_cliproxyapi
+        fi

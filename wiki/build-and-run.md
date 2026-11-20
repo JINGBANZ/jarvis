@@ -31,19 +31,20 @@ and failure artifacts. Pixel assertions also need a consistent color space and s
 offscreen images inherit the display's color profile. The normalization and diagnostic evidence live
 in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHintRenderingTests.swift).
 
-CI caches build work while running the tests and bundle guards on every pull request.
-Swift caches are separated by runner, toolchain, dependency pins, and build scripts; subsequent
-commits can reuse compatible intermediates. [`ci-build-cache.py`](../scripts/ci-build-cache.py)
-restores a tracked input's timestamp only when its contents match the successful cached build,
-because fresh checkout timestamps otherwise invalidate unchanged Swift sources. Changed inputs
-retain their new timestamps and go through the normal compiler dependency checks. Test results,
-session data, and credentials are outside the cache paths.
+Hosted source CI compiles Swift source and test targets together. The supervised test runner uses
+the resulting debug build through normal SwiftPM freshness checks. Bundle assembly uses a separate
+cache for the unsigned universal release build. Each cache is keyed by runner, configuration,
+toolchain, dependency pins, build recipe, and revision. [`ci-build-cache.py`](../scripts/ci-build-cache.py)
+restores tracked input timestamps only when their contents match the cached build. Changed inputs
+keep their checkout timestamps and go through the normal compiler dependency checks.
 
-SwiftPM downloads and verifies the hosted AEC artifact on a cache miss. The subscription helper
-retains its recipe/architecture keys and digest verification, building from source on a cache miss.
-GitHub isolates Swift caches created by one PR from other PRs. Initial runs, evicted caches, and
-toolchain or dependency changes therefore take longer than subsequent runs of the same PR. Signed
-release packaging resolves the same pinned dependencies independently of these PR caches.
+The [cache warmer](../.github/workflows/warm-ci-cache.yml) builds the Intel source and unsigned
+universal configurations on trusted `main`, where fresh PRs can restore compatible caches. It runs
+on changes to build inputs and on a weekly schedule to cover runner toolchain updates and cache
+eviction. The caches include the pinned AEC dependency and the subscription helper, whose binaries
+are verified by recipe, architecture, and digest. PRs still run the tests and bundle guards, and
+signed release packaging resolves its dependencies independently. Test results, session data, and
+credentials are outside the cache paths.
 
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested

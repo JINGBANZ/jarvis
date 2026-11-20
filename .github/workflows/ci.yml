@@ -26,37 +26,11 @@ jobs:
       - name: Verify source revision (${{ github.sha }})
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
-      - name: Show toolchain
-        id: toolchain
-        run: |
-          sw_vers
-          xcode-select -p
-          swift --version
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$(xcode-select -p)/../Info.plist"
-          fingerprint="$( { xcodebuild -version; swift --version; } | shasum -a 256 | cut -d' ' -f1)"
-          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Swift build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Compile source and test targets
+        uses: ./.github/actions/ci-build
         with:
-          path: |
-            .build/artifacts
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-            .build/*-apple-macosx
-            .build/build.db
-            .build/debug.yaml
-            .build/ci-cache-inputs.json
-          key: swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**') }}-${{ github.sha }}
-          restore-keys: |
-            swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**') }}-
-
-      - name: Restore unchanged input timestamps
-        run: python3 scripts/ci-build-cache.py restore
-
-      - name: Compile all targets
-        run: swift build
+          runner-label: ${{ matrix.os }}
+          helper: ${{ matrix.os == 'macos-26-intel' && 'native' || '' }}
 
       - name: Run tests
         run: |
@@ -73,22 +47,9 @@ jobs:
               ;;
           esac
 
-      - name: Cache Intel subscription helper
-        if: matrix.os == 'macos-26-intel'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            .build/cliproxyapi/*/*/*/cliproxyapi
-            .build/cliproxyapi/*/*/*/binary.sha256
-            .build/cliproxyapi/*/*/*/LICENSE
-          key: helper-native-v1-${{ runner.arch }}-${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
-
       - name: Check Intel helper egress
         if: matrix.os == 'macos-26-intel'
         run: ./scripts/test-proxy-privacy.sh
-
-      - name: Record successful build inputs
-        run: python3 scripts/ci-build-cache.py snapshot
 
       - name: Upload test failure evidence
         if: failure()
@@ -147,17 +108,14 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Cache bundled subscription helper
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Compile unsigned universal app
+        uses: ./.github/actions/ci-build
         with:
-          path: |
-            .build/cliproxyapi/*/*/*/cliproxyapi
-            .build/cliproxyapi/*/*/*/binary.sha256
-            .build/cliproxyapi/*/*/*/LICENSE
-          key: helper-universal-v1-${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
-      - name: Build and verify universal app without signing
+          runner-label: macos-26
+          configuration: universal
+          helper: universal
+      - name: Assemble and verify unsigned universal app
         run: |
-          swift build -c release --arch arm64 --arch x86_64
           ARTIFACTS="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
           source scripts/lib/app-bundle.sh
           assemble_app .build/Jarvis.app "$ARTIFACTS" release
