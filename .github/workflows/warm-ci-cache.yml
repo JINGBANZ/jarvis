@@ -1,0 +1,50 @@
+name: Warm CI caches
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/ci-build/action.yml
+      - .github/workflows/warm-ci-cache.yml
+      - Package.swift
+      - Package.resolved
+      - scripts/ci-build-cache.py
+      - scripts/lib/cliproxyapi.sh
+      - scripts/cliproxyapi/local-only.patch
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warm-ci-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    if: github.ref == 'refs/heads/main'
+    name: Warm ${{ matrix.configuration }} cache (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26-intel
+            configuration: debug
+            helper: native
+          - os: macos-26
+            configuration: universal
+            helper: universal
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/ci-build
+        with:
+          runner-label: ${{ matrix.os }}
+          configuration: ${{ matrix.configuration }}
+          helper: ${{ matrix.helper }}
+          warm-cache: 'true'
