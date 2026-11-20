@@ -393,14 +393,15 @@ the downloaded artifact.
 On each push to `main`, [`release.yml`](../.github/workflows/release.yml) lets release-please maintain
 a standing Release PR from conventional commits. Its only changes are the CHANGELOG, release manifest,
 and both version keys in `Resources/Info.plist`; see `release-please-config.json`.
-The existing **Approve workflows to run** action on that bot PR starts its source CI and the
-default-branch-owned [`release-ready.yml`](../.github/workflows/release-ready.yml). Ordinary code PRs
-keep automatic source CI and an explicit outside-scope `release-ready` result; their `test` aggregate
-does not wait for installed-app acceptance.
+Approve **workflows to run** on the bot PR when GitHub requests it. After all three source Gate jobs
+pass, release CI dispatches [`release-ready.yml`](../.github/workflows/release-ready.yml) on `main`
+and links the returned run in its job summary. A rejected dispatch fails the required `test` check.
+A dispatched run that stays queued for five minutes also fails that check. Ordinary code PRs run
+the source Gate and unsigned universal app verification.
 
 The release worker admits only the genuine bot PR and metadata-only merge tree. It freezes the PR
 head, current main base, merge tree, version, CHANGELOG notes, predecessor asset, and source run attempt.
-It waits for all three source Gate jobs at that exact merge revision, independently of `test`, then
+It requires all three completed source Gate jobs at that exact merge revision, then
 builds, signs, notarizes, and verifies one universal candidate on macOS 26. Signing credentials stay in
 the main-only `release` environment. The hash-pinned DMG layout dependencies live in an ephemeral
 environment. The appcast signs the final DMG bytes and uses the frozen notes, so it does not depend on
@@ -416,13 +417,11 @@ The native evidence binds the immutable candidate artifact ID and digest, manife
 hashes. Candidate, acceptance receipt, and scalar evidence are retained for 30 days. No raw session,
 transcript, screenshot, provider traffic, or test credential is uploaded by this workflow.
 
-The release source `test` aggregate requires this attempt's `release-ready` success. Merge enforcement
-also needs the repository's required `test` and `release-ready` checks, current-base requirement, and
-no bypass; workflow changes do not themselves activate those repository settings. A changed head or
-base requires a new source run and acceptance. [`release-promotion.py`](../scripts/release-promotion.py)
-owns the identity and freshness checks shared by the worker and publisher.
-Re-run all source CI jobs to renew acceptance; re-running only failed jobs cannot combine evidence
-from different attempts. Approve the new run when GitHub requires approval.
+The required `test` aggregate waits for the exact dispatched run and its matching `release-ready`
+receipt. [`release-promotion.py`](../scripts/release-promotion.py) owns the identity and freshness
+checks shared by CI, the worker, and the publisher. After the PR head or base changes, start fresh
+source CI and approve it if prompted. To retry on the same revision, use **Re-run all jobs** on
+source CI so the source Gate, dispatch, and receipt belong to the same attempt.
 
 Merging the accepted Release PR creates a draft and its tag immediately (`force-tag-creation` prevents
 an untagged draft from confusing the next release-please run). Publication compares the squash-merged

@@ -40,8 +40,13 @@ class ReleasePromotionTests(unittest.TestCase):
                    'base': {'ref': 'main', 'sha': 'b' * 40, 'repo': {'full_name': 'JINGBANZ/jarvis'}},
                    'labels': [{'name': 'autorelease: pending'}], 'merge_commit_sha': 'c' * 40}
         self.source = {'id': 11, 'run_attempt': 2, 'head_sha': 'a' * 40,
-                       'event': 'pull_request', 'path': '.github/workflows/ci.yml',
+                       'event': 'pull_request', 'path': '.github/workflows/ci.yml', 'workflow_id': 123,
                        'status': 'in_progress', 'conclusion': None}
+        self.source_replies = {'/actions/runs/11': self.source, '/actions/workflows/ci.yml': {'id': 123},
+                               '/pulls/42': self.pr, '/git/ref/heads/main': {'object': {'sha': 'b' * 40}}}
+        self.worker = {'id': 12, 'path': self.module['WORKFLOW'], 'event': 'workflow_dispatch',
+                       'head_branch': 'main', 'head_sha': 'b' * 40, 'run_attempt': 3,
+                       'status': 'completed', 'conclusion': 'success'}
 
     def api(self, replies, collections=None):
         class API:
@@ -85,8 +90,9 @@ class ReleasePromotionTests(unittest.TestCase):
                  'steps': [{'name': 'Verify source revision (' + self.identity['merge'] + ')',
                             'conclusion': 'success'}]} for name in self.module['SOURCE_JOBS']]
         check = self.module['source_jobs_pass']
-        self.assertTrue(check(jobs, self.identity['merge']))
-        self.assertFalse(check(jobs[:-1], self.identity['merge']))
+        check(jobs, self.identity['merge'])
+        with self.assertRaisesRegex(ValueError, 'All three source jobs'):
+            check(jobs[:-1], self.identity['merge'])
         with self.assertRaises(ValueError):
             check(jobs + [jobs[0]], self.identity['merge'])
         for conclusion in ('skipped', 'cancelled', 'failure'):
@@ -97,19 +103,73 @@ class ReleasePromotionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             check(jobs, 'f' * 40)
 
-    def test_stale_base_head_merge_or_source_attempt_refuses(self):
-        replies = {'/actions/runs/11': self.source, '/pulls/42': self.pr,
-                   '/git/ref/heads/main': {'object': {'sha': 'b' * 40}}}
-        self.module['fresh'](self.api(replies), self.identity)
-        mutations = [('/actions/runs/11', 'run_attempt', 3), ('/pulls/42', 'merge_commit_sha', 'f' * 40)]
-        for path, key, value in mutations:
-            changed = json.loads(json.dumps(replies))
-            changed[path][key] = value
-            with self.subTest(key=key), self.assertRaises(ValueError):
-                self.module['fresh'](self.api(changed), self.identity)
-        replies['/git/ref/heads/main']['object']['sha'] = 'f' * 40
-        with self.assertRaises(ValueError):
-            self.module['fresh'](self.api(replies), self.identity)
+    def test_stale_base_head_merge_or_attempt_refuses(self):
+        with mock.patch.dict(os.environ, {'GITHUB_RUN_ID': '12', 'GITHUB_RUN_ATTEMPT': '3'}):
+            self.module['fresh'](self.api(self.source_replies), self.identity)
+            mutations = [('/actions/runs/11', 'run_attempt', 3), ('/pulls/42', 'merge_commit_sha', 'f' * 40),
+                         ('/git/ref/heads/main', 'object', {'sha': 'f' * 40})]
+            for path, key, value in mutations:
+                changed = json.loads(json.dumps(self.source_replies))
+                changed[path][key] = value
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    self.module['fresh'](self.api(changed), self.identity)
+        with mock.patch.dict(os.environ, {'GITHUB_RUN_ID': '12', 'GITHUB_RUN_ATTEMPT': '4'}):
+            with self.assertRaisesRegex(ValueError, 'Readiness attempt changed'):
+                self.module['fresh'](self.api(self.source_replies), self.identity)
+
+    def source_environment(self):
+        event = self.root / 'event.json'
+        event.write_text(json.dumps({'pull_request': self.pr}))
+        return {'GITHUB_EVENT_NAME': 'pull_request', 'GITHUB_EVENT_PATH': str(event), 'GITHUB_SHA': self.identity['merge'],
+                'GITHUB_RUN_ID': '11', 'GITHUB_RUN_ATTEMPT': '2', 'GITHUB_OUTPUT': str(self.root / 'output'),
+                'GITHUB_STEP_SUMMARY': str(self.root / 'summary')}
+
+    def test_dispatch_targets_main_and_exposes_the_confirmed_worker_id(self):
+        endpoint = '/actions/workflows/release-ready.yml/dispatches'
+        api = self.api({**self.source_replies, endpoint: {'workflow_run_id': 12}})
+        with mock.patch.dict(os.environ, self.source_environment()), mock.patch.object(api, 'repo', wraps=api.repo) as repo:
+            self.module['dispatch'](api)
+            repo.assert_called_with(endpoint, method='POST', data={
+                'ref': 'main', 'return_run_details': True,
+                'inputs': {'pull_request_number': '42', 'source_run_id': '11', 'source_run_attempt': '2'},
+            })
+            self.assertEqual((self.root / 'output').read_text(), 'worker_run=12\n')
+            self.assertIn('/actions/runs/12', (self.root / 'summary').read_text())
+            repo.reset_mock()
+            os.environ['GITHUB_SHA'] = '9' * 40
+            with self.assertRaisesRegex(ValueError, 'changed before dispatch'):
+                self.module['dispatch'](api)
+            self.assertTrue(all(call.args != (endpoint,) for call in repo.call_args_list))
+
+    def test_wait_requires_completed_exact_worker_and_acceptance(self):
+        environment = {**self.source_environment(), 'RELEASE_WORKER_RUN_ID': '12'}
+        identity = {**self.identity, 'workerRun': {'id': 12, 'attempt': 1}}
+        wrong_check = {'id': 42, 'app': {'id': 15368}, 'external_id': self.module['external_id'](self.identity),
+                       'status': 'completed', 'conclusion': 'success', 'output': {'text': '{}'}}
+        check = {**wrong_check, 'id': 13, 'external_id': self.module['external_id'](identity),
+                 'output': {'text': json.dumps({'identity': identity})}}
+        worker = {**self.worker, 'run_attempt': 1}
+        replies = {**self.source_replies, '/actions/runs/12': worker}
+        check_path = '/commits/' + self.identity['head'] + '/check-runs?check_name=release-ready&filter=all'
+        wait = self.module['wait_ready']
+        with mock.patch.dict(os.environ, environment):
+            with self.assertRaisesRegex(ValueError, 'no successful release-ready check'):
+                wait(self.api(replies, {check_path: [wrong_check]}))
+            wait(self.api(replies, {check_path: [wrong_check, check]}))
+            worker['run_attempt'] = 2
+            with self.assertRaisesRegex(ValueError, 'differs from the dispatched run'):
+                wait(self.api(replies))
+            worker.update(run_attempt=1, conclusion='failure')
+            with self.assertRaisesRegex(ValueError, 'readiness run failed'):
+                wait(self.api(replies))
+
+    def test_queued_worker_fails_at_startup_deadline(self):
+        worker = {**self.worker, 'run_attempt': 1, 'status': 'queued', 'conclusion': None}
+        api = self.api({**self.source_replies, '/actions/runs/12': worker})
+        environment = {**self.source_environment(), 'RELEASE_WORKER_RUN_ID': '12'}
+        with mock.patch.dict(os.environ, environment), mock.patch.object(time, 'monotonic', side_effect=[0, 1, 300]):
+            with self.assertRaisesRegex(ValueError, 'did not start within 5 minutes'):
+                self.module['wait_ready'](api)
 
     def test_artifact_requires_exact_run_digest_and_unexpired_identity(self):
         artifact = {'id': 21, 'workflow_run': {'id': 12}, 'expired': False,
@@ -210,11 +270,9 @@ class ReleasePromotionTests(unittest.TestCase):
     def promotion_api(self, record):
         merged = '9' * 40
         pr = {**self.pr, 'merged_at': '2026-11-09T00:00:00Z', 'merge_commit_sha': merged}
-        worker = {'path': self.module['WORKFLOW'], 'event': 'workflow_run', 'head_sha': 'b' * 40,
-                  'run_attempt': 3, 'conclusion': 'success'}
         replies = {f'/git/commits/{merged}': {'parents': [{'sha': 'b' * 40}], 'tree': {'sha': 'd' * 40}},
                    f'/commits/{merged}/pulls': [pr], '/git/ref/tags/v0.6.0': {'object': {'sha': merged}},
-                   '/actions/runs/12': worker,
+                   '/actions/runs/12': dict(self.worker),
                    '/actions/runs/11': {**self.source, 'status': 'completed', 'conclusion': 'success'}}
         for key in ('candidate', 'acceptance'):
             artifact = record[key]

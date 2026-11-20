@@ -102,9 +102,36 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+  release-dispatch:
+    needs: gate
+    if: >-
+      github.repository == 'JINGBANZ/jarvis' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.id == 41898282 &&
+      github.base_ref == 'main' && github.head_ref == 'release-please--branches--main' &&
+      contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    outputs:
+      worker_run: ${{ steps.dispatch.outputs.worker_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Start the main-branch readiness workflow
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-promotion.py dispatch
+
   # Keep the existing required check name while requiring all validation jobs to pass.
   test:
-    needs: [gate, universal-app]
+    needs: [gate, universal-app, release-dispatch]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: >-
@@ -115,29 +142,33 @@ jobs:
       checks: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: >-
-          github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
-        with:
-          persist-credentials: false
       - name: Require all validation jobs
         env:
           GATE_RESULT: ${{ needs.gate.result }}
           UNIVERSAL_APP_RESULT: ${{ needs.universal-app.result }}
+          RELEASE_DISPATCH_RESULT: ${{ needs.release-dispatch.result }}
           RELEASE_SCOPE: >-
             ${{ github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}
         run: |
           test "$GATE_RESULT" = success
           if [[ "$RELEASE_SCOPE" == true ]]; then
             test "$UNIVERSAL_APP_RESULT" = skipped
+            test "$RELEASE_DISPATCH_RESULT" = success
           else
             test "$UNIVERSAL_APP_RESULT" = success
           fi
-      - name: Require this release source attempt's installed-app acceptance
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: >-
+          github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Require acceptance from the dispatched release run
         if: >-
           github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_WORKER_RUN_ID: ${{ needs.release-dispatch.outputs.worker_run }}
         run: python3 scripts/release-promotion.py wait-ready
 
   universal-app:

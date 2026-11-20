@@ -33,9 +33,13 @@ ACTIONS_APP = 15368
 ROOT = Path(__file__).resolve().parent.parent
 
 
+class ReleaseError(ValueError):
+    pass
+
+
 def require(condition, reason):
     if not condition:
-        raise ValueError(reason)
+        raise ReleaseError(reason)
 
 
 def integer(value):
@@ -81,8 +85,10 @@ class GitHub:
                 body = response.read(4_194_305)
             require(len(body) <= 4_194_304, "API response exceeds the bound")
             return json.loads(body)
-        except (OSError, urllib.error.HTTPError, json.JSONDecodeError):
-            raise ValueError("GitHub API request failed") from None
+        except urllib.error.HTTPError as error:
+            raise ReleaseError(f"GitHub API {method} returned HTTP {error.code}") from None
+        except (OSError, json.JSONDecodeError):
+            raise ReleaseError(f"GitHub API {method} did not return a valid response") from None
 
     def repo(self, path, **kwargs):
         return self.request("/repos/" + REPOSITORY + path, **kwargs)
@@ -120,11 +126,6 @@ def write_json(path, value):
         stream.write("\n")
 
 
-def release_scope(pr):
-    return (pr["head"]["ref"] == RELEASE_BRANCH
-            or any(label["name"] == "autorelease: pending" for label in pr.get("labels", [])))
-
-
 def admit_release(pr, run, main):
     require(pr["state"] == "open" and pr["draft"] is False, "Release PR is not open and ready")
     require(pr["user"]["login"] == "github-actions[bot]" and pr["user"]["id"] == 41898282,
@@ -142,6 +143,40 @@ def check_source_run(run, source):
             and run["event"] == "pull_request" and run["path"] == ".github/workflows/ci.yml",
             "Source workflow or attempt changed")
     require(run["status"] != "completed" or run["conclusion"] == "success", "Source workflow stopped without success")
+
+
+def release_source(api, number, source):
+    run = api.repo(f"/actions/runs/{source['id']}")
+    check_source_run(run, source)
+    require(run["workflow_id"] == api.repo("/actions/workflows/ci.yml")["id"], "Unexpected source workflow identity")
+    pr = api.repo(f"/pulls/{integer(number)}")
+    main = sha(api.repo("/git/ref/heads/main")["object"]["sha"])
+    admit_release(pr, run, main)
+    return pr, main
+
+
+def current_attempt():
+    return {"id": integer(int(os.environ["GITHUB_RUN_ID"])), "attempt": integer(int(os.environ["GITHUB_RUN_ATTEMPT"]))}
+
+
+def dispatch(api):
+    require(os.environ["GITHUB_EVENT_NAME"] == "pull_request", "Readiness dispatch requires a pull-request CI run")
+    event_pr = read_json(os.environ["GITHUB_EVENT_PATH"])["pull_request"]
+    source = current_attempt()
+    pr, main = release_source(api, event_pr["number"], source)
+    require(pr["head"]["sha"] == event_pr["head"]["sha"] and main == event_pr["base"]["sha"]
+            and pr["merge_commit_sha"] == os.environ["GITHUB_SHA"], "Release PR changed before dispatch")
+    result = api.repo("/actions/workflows/release-ready.yml/dispatches", method="POST", data={
+        "ref": "main", "return_run_details": True,
+        "inputs": {"pull_request_number": str(pr["number"]),
+                   "source_run_id": str(source["id"]), "source_run_attempt": str(source["attempt"])},
+    })
+    worker_id = integer(result["workflow_run_id"])
+    url = f"https://github.com/{REPOSITORY}/actions/runs/{worker_id}"
+    print(f"Dispatched release readiness: {url}")
+    with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
+        stream.write(f"[Release readiness run {worker_id}]({url})\n")
+    output(worker_run=str(worker_id))
 
 
 def validate_metadata(files, base_manifest, candidate_manifest, base_plist, candidate_plist, changelog):
@@ -183,36 +218,23 @@ def report(api, check_id, conclusion, summary, text=None):
 
 def prepare(api):
     event = read_json(os.environ["GITHUB_EVENT_PATH"])
-    require(os.environ["GITHUB_EVENT_NAME"] == "workflow_run" and event["action"] == "in_progress",
-            "Readiness starts only with the approved source workflow")
-    source = {"id": integer(event["workflow_run"]["id"]), "attempt": integer(event["workflow_run"]["run_attempt"])}
-    run = api.repo(f"/actions/runs/{source['id']}")
-    check_source_run(run, source)
-    require(run["workflow_id"] == api.repo("/actions/workflows/ci.yml")["id"], "Unexpected source workflow identity")
-    prs = event["workflow_run"]["pull_requests"]
-    if not prs:
-        prs = [pr for pr in api.repo(f"/commits/{sha(run['head_sha'])}/pulls")
-               if pr["head"]["sha"] == run["head_sha"] and pr["state"] == "open"]
-    require(len(prs) == 1, "Source run must identify exactly one PR")
-    pr = api.repo(f"/pulls/{integer(prs[0]['number'])}")
-    require(pr["head"]["sha"] == run["head_sha"], "Source PR head changed")
+    require(os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch" and os.environ["GITHUB_REF"] == "refs/heads/main",
+            "Readiness must be dispatched on main")
+    inputs = event["inputs"]
+    source = {"id": integer(int(inputs["source_run_id"])), "attempt": integer(int(inputs["source_run_attempt"]))}
+    pr, main = release_source(api, int(inputs["pull_request_number"]), source)
+    require(main == os.environ["GITHUB_SHA"], "Trusted orchestration must use the current base revision")
     identity = {"schemaVersion": 1, "repository": REPOSITORY, "pr": integer(pr["number"]),
                 "head": sha(pr["head"]["sha"]), "sourceRun": source,
-                "workerRun": {"id": integer(int(os.environ["GITHUB_RUN_ID"])),
-                              "attempt": integer(int(os.environ["GITHUB_RUN_ATTEMPT"]))}}
+                "workerRun": current_attempt()}
     check = api.repo("/check-runs", method="POST", data={"name": "release-ready", "head_sha": identity["head"],
         "status": "in_progress", "external_id": external_id(identity),
         "details_url": f"https://github.com/{REPOSITORY}/actions/runs/{identity['workerRun']['id']}"})
     identity["checkID"] = integer(check["id"])
     output(check_id=str(check["id"]))
-    if not release_scope(pr):
-        report(api, check["id"], "success", "Outside release scope; ordinary source CI remains required.")
-        output(release="false")
-        return
-    main = sha(api.repo("/git/ref/heads/main")["object"]["sha"])
-    admit_release(pr, run, main)
-    require(main == os.environ["GITHUB_SHA"], "Trusted orchestration must use the current base revision")
     merge = sha(pr["merge_commit_sha"])
+    jobs = api.pages(f"/actions/runs/{source['id']}/attempts/{source['attempt']}/jobs", "jobs")
+    source_jobs_pass(jobs, merge)
     commit = api.repo(f"/git/commits/{merge}")
     require([parent["sha"] for parent in commit["parents"]] == [main, identity["head"]], "Unexpected candidate merge parents")
     comparison = api.repo(f"/compare/{main}...{merge}")
@@ -233,44 +255,26 @@ def prepare(api):
     identity.update(base=main, merge=merge, tree=sha(commit["tree"]["sha"]), version=value, notes=notes,
                     predecessor={"tag": tag, "assetID": integer(asset["id"]),
                                  "sha256": digest(asset["digest"]), "size": asset["size"]})
-    output(release="true", identity=identity, merge=merge, version=value)
+    output(identity=identity, merge=merge, version=value)
 
 
 def fresh(api, identity):
-    run = api.repo(f"/actions/runs/{identity['sourceRun']['id']}")
-    check_source_run(run, identity["sourceRun"])
-    pr = api.repo(f"/pulls/{identity['pr']}")
-    main = api.repo("/git/ref/heads/main")["object"]["sha"]
-    admit_release(pr, run, main)
+    require(current_attempt() == identity["workerRun"], "Readiness attempt changed. Rerun all release CI jobs")
+    pr, main = release_source(api, identity["pr"], identity["sourceRun"])
     require(pr["head"]["sha"] == identity["head"] and main == identity["base"]
             and pr["merge_commit_sha"] == identity["merge"], "Accepted source is stale")
-    return run
 
 
 def source_jobs_pass(jobs, merge):
     selected = [job for job in jobs if job["name"] in SOURCE_JOBS]
     require(len(selected) == len({job["name"] for job in selected}), "Duplicate source jobs")
-    if len(selected) != len(SOURCE_JOBS) or any(job["status"] != "completed" for job in selected):
-        return False
+    require(len(selected) == len(SOURCE_JOBS) and all(job["status"] == "completed" for job in selected),
+            "All three source jobs must complete in this CI attempt. Rerun all release CI jobs")
     require(all(job["conclusion"] == "success" for job in selected), "A required source job failed")
     expected = "Verify source revision (" + merge + ")"
     for job in selected:
         proof = [step for step in job["steps"] if step["name"] == expected]
         require(len(proof) == 1 and proof[0]["conclusion"] == "success", "Source jobs tested another merge revision")
-    return True
-
-
-def wait_source(api, identity):
-    deadline = time.monotonic() + 1800
-    while time.monotonic() < deadline:
-        run = fresh(api, identity)
-        source = identity["sourceRun"]
-        jobs = api.pages(f"/actions/runs/{source['id']}/attempts/{source['attempt']}/jobs", "jobs")
-        if source_jobs_pass(jobs, identity["merge"]):
-            return
-        require(run["status"] != "completed", "Required source jobs are missing")
-        time.sleep(10)
-    raise ValueError("Source jobs did not complete within the bound")
 
 
 def file_hash(path, limit=536_870_912):
@@ -417,32 +421,47 @@ def accept(identity, candidate, manifest_hash, records, directory, destination):
     output(acceptance_sha256=file_hash(destination / "acceptance.json")["sha256"])
 
 
+def check_worker_run(run, worker, base):
+    require(run["id"] == worker["id"] and run["path"] == WORKFLOW and run["event"] == "workflow_dispatch"
+            and run["head_branch"] == "main" and run["head_sha"] == base and run["run_attempt"] == worker["attempt"],
+            "Readiness run or attempt differs from the dispatched run")
+
+
+def readiness_checks(api, head):
+    checks = api.pages(f"/commits/{sha(head)}/check-runs?check_name=release-ready&filter=all", "check_runs")
+    return [check for check in checks if check["app"]["id"] == ACTIONS_APP]
+
+
 def wait_ready(api):
-    event = read_json(os.environ["GITHUB_EVENT_PATH"])
-    pr = event["pull_request"]
-    if not release_scope(pr):
-        return
-    expected_source = {"id": int(os.environ["GITHUB_RUN_ID"]), "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"])}
-    deadline = time.monotonic() + 14_100
-    while time.monotonic() < deadline:
-        current = api.repo(f"/pulls/{integer(pr['number'])}")
-        require(current["head"]["sha"] == pr["head"]["sha"]
-                and current["base"]["sha"] == pr["base"]["sha"], "Source PR changed while waiting")
-        checks = api.pages(f"/commits/{sha(pr['head']['sha'])}/check-runs?check_name=release-ready&filter=all", "check_runs")
-        prefix = f"release-ready:{expected_source['id']}:{expected_source['attempt']}:"
-        checks = [check for check in checks if check["app"]["id"] == ACTIONS_APP
-                  and (check.get("external_id") or "").startswith(prefix)]
-        if checks:
-            newest = max(checks, key=lambda item: item["id"])
-            if newest["status"] == "completed":
-                require(newest["conclusion"] == "success", "Release readiness did not pass")
-                record = json.loads(newest["output"]["text"])
-                require(record["identity"]["sourceRun"] == expected_source
-                        and record["identity"]["head"] == pr["head"]["sha"]
-                        and record["identity"]["base"] == pr["base"]["sha"], "Readiness belongs to another source")
-                return
-        time.sleep(10)
-    raise ValueError("Release readiness did not complete within the bound")
+    pr = read_json(os.environ["GITHUB_EVENT_PATH"])["pull_request"]
+    source = current_attempt()
+    worker = {"id": integer(int(os.environ["RELEASE_WORKER_RUN_ID"])), "attempt": 1}
+    identity = {"sourceRun": source, "workerRun": worker, "pr": integer(pr["number"]),
+                "head": pr["head"]["sha"], "base": pr["base"]["sha"], "merge": sha(os.environ["GITHUB_SHA"])}
+    print(f"Waiting for https://github.com/{REPOSITORY}/actions/runs/{worker['id']}", flush=True)
+    start = time.monotonic()
+    started = False
+    while time.monotonic() - start < 14_100:
+        current = api.repo(f"/pulls/{identity['pr']}")
+        require(current["state"] == "open" and current["head"]["sha"] == identity["head"]
+                and current["base"]["sha"] == identity["base"]
+                and current["merge_commit_sha"] == identity["merge"], "Release PR changed while waiting for readiness")
+        run = api.repo(f"/actions/runs/{worker['id']}")
+        check_worker_run(run, worker, identity["base"])
+        if run["status"] == "completed":
+            require(run["conclusion"] == "success", "The dispatched release readiness run failed. See its job logs")
+            checks = [check for check in readiness_checks(api, identity["head"])
+                      if check.get("external_id") == external_id(identity)]
+            require(len(checks) == 1 and checks[0]["status"] == "completed" and checks[0]["conclusion"] == "success",
+                    "The dispatched run has no successful release-ready check")
+            accepted = json.loads(checks[0]["output"]["text"])["identity"]
+            require(all(accepted[key] == value for key, value in identity.items())
+                    and accepted["checkID"] == checks[0]["id"], "Release readiness accepted different source evidence")
+            return
+        started = started or run["status"] == "in_progress"
+        require(started or time.monotonic() - start < 300, "The dispatched readiness run did not start within 5 minutes")
+        time.sleep(15)
+    raise ReleaseError("Release readiness did not complete within the bound")
 
 
 def select_promotion(api, tag):
@@ -453,9 +472,8 @@ def select_promotion(api, tag):
            and pr["merge_commit_sha"] == merged_sha and pr["head"]["ref"] == RELEASE_BRANCH]
     require(len(prs) == 1, "Merged release PR is missing or ambiguous")
     pr = prs[0]
-    checks = api.pages(f"/commits/{sha(pr['head']['sha'])}/check-runs?check_name=release-ready&filter=all", "check_runs")
-    checks = [check for check in checks if check["app"]["id"] == ACTIONS_APP
-              and (check.get("external_id") or "").startswith("release-ready:")]
+    checks = [check for check in readiness_checks(api, pr["head"]["sha"])
+              if (check.get("external_id") or "").startswith("release-ready:")]
     require(bool(checks), "Merged release has no accepted candidate")
     check = max(checks, key=lambda item: item["id"])
     require(check["status"] == "completed" and check["conclusion"] == "success", "Latest candidate did not pass")
@@ -464,12 +482,13 @@ def select_promotion(api, tag):
     require(identity["repository"] == REPOSITORY and identity["pr"] == pr["number"]
             and identity["head"] == pr["head"]["sha"] and identity["tree"] == commit["tree"]["sha"]
             and identity["base"] == commit["parents"][0]["sha"] and "v" + identity["version"] == tag
-            and check["external_id"] == external_id(identity), "Merged source is not the accepted tree/version")
+            and check["id"] == identity["checkID"] and check["external_id"] == external_id(identity),
+            "Merged source is not the accepted tree/version")
     require(api.repo(f"/git/ref/tags/{tag}")["object"]["sha"] == merged_sha, "Release tag points to another commit")
     worker = identity["workerRun"]
     run = api.repo(f"/actions/runs/{worker['id']}")
-    require(run["path"] == WORKFLOW and run["event"] == "workflow_run" and run["head_sha"] == identity["base"]
-            and run["run_attempt"] == worker["attempt"] and run["conclusion"] == "success", "Acceptance worker did not complete")
+    check_worker_run(run, worker, identity["base"])
+    require(run["status"] == "completed" and run["conclusion"] == "success", "Acceptance worker did not complete")
     source = api.repo(f"/actions/runs/{identity['sourceRun']['id']}")
     check_source_run(source, identity["sourceRun"])
     require(source["conclusion"] == "success", "Source aggregate did not complete successfully")
@@ -496,8 +515,8 @@ def verify_promotion(record, acceptance_directory, candidate_directory):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("prepare", "wait-source", "notes", "seal", "predecessor", "candidate", "native-proof",
-        "native-artifacts", "accept", "pass", "fail", "wait-ready", "select-promotion", "verify-promotion"))
+    parser.add_argument("operation", choices=("dispatch", "prepare", "fresh", "notes", "seal", "predecessor", "candidate",
+        "native-proof", "native-artifacts", "accept", "pass", "fail", "wait-ready", "select-promotion", "verify-promotion"))
     parser.add_argument("--directory", type=Path)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--output", type=Path)
@@ -516,10 +535,12 @@ def main():
         verify_promotion(json.loads(os.environ["PROMOTION"]), args.source, args.directory)
     else:
         api = GitHub()
-        if operation == "prepare":
+        if operation == "dispatch":
+            dispatch(api)
+        elif operation == "prepare":
             prepare(api)
-        elif operation == "wait-source":
-            wait_source(api, identity)
+        elif operation == "fresh":
+            fresh(api, identity)
         elif operation == "wait-ready":
             wait_ready(api)
         elif operation == "fail":
@@ -555,5 +576,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except ReleaseError as error:
+        raise SystemExit(f"Release orchestration: {error}") from None
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, ET.ParseError):
         raise SystemExit("Release orchestration refused incomplete or mismatched evidence.") from None
