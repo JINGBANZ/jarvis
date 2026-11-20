@@ -1,18 +1,30 @@
 name: Release ready check
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [in_progress]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Release PR number
+        required: true
+        type: string
+      source_run_id:
+        description: CI run ID
+        required: true
+        type: string
+      source_run_attempt:
+        description: CI run attempt
+        required: true
+        type: string
 
 permissions: {}
 
 concurrency:
-  group: release-ready-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  group: release-ready-${{ github.ref }}-${{ inputs.pull_request_number }}
   cancel-in-progress: true
 
 jobs:
   prepare:
+    if: github.repository == 'JINGBANZ/jarvis' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -21,7 +33,6 @@ jobs:
       checks: write
       pull-requests: read
     outputs:
-      release: ${{ steps.source.outputs.release }}
       identity: ${{ steps.source.outputs.identity }}
       merge: ${{ steps.source.outputs.merge }}
       version: ${{ steps.source.outputs.version }}
@@ -31,39 +42,21 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Admit the approved source attempt
+      - name: Admit the completed source Gate
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release-promotion.py prepare
 
-  source:
-    needs: prepare
-    if: needs.prepare.outputs.release == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 31
-    permissions:
-      contents: read
-      actions: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Require all three source jobs at the frozen merge revision
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_IDENTITY: ${{ needs.prepare.outputs.identity }}
-        run: python3 scripts/release-promotion.py wait-source
-
   candidate:
-    needs: [prepare, source]
+    needs: prepare
     runs-on: macos-26
     environment: release
     timeout-minutes: 75
     permissions:
       contents: read
+      actions: read
+      pull-requests: read
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
       artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
@@ -75,6 +68,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Recheck the admitted source before signing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-promotion.py fresh
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.merge }}
@@ -256,7 +253,7 @@ jobs:
           retention-days: 30
 
   accepted:
-    needs: [prepare, source, candidate, installed]
+    needs: [prepare, candidate, installed]
     if: always() && needs.prepare.outputs.check_id != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -278,19 +275,15 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Require every release job
-        if: needs.prepare.outputs.release == 'true'
         env:
           PREPARE: ${{ needs.prepare.result }}
-          SOURCE: ${{ needs.source.result }}
           CANDIDATE: ${{ needs.candidate.result }}
           INSTALLED: ${{ needs.installed.result }}
-        run: test "$PREPARE:$SOURCE:$CANDIDATE:$INSTALLED" = success:success:success:success
+        run: test "$PREPARE:$CANDIDATE:$INSTALLED" = success:success:success
       - name: Select this attempt's complete native evidence
         id: native
-        if: needs.prepare.outputs.release == 'true'
         run: python3 scripts/release-promotion.py native-artifacts
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: needs.prepare.outputs.release == 'true'
         with:
           artifact-ids: ${{ steps.native.outputs.native_ids }}
           path: native-evidence
@@ -298,18 +291,15 @@ jobs:
           digest-mismatch: error
       - name: Freeze acceptance
         id: acceptance
-        if: needs.prepare.outputs.release == 'true'
         run: python3 scripts/release-promotion.py accept --directory native-evidence --output accepted
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         id: upload
-        if: needs.prepare.outputs.release == 'true'
         with:
           name: release-acceptance-${{ github.run_attempt }}
           path: accepted/acceptance.json
           if-no-files-found: error
           retention-days: 30
-      - name: Complete this source attempt's release-ready check
-        if: needs.prepare.outputs.release == 'true'
+      - name: Complete the release-ready check
         env:
           ACCEPTANCE_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
           ACCEPTANCE_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}

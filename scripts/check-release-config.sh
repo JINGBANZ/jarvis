@@ -195,8 +195,9 @@ if /usr/bin/grep -Eq 'swift build|package-app.sh|notarytool|SPARKLE_ED_PRIVATE_K
     || ! /usr/bin/grep -Fq 'release-promotion.py select-promotion' "$workflow" \
     || ! /usr/bin/grep -Fq 'release-promotion.py verify-promotion' "$workflow" \
     || ! /usr/bin/grep -Fq 'digest-mismatch: error' "$workflow" \
-    || ! /usr/bin/grep -Fq 'types: [in_progress]' "$ready_workflow" \
+    || ! /usr/bin/grep -Fq '  workflow_dispatch:' "$ready_workflow" \
     || ! /usr/bin/grep -Fq 'os: [macos-15, macos-26, macos-15-intel]' "$ready_workflow" \
+    || ! /usr/bin/grep -Fq 'release-promotion.py dispatch' "$ci_workflow" \
     || ! /usr/bin/grep -Fq 'release-promotion.py wait-ready' "$ci_workflow"; then
   echo "Release publication must promote only the exact premerge artifact accepted on all required native Macs." >&2
   exit 1
