@@ -715,14 +715,39 @@ final class ReleaseReadinessTests: XCTestCase {
         let button = try XCTUnwrap(openButtons().first)
         let frame = button.frame
         let center = CGPoint(x: frame.midX, y: frame.midY)
-        let owningWindow = try XCTUnwrap(settings.windows.allElementsBoundByIndex.first {
-            $0.frame.contains(center) && $0.frame.width > 0 && $0.frame.height > 0
+        XCTAssertTrue(settings.state == .runningForeground && CGDisplayBounds(CGMainDisplayID()).contains(center))
+        let rows = try XCTUnwrap(CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                            kCGNullWindowID) as? [[String: Any]])
+        let front = try XCTUnwrap(rows.first {
+            guard let data = $0[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: data as CFDictionary) else { return false }
+            return bounds.contains(center)
         })
-        let window = owningWindow.frame
-        let point = CGVector(dx: (center.x - window.minX) / window.width,
-                             dy: (center.y - window.minY) / window.height)
-        attachEvidence(settings, name: "recording-add-open-coordinate-verified")
-        owningWindow.coordinate(withNormalizedOffset: point).click()
+        let pid = try XCTUnwrap((front[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value)
+        let owner = NSRunningApplication(processIdentifier: pid)
+        let identifier = owner?.bundleIdentifier
+        let path = owner?.bundleURL?.resolvingSymlinksInPath().path ?? ""
+        let permittedOwner = [
+            "com.apple.systempreferences", "com.apple.appkit.xpc.openAndSavePanelService",
+            "com.apple.settings.PrivacySecurity.extension"
+        ].contains(identifier ?? "") && ["\/System/Applications/", "\/System/Library/"].contains { path.hasPrefix($0) }
+        let receipt = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+        let preflight = CGPreflightPostEventAccess()
+        let facts: [String: Any] = ["permittedOwner": permittedOwner, "preflight": preflight,
+            "settings": identifier == "com.apple.systempreferences",
+            "picker": identifier == "com.apple.appkit.xpc.openAndSavePanelService",
+            "privacy": identifier == "com.apple.settings.PrivacySecurity.extension"]
+        try JSONSerialization.data(withJSONObject: facts).write(
+            to: URL(fileURLWithPath: receipt).appendingPathComponent("picker-owner.json"), options: .atomic)
+        XCTAssertTrue(permittedOwner, "The verified picker control must belong to a known Apple window")
+        XCTAssertTrue(preflight, "The existing hosted automation mode must allow the native click")
+        let down = try XCTUnwrap(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                        mouseCursorPosition: center, mouseButton: .left))
+        let up = try XCTUnwrap(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                                      mouseCursorPosition: center, mouseButton: .left))
+        attachEvidence(settings, name: "recording-add-open-native-verified")
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
         attachEvidence(settings, name: "recording-add-confirmed")
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             !cancel.allElementsBoundByIndex.contains { $0.isHittable }
