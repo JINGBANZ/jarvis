@@ -243,7 +243,9 @@ final class ReleaseReadinessTests: XCTestCase {
                         && self.grantedPermissionCount(in: onboarding) == 2
                         && onboarding.staticTexts.matching(identifier: "Refused").count == 1
                 case "Quit & Reopen":
-                    permitted = self.grantedPermissionCount(in: onboarding) == 2
+                    // The app can offer a relaunch before macOS presents the asynchronous screen prompt.
+                    permitted = acceptedConsents == ["microphone", "audio", "screen"]
+                        && self.grantedPermissionCount(in: onboarding) == 2
                         && onboarding.staticTexts.matching(identifier: "Reopen to finish").count == 1
                 default:
                     permitted = acceptedConsents == ["microphone", "audio", "screen"]
@@ -502,10 +504,24 @@ final class ReleaseReadinessTests: XCTestCase {
         attachEvidence(settings, name: "recording-headings-loaded")
         XCTAssertGreaterThan(screenHeading.frame.height, 0)
         XCTAssertGreaterThan(audioOnlyHeading.frame.minY, screenHeading.frame.maxY)
-        let sections = pane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex.filter {
+        let screenEnd = screenHeading.frame.maxY
+        let audioStart = audioOnlyHeading.frame.minY
+        let outlines = pane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex
+        var locations: [[String: Any]] = []
+        let sections = outlines.filter {
             let frame = $0.frame
-            return frame.height > 0 && frame.minY >= screenHeading.frame.maxY && frame.maxY <= audioOnlyHeading.frame.minY
+            let toggles = $0.switches.matching(identifier: "Jarvis_Toggle").allElementsBoundByIndex
+            locations.append(["outlineMin": frame.minY, "outlineMax": frame.maxY, "toggles": toggles.map {
+                ["min": $0.frame.minY, "max": $0.frame.maxY,
+                 "enabled": self.recordingToggleEnabled($0.value) as Any? ?? NSNull()]
+            }])
+            return frame.height > 0 && frame.minY >= screenEnd && frame.maxY <= audioStart
         }
+        let layout: [String: Any] = ["screenEnd": screenEnd, "audioStart": audioStart, "outlines": locations,
+                                     "screenEnabledCount": sections.count,
+                                     "allNamedSwitches": pane.switches.matching(identifier: "Jarvis_Toggle").count]
+        try JSONSerialization.data(withJSONObject: layout).write(
+            to: evidenceDirectory.appendingPathComponent("recording-layout.json"), options: .atomic)
         XCTAssertEqual(sections.count, 1, "Exactly one Jarvis outline must belong to the screen-recording section")
         let section = try XCTUnwrap(sections.first)
         attachEvidence(settings, name: "recording-section-matched")
