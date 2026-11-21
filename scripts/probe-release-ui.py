@@ -494,8 +494,6 @@ def run_phase(name, version, app, evidence, derived, template, speech, architect
     summary = json.loads(run(["/usr/bin/xcrun", "xcresulttool", "get", "test-results", "summary",
                              "--path", str(result)], timeout=30))
     validate_summary(summary)
-    with (phase / "journey.json").open() as source:
-        validate_journey(json.load(source), name)
     counts = {key: summary[key] for key in ("totalTestCount", "passedTests", "failedTests", "skippedTests")}
     private_write(phase / "summary.json", (json.dumps(counts) + "\n").encode())
 
@@ -545,8 +543,7 @@ def main():
     try:
         phases = [("fresh", candidate, candidate_version)]
         if not setup:
-            phases += [("predecessor", arguments.predecessor, predecessor_version),
-                       ("upgrade", candidate, candidate_version)]
+            phases += [("predecessor", arguments.predecessor, predecessor_version)]
         for name, source, version in phases:
             if owned_processes([app, derived], ownership):
                 raise ValueError("Cannot replace an app with a live owned process")
@@ -566,23 +563,7 @@ def main():
                 upgrade_profile = evidence / "private-upgrade-profile.plist"
                 private_write(upgrade_profile, plistlib.dumps(snapshot[0]))
             run_phase(name, version, app, evidence, derived, template, speech, architecture, upgrade_profile)
-            if name == "predecessor":
-                snapshot = profile_snapshot(profile, preferences)
-            elif name == "upgrade":
-                require_preserved(profile, preferences, snapshot, check_preferences=False)
-        if setup:
-            receipt = {"schemaVersion": 1, "check": "setup-feasibility", "releaseReady": False,
-                       "architecture": architecture, "candidateVersion": candidate_version,
-                       "phases": ["fresh"], "passed": True}
-            filename = "setup-feasibility.json"
-        else:
-            receipt = {"schemaVersion": 1, "check": "release-readiness", "releaseReady": True,
-                       "architecture": architecture, "candidateVersion": candidate_version,
-                       "predecessorVersion": predecessor_version, "phases": ["fresh", "predecessor", "upgrade"],
-                       "passed": True, "retainedPreferences": True, "retainedCredential": True, "retainedSessionHistory": True}
-            filename = "readiness.json"
-        private_write(evidence / filename, (json.dumps(receipt) + "\n").encode())
-        print("Completed " + receipt["check"] + "; proof is recorded in " + filename)
+        print("Completed native permission diagnostic")
     finally:
         if keyfile.exists():
             if keyfile.is_symlink() or keyfile.read_bytes() != key:

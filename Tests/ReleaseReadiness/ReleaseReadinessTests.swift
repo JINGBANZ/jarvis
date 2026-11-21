@@ -10,6 +10,39 @@ final class ReleaseReadinessTests: XCTestCase {
     var audioDevices: ReleaseAudioDevices?
     private nonisolated let pendingRelaunch = OSAllocatedUnfairLock<(pid: pid_t, installedURL: URL, operation: String)?>(initialState: nil)
 
+    private nonisolated let permissionTrace = OSAllocatedUnfairLock<[[String: String]]>(initialState: [])
+
+    private nonisolated func tracePermission(_ event: String, owner: String = "", pid: pid_t = 0) {
+        let uptime = String(ProcessInfo.processInfo.systemUptime)
+        let present = pid > 0 && kill(pid, 0) == 0
+        permissionTrace.withLock {
+            $0.append(["step": event, "owner": owner, "pid": String(pid),
+                       "pidPresent": String(present), "uptime": uptime])
+            if $0.count > 80 { $0.removeFirst() }
+        }
+    }
+
+    nonisolated func writePermissionTrace(_ issue: XCTIssue? = nil) {
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
+        var receipt = permissionTrace.withLock { $0 }
+        if let issue {
+            let message = issue.compactDescription
+            let terms = ["UserNotificationCenter", "coreservices.uiagent", "universalAccessAuthWarn",
+                         "AccessibilityUIServer", "Jarvis", "snapshot", "not running", "communication",
+                         "connection", "failed to get matching", "query", "Application is not running", "null"]
+            let observed = terms.filter { message.localizedCaseInsensitiveContains($0) }
+            let pid = receipt.reversed().compactMap { $0["pid"].flatMap(pid_t.init) }.first { $0 > 0 } ?? 0
+            receipt.append(["step": "issue", "signals": observed.joined(separator: ","),
+                            "lastOwnerPID": String(pid), "lastOwnerPresent": String(pid > 0 && kill(pid, 0) == 0),
+                            "uptime": String(ProcessInfo.processInfo.systemUptime)])
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+            try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("permission-trace.json"),
+                           options: .withoutOverwriting)
+        } catch {}
+    }
+
     override func record(_ issue: XCTIssue) {
         UIIssueEvidence.record(issue, firstFilename: "ui-issue.json", failureFilename: "ui-failure.json")
         let reference = issue as XCTIssueReference
@@ -18,7 +51,10 @@ final class ReleaseReadinessTests: XCTestCase {
            let value = reference.value(forKey: "isFailure") as? NSNumber {
             isFailure = value.boolValue
         }
-        if isFailure { recordRelaunchState() }
+        if isFailure {
+            writePermissionTrace(issue)
+            recordRelaunchState()
+        }
         super.record(issue)
     }
 
@@ -64,12 +100,14 @@ final class ReleaseReadinessTests: XCTestCase {
                 reachedReady = true
                 completionPath = "relaunch-automatic"
             case .consent(let permissions, let dialog):
+                tracePermission("permission-consent-selected")
                 attachEvidence(name: "permission-consent-selected")
                 acceptedConsents.formUnion(permissions)
                 if permissions.contains("screen"), dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
                     let previousPID = try candidateProcessID()
                     attachEvidence(name: "permission-settings-click")
                     dialog.buttons["Open System Settings"].click()
+                    tracePermission("permission-settings-clicked")
                     attachEvidence(name: "permission-settings-clicked")
                     if try grantScreenRecordingInSettings() {
                         app = try waitForReplacement(of: previousPID)
@@ -80,7 +118,9 @@ final class ReleaseReadinessTests: XCTestCase {
                 } else {
                     let allow = consentButtons(in: dialog)
                     XCTAssertEqual(allow.count, 1, "Consent requires one unambiguous Allow control")
+                    tracePermission("allow-click")
                     allow.element.click()
+                    tracePermission("allow-clicked")
                 }
             case .onboarding(let title):
                 attachEvidence(app, name: "permission-step-\(step)-\(title)")
@@ -169,7 +209,7 @@ final class ReleaseReadinessTests: XCTestCase {
                       "com.apple.accessibility.universalAccessAuthWarn", "com.apple.AccessibilityUIServer"]
         var captured: Set<String> = []
         var action: PermissionAction?
-        var consentOwner: String?
+        var consentOwner: (String, pid_t)?
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             if let replacementPID, acceptedConsents == ["microphone", "audio", "screen"] {
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: self.bundleID)
@@ -215,7 +255,7 @@ final class ReleaseReadinessTests: XCTestCase {
                 action = .onboarding(titles[0])
                 return true
             }
-            var matches: [(String, Set<String>, XCUIElement)] = []
+            var matches: [(String, pid_t, Set<String>, XCUIElement)] = []
             guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                     as? [[String: Any]] else { return false }
             let visibleOwners = Set(windows.compactMap { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value })
@@ -246,7 +286,9 @@ final class ReleaseReadinessTests: XCTestCase {
                 if captured.insert(identifier).inserted {
                     self.attachEvidence(name: "permission-owner-first-\(identifier)")
                 }
+                self.tracePermission("query-dialogs", owner: identifier, pid: ready[0].processIdentifier)
                 let dialogs = candidate.dialogs.allElementsBoundByIndex
+                self.tracePermission("query-containers", owner: identifier, pid: ready[0].processIdentifier)
                 let containers = dialogs.isEmpty ? candidate.windows.allElementsBoundByIndex : dialogs
                 counts["dialogs"] = dialogs.count
                 counts["containers"] = containers.count
@@ -276,7 +318,7 @@ final class ReleaseReadinessTests: XCTestCase {
                     counts["openSettingsButtons", default: 0] += container.buttons.matching(identifier: "Open System Settings").count
                     let opensSettings = permissions.contains("screen")
                         && container.buttons.matching(identifier: "Open System Settings").count == 1
-                    if allow.count == 1 || opensSettings { matches.append((identifier, permissions, container)) }
+                    if allow.count == 1 || opensSettings { matches.append((identifier, ready[0].processIdentifier, permissions, container)) }
                 }
                 counts["queryFinishedMilliseconds"] = Int(ProcessInfo.processInfo.systemUptime * 1_000)
                 discovery[identifier] = counts
@@ -284,16 +326,18 @@ final class ReleaseReadinessTests: XCTestCase {
             }
             recordDiscovery()
             if matches.count == 1 {
-                let (owner, permissions, dialog) = matches[0]
+                let (owner, pid, permissions, dialog) = matches[0]
+                self.tracePermission("matched", owner: owner, pid: pid)
                 self.attachEvidence(name: "permission-consent-matched")
                 action = .consent(permissions, dialog)
-                consentOwner = owner
+                consentOwner = (owner, pid)
                 return true
             }
             return false
         }, object: nil)
         let waitStarted = ProcessInfo.processInfo.systemUptime
         let result = XCTWaiter.wait(for: [visible], timeout: 20)
+        tracePermission("wait-returned")
         recordPermissionWait(result, started: waitStarted, filename: "permission-wait.json")
         guard result == .completed, let action else {
             let path = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
@@ -303,7 +347,8 @@ final class ReleaseReadinessTests: XCTestCase {
         }
         if case .consent(let permissions, _) = action {
             let owner = try XCTUnwrap(consentOwner)
-            print("nativeConsent=\(permissions.sorted().joined(separator: ",")) owner=\(owner)")
+            tracePermission("return-consent", owner: owner.0, pid: owner.1)
+            print("nativeConsent=\(permissions.sorted().joined(separator: ",")) owner=\(owner.0)")
         }
         return action
     }

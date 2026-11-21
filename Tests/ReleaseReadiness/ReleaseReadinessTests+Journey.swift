@@ -19,36 +19,11 @@ extension ReleaseReadinessTests {
         }
         XCTAssertTrue(persistedOnboardingCompleted())
         XCTAssertTrue(app.statusItems["Jarvis is stopped"].exists)
-        if phase == "upgrade" {
-            let expectedPath = try XCTUnwrap(environment["JARVIS_READINESS_UPGRADE_PROFILE"])
-            let expected = try XCTUnwrap(PropertyListSerialization.propertyList(
-                from: Data(contentsOf: URL(fileURLWithPath: expectedPath)), format: nil) as? [String: Any])
-            let actual = try preferences()
-            for (key, value) in expected {
-                XCTAssertTrue(NSDictionary(dictionary: [key: value]).isEqual(to: [key: actual[key] as Any]),
-                              "Upgrade must retain existing user preferences before any setting changes")
-            }
-        }
-        try checkSkills(app)
-        try selectOpenAIBrain(app)
-        let models = phase == "predecessor" ? ["GPT Transcribe"] : ["GPT Transcribe", "GPT-4o Transcribe"]
-        var results: [[String: Any]] = []
-        for model in models {
-            try selectTranscription(model, app: app)
-            for cycle in 1...(phase == "predecessor" ? 1 : 2) {
-                results.append(try runSession(app, model: model, cycle: cycle))
-            }
-        }
+        writePermissionTrace()
         app.typeKey("q", modifierFlags: .command)
-        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "Normal Quit must close the exact installed app")
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
         try audioDevices?.restore()
         audioDevices = nil
-        let receipt: [String: Any] = ["schemaVersion": 1, "phase": phase, "skills": 5,
-                                     "nativeProcessVerified": true,
-                                     "normalQuit": true, "defaultsRestored": true, "sessions": results]
-        let evidence = try XCTUnwrap(environment["JARVIS_READINESS_EVIDENCE"])
-        try JSONSerialization.data(withJSONObject: receipt).write(
-            to: URL(fileURLWithPath: evidence).appendingPathComponent("journey.json"), options: .atomic)
     }
 
     private func settings(_ app: XCUIApplication) throws -> XCUIElement {

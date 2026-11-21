@@ -1,0 +1,76 @@
+name: Diagnose native release permissions
+on:
+  push:
+    branches: [diagnose/release-permission-automation]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  permissions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44851545996
+          artifact-ids: 14686032238
+          path: retained-candidate
+          merge-multiple: true
+          digest-mismatch: error
+      - name: Extract the two signed apps from the failed readiness run
+        run: |
+          set -euo pipefail
+          umask 077
+          curl --fail --location --retry 3 https://github.com/JINGBANZ/jarvis/releases/download/v0.5.14/Jarvis.dmg --output "$RUNNER_TEMP/predecessor.dmg"
+          printf '%s  %s\n' eb2f8ebc0f78ff4d6b09773e9052652eae74ffcc9d4bebf885a8c62b9b38416c "$RUNNER_TEMP/predecessor.dmg" | shasum -a 256 -c -
+          mount_point="$(mktemp -d "$RUNNER_TEMP/jarvis-permission-diagnosis.XXXXXX")"
+          trap 'hdiutil detach "$mount_point" >/dev/null 2>&1 || true; rmdir "$mount_point"' EXIT
+          for phase in candidate predecessor; do
+            image=retained-candidate/Jarvis.dmg
+            if [[ "$phase" == predecessor ]]; then image="$RUNNER_TEMP/predecessor.dmg"; fi
+            hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount_point"
+            ditto "$mount_point/Jarvis.app" "$RUNNER_TEMP/Jarvis-$phase.app"
+            hdiutil detach "$mount_point"
+          done
+      - name: Match the release runner's audio setup
+        run: |
+          set -euo pipefail
+          /usr/bin/automationmodetool | grep -F 'DOES NOT REQUIRE'
+          curl --fail --location --retry 3 https://existential.audio/downloads/BlackHole16ch-0.7.1.pkg --output "$RUNNER_TEMP/BlackHole16ch.pkg"
+          printf '%s  %s\n' 57254e2f76cd40db7f3f715238b1a2cb2bd08819d38abf4087f2944f71a3641a "$RUNNER_TEMP/BlackHole16ch.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "$RUNNER_TEMP/BlackHole16ch.pkg" -target /
+          sudo killall coreaudiod
+          sleep 3
+      - name: Prepare native permission authorization
+        run: python3 scripts/prepare-release-ui-account.py prepare
+      - name: Exercise permission onboarding only
+        env:
+          RELEASE_READINESS_OPENAI_API_KEY: diagnostic-placeholder-unused
+        run: python3 scripts/probe-release-ui.py --candidate "$RUNNER_TEMP/Jarvis-candidate.app" --predecessor "$RUNNER_TEMP/Jarvis-predecessor.app"
+      - name: Clean up native permission authorization
+        if: always()
+        run: python3 scripts/prepare-release-ui-account.py cleanup
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: permission-diagnosis-${{ matrix.os }}
+          path: |
+            .jarvis/release-ui-probe/*/*/permission-trace.json
+            .jarvis/release-ui-probe/*/*/permission-discovery.json
+            .jarvis/release-ui-probe/*/*/permission-wait.json
+            .jarvis/release-ui-probe/*/*/permission-completion.json
+            .jarvis/release-ui-probe/*/*/ui-stage.json
+            .jarvis/release-ui-probe/*/*/ui-failure.json
+            .jarvis/release-ui-probe/*/*/summary.json
+            .jarvis/release-ui-probe/*/*/cleanup.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 3
