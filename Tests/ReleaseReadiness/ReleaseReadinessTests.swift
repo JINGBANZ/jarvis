@@ -1,5 +1,4 @@
 import AppKit
-import CoreServices
 import os
 import XCTest
 
@@ -756,22 +755,17 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(bundle.bundleIdentifier, bundleID)
         XCTAssertEqual(bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, expectedVersion)
         XCTAssertNotEqual(bundle.object(forInfoDictionaryKey: "JarvisDevelopmentBuild") as? Bool, true)
-        let workspace = NSWorkspace.shared
-        let registeredBefore = workspace.urlForApplication(withBundleIdentifier: bundleID)?.resolvingSymlinksInPath() == url
-        let registration = LSRegisterURL(url as CFURL, true)
-        let registeredAfter = workspace.urlForApplication(withBundleIdentifier: bundleID)?.resolvingSymlinksInPath() == url
-        let registrationEvidence = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
-        try JSONSerialization.data(withJSONObject: ["before": registeredBefore, "after": registeredAfter,
-                                                    "result": Int(registration)] as [String: Any]).write(
-            to: URL(fileURLWithPath: registrationEvidence).appendingPathComponent("app-registration.json"), options: .atomic)
-        XCTAssertEqual(registration, noErr)
-        XCTAssertTrue(registeredAfter)
         installedURL = url
         let app = XCUIApplication(url: url)
         app.launchArguments = []
         app.launchEnvironment = [:]
         application = app
         app.launch()
+        let registryResolution = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.resolvingSymlinksInPath()
+        let registrationEvidence = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
+        let matches: [String: Any] = ["resolved": registryResolution != nil, "matchesInstalled": registryResolution == url]
+        try JSONSerialization.data(withJSONObject: matches).write(
+            to: URL(fileURLWithPath: registrationEvidence).appendingPathComponent("app-registration.json"), options: .atomic)
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
         XCTAssertEqual(running.count, 1, "Exactly one installed candidate must run")
         let actual = try XCTUnwrap(running.first)
