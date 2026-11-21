@@ -645,9 +645,17 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertTrue(open.waitForExistence(timeout: 10), "The native app picker must open")
         settings.typeKey("g", modifierFlags: [.command, .shift])
         attachEvidence(settings, name: "recording-add-go-to")
-        settings.typeText(try XCTUnwrap(installedURL).path)
+        let installed = try XCTUnwrap(installedURL)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString(installed.path, forType: .string))
+        defer { pasteboard.clearContents() }
+        settings.typeKey("v", modifierFlags: .command)
+        attachEvidence(settings, name: "recording-add-path-pasted")
         settings.typeKey(.return, modifierFlags: [])
-        XCTAssertTrue(open.waitForExistence(timeout: 10), "The picker must return from Go to Folder")
+        attachEvidence(settings, name: "recording-add-folder-selected")
+        let selectable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: open)
+        XCTAssertEqual(XCTWaiter.wait(for: [selectable], timeout: 10), .completed)
         open.click()
         attachEvidence(settings, name: "recording-add-confirmed")
     }
