@@ -11,6 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-15, macos-15-intel, macos-26]
+        journey: [candidate, predecessor]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 18
     steps:
@@ -54,14 +55,14 @@ jobs:
       - name: Exercise permission onboarding only
         env:
           RELEASE_READINESS_OPENAI_API_KEY: diagnostic-placeholder-unused
-        run: python3 scripts/probe-release-ui.py --candidate "$RUNNER_TEMP/Jarvis-candidate.app" --predecessor "$RUNNER_TEMP/Jarvis-predecessor.app"
+        run: python3 scripts/probe-release-ui.py --setup-candidate "$RUNNER_TEMP/Jarvis-${{ matrix.journey }}.app"
       - name: Clean up native permission authorization
         if: always()
         run: python3 scripts/prepare-release-ui-account.py cleanup
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: permission-diagnosis-${{ matrix.os }}
+          name: permission-diagnosis-${{ matrix.os }}-${{ matrix.journey }}
           path: |
             .jarvis/release-ui-probe/*/*/permission-trace.json
             .jarvis/release-ui-probe/*/*/permission-discovery.json

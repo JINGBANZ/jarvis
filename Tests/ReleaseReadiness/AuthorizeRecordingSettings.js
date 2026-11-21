@@ -79,7 +79,7 @@ function run() {
         function attribute(element, name, optional = false) {
             const value = Ref();
             let error = Number($.AXUIElementCopyAttributeValue(element, $(name), value));
-            // A busy native view can transiently refuse an attribute read.
+            // Retry a transient, read-only AX timeout before verifying the native form.
             for (let retry = 0; error === -25204 && retry < 2; retry++) {
                 $.NSThread.sleepForTimeInterval(0.05);
                 error = Number($.AXUIElementCopyAttributeValue(element, $(name), value));
