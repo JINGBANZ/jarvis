@@ -522,8 +522,33 @@ final class ReleaseReadinessTests: XCTestCase {
                                      "allNamedSwitches": pane.switches.matching(identifier: "Jarvis_Toggle").count]
         try JSONSerialization.data(withJSONObject: layout).write(
             to: evidenceDirectory.appendingPathComponent("recording-layout.json"), options: .atomic)
-        XCTAssertEqual(sections.count, 1, "Exactly one Jarvis outline must belong to the screen-recording section")
-        let section = try XCTUnwrap(sections.first)
+        func currentSections() -> [XCUIElement] {
+            pane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex.filter {
+                let frame = $0.frame
+                return frame.height > 0 && frame.minY >= screenHeading.frame.maxY && frame.maxY <= audioOnlyHeading.frame.minY
+            }
+        }
+        var availableSections = sections
+        if pane.switches.matching(identifier: "Jarvis_Toggle").count == 0 {
+            attachEvidence(settings, name: "recording-wait-for-row")
+            let row = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !currentSections().isEmpty
+            }, object: nil)
+            _ = XCTWaiter.wait(for: [row], timeout: 10)
+            availableSections = currentSections()
+            if availableSections.isEmpty {
+                attachEvidence(settings, name: "recording-add-missing-app")
+                try addInstalledApp(settings: settings, pane: pane, screenEnd: screenEnd, audioStart: audioStart,
+                                    evidence: evidenceDirectory)
+                let added = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    !currentSections().isEmpty
+                }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [added], timeout: 10), .completed)
+                availableSections = currentSections()
+            }
+        }
+        XCTAssertEqual(availableSections.count, 1, "Exactly one Jarvis outline must belong to the screen-recording section")
+        let section = try XCTUnwrap(availableSections.first)
         attachEvidence(settings, name: "recording-section-matched")
         XCTAssertEqual(section.staticTexts["Jarvis_Title"].value as? String, "Jarvis")
         XCTAssertEqual(section.switches.matching(identifier: "Jarvis_Toggle").count, 1)
@@ -593,11 +618,38 @@ final class ReleaseReadinessTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: finalState).write(
             to: URL(fileURLWithPath: evidence).appendingPathComponent("recording-final.json"), options: .atomic)
         XCTAssertEqual(enabledResult, .completed, "Screen-recording grant must be enabled")
-        // Start the next journey with a new privacy pane after its TCC reset.
-        settings.terminate()
-        XCTAssertTrue(settings.wait(for: .notRunning, timeout: 10),
-                      "System Settings must exit after the recording grant is verified")
         return relaunches
+    }
+
+    private func addInstalledApp(settings: XCUIApplication, pane: XCUIElement, screenEnd: CGFloat,
+                                 audioStart: CGFloat, evidence: URL) throws {
+        let buttons = pane.buttons.allElementsBoundByIndex
+        var receipts: [[String: Any]] = []
+        let addButtons = buttons.filter {
+            let frame = $0.frame
+            let titles = [$0.identifier, $0.label, $0.title]
+            let add = titles.contains { title in
+                title == "+" || title.localizedCaseInsensitiveContains("add")
+                    || title.localizedCaseInsensitiveContains("plus")
+            }
+            receipts.append(["add": add, "minus": titles.contains { $0.localizedCaseInsensitiveContains("remove") || $0 == "-" },
+                             "minY": frame.minY, "maxY": frame.maxY])
+            return add && frame.height > 0 && frame.minY >= screenEnd && frame.maxY <= audioStart
+        }
+        try JSONSerialization.data(withJSONObject: receipts).write(to: evidence.appendingPathComponent("recording-add-controls.json"),
+                                                                  options: .atomic)
+        XCTAssertEqual(addButtons.count, 1, "Exactly one Add control must belong to the screen-recording list")
+        try XCTUnwrap(addButtons.first).click()
+        attachEvidence(settings, name: "recording-add-clicked")
+        let open = settings.buttons.matching(identifier: "Open").firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 10), "The native app picker must open")
+        settings.typeKey("g", modifierFlags: [.command, .shift])
+        attachEvidence(settings, name: "recording-add-go-to")
+        settings.typeText(try XCTUnwrap(installedURL).path)
+        settings.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(open.waitForExistence(timeout: 10), "The picker must return from Go to Folder")
+        open.click()
+        attachEvidence(settings, name: "recording-add-confirmed")
     }
 
     private func recordingToggleEnabled(_ value: Any?) -> Bool? {
