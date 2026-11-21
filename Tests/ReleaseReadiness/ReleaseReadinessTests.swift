@@ -647,10 +647,14 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(addButtons.count, 1, "Exactly one Add control must belong to the screen-recording list")
         try XCTUnwrap(addButtons.first).click()
         attachEvidence(settings, name: "recording-add-clicked")
-        let open = settings.buttons.matching(identifier: "Open").firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 25), "The native app picker must open")
-        XCTAssertEqual(settings.buttons.matching(identifier: "Open").count, 1)
-        XCTAssertEqual(settings.buttons.matching(identifier: "Cancel").count, 1)
+        let open = settings.buttons.matching(identifier: "Open")
+        XCTAssertTrue(open.firstMatch.waitForExistence(timeout: 25), "The native app picker must open")
+        let cancel = settings.buttons.matching(identifier: "Cancel")
+        let pickerReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            cancel.allElementsBoundByIndex.contains { $0.isHittable }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [pickerReady], timeout: 10), .completed)
+        attachEvidence(settings, name: "recording-add-picker-ready")
         settings.typeKey("g", modifierFlags: [.command, .shift])
         attachEvidence(settings, name: "recording-add-go-to")
         let installed = try XCTUnwrap(installedURL)
@@ -674,7 +678,10 @@ final class ReleaseReadinessTests: XCTestCase {
         attachEvidence(settings, name: "recording-add-file-found")
         (cell.isHittable ? cell : label).click()
         attachEvidence(settings, name: "recording-add-file-selected")
-        XCTAssertTrue(open.isEnabled)
+        let canOpen = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            open.allElementsBoundByIndex.contains { $0.isEnabled && $0.isHittable }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [canOpen], timeout: 10), .completed)
         settings.typeKey(.return, modifierFlags: [])
         attachEvidence(settings, name: "recording-add-confirmed")
     }
