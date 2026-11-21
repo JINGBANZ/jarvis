@@ -144,12 +144,13 @@ jobs:
           rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/AuthKey.p8"
 
   installed:
-    name: Installed app (${{ matrix.os }})
+    name: Installed app (${{ matrix.os }}, ${{ matrix.journey }})
     needs: [prepare, candidate]
     strategy:
       fail-fast: false
       matrix:
         os: [macos-15, macos-26, macos-15-intel]
+        journey: [fresh, upgrade]
     runs-on: ${{ matrix.os }}
     environment: release
     timeout-minutes: 90
@@ -177,7 +178,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release-promotion.py candidate --directory retained-candidate
-      - name: Verify and extract the candidate and frozen predecessor
+      - name: Verify the disk image for the first install
+        env:
+          JOURNEY: ${{ matrix.journey }}
         run: |
           set -euo pipefail
           umask 077
@@ -185,29 +188,15 @@ jobs:
           "$RUNNER_TEMP/release-layout-venv/bin/python" -m pip install \
             --require-hashes --requirement scripts/requirements-release.txt
           export DMGBUILD_PYTHON="$RUNNER_TEMP/release-layout-venv/bin/python"
-          mkdir "$RUNNER_TEMP/predecessor"
-          python3 scripts/release-promotion.py predecessor --output "$RUNNER_TEMP/predecessor/Jarvis.dmg"
-          TAG="$(python3 -c 'import json,os; print("v"+json.loads(os.environ["RELEASE_IDENTITY"])["version"])')"
-          ./scripts/verify-release.sh retained-candidate/Jarvis.dmg "$TAG"
-          PREDECESSOR_TAG="$(python3 -c 'import json,os; print(json.loads(os.environ["RELEASE_IDENTITY"])["predecessor"]["tag"])')"
-          ./scripts/verify-release.sh "$RUNNER_TEMP/predecessor/Jarvis.dmg" "$PREDECESSOR_TAG"
-          mount_point="$(mktemp -d "$RUNNER_TEMP/jarvis-candidate.XXXXXX")"
-          mounted=false
-          cleanup() {
-            if [[ "$mounted" == true ]]; then hdiutil detach "$mount_point" || exit 1; fi
-            rmdir "$mount_point"
-          }
-          trap cleanup EXIT
-          for phase in candidate predecessor; do
-            if [[ "$phase" == candidate ]]; then image=retained-candidate/Jarvis.dmg; else image="$RUNNER_TEMP/predecessor/Jarvis.dmg"; fi
-            hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount_point"
-            mounted=true
-            test ! -e "$RUNNER_TEMP/Jarvis-$phase.app"
-            ditto "$mount_point/Jarvis.app" "$RUNNER_TEMP/Jarvis-$phase.app"
-            codesign --verify --strict --deep "$RUNNER_TEMP/Jarvis-$phase.app"
-            hdiutil detach "$mount_point"
-            mounted=false
-          done
+          if [[ "$JOURNEY" == upgrade ]]; then
+            mkdir "$RUNNER_TEMP/predecessor"
+            python3 scripts/release-promotion.py predecessor --output "$RUNNER_TEMP/predecessor/Jarvis.dmg"
+            TAG="$(python3 -c 'import json,os; print(json.loads(os.environ["RELEASE_IDENTITY"])["predecessor"]["tag"])')"
+            ./scripts/verify-release.sh "$RUNNER_TEMP/predecessor/Jarvis.dmg" "$TAG"
+          else
+            TAG="$(python3 -c 'import json,os; print("v"+json.loads(os.environ["RELEASE_IDENTITY"])["version"])')"
+            ./scripts/verify-release.sh retained-candidate/Jarvis.dmg "$TAG"
+          fi
       - name: Require supported UI automation
         run: /usr/bin/automationmodetool | grep -F 'DOES NOT REQUIRE'
       - name: Install the pinned silent microphone input
@@ -219,20 +208,26 @@ jobs:
           sleep 3
       - name: Prepare native permission authorization
         run: python3 scripts/prepare-release-ui-account.py prepare
-      - name: Require fresh, predecessor, and retained-state upgrade journeys
+      - name: Require the installed-app journey
         env:
+          JOURNEY: ${{ matrix.journey }}
           RELEASE_READINESS_OPENAI_API_KEY: ${{ secrets.RELEASE_TEST_OPENAI_API_KEY }}
-        run: python3 scripts/probe-release-ui.py --candidate "$RUNNER_TEMP/Jarvis-candidate.app" --predecessor "$RUNNER_TEMP/Jarvis-predecessor.app"
+        run: |
+          images=(--candidate-dmg "$GITHUB_WORKSPACE/retained-candidate/Jarvis.dmg")
+          if [[ "$JOURNEY" == upgrade ]]; then
+            images+=(--predecessor-dmg "$RUNNER_TEMP/predecessor/Jarvis.dmg")
+          fi
+          python3 scripts/probe-release-ui.py "${images[@]}"
       - name: Remove temporary permission authorization
         if: always()
         run: python3 scripts/prepare-release-ui-account.py cleanup
       - name: Bind native proof to the candidate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/release-promotion.py native-proof --os '${{ matrix.os }}' --source .jarvis/release-ui-probe --output native-proof
+        run: python3 scripts/release-promotion.py native-proof --os '${{ matrix.os }}' --journey '${{ matrix.journey }}' --source .jarvis/release-ui-probe --output native-proof
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-native-${{ github.run_attempt }}-${{ matrix.os }}
+          name: release-native-${{ github.run_attempt }}-${{ matrix.os }}-${{ matrix.journey }}
           path: native-proof/
           if-no-files-found: error
           retention-days: 30
@@ -240,7 +235,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-failure-${{ github.run_attempt }}-${{ matrix.os }}
+          name: release-failure-${{ github.run_attempt }}-${{ matrix.os }}-${{ matrix.journey }}
           path: |
             .jarvis/release-ui-probe/*/stage.json
             .jarvis/release-ui-probe/*/*/ui-stage.json

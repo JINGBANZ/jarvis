@@ -409,9 +409,10 @@ environment. The appcast signs the final DMG bytes and uses the frozen notes, so
 a draft Release existing before merge.
 
 The same retained candidate runs the [basic installed-app journey](./live-e2e-tests.md#external-installed-app-readiness)
-on native Apple silicon macOS 15 and 26 and Intel macOS 15. Every job requires fresh installation,
-normal provider-backed operation, Stop/restart, and retained-state upgrade from the frozen public
-predecessor. Missing, failed, skipped, or cancelled native work cannot produce acceptance. This proves
+on native Apple silicon macOS 15 and 26 and Intel macOS 15. Each platform uses separate runners for
+fresh installation and retained-state upgrade from the frozen public predecessor. Both journeys
+require normal provider-backed operation and Stop/restart. Missing, failed, skipped, or cancelled
+native work cannot produce acceptance. This proves
 basic operation with synthetic system speech and a silent virtual microphone; speech quality,
 microphone acoustics, isolation, and coaching usefulness belong to separate tests and evaluations.
 The native evidence binds the immutable candidate artifact ID and digest, manifest, and individual file

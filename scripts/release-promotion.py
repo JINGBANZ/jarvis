@@ -27,6 +27,9 @@ WORKFLOW = ".github/workflows/release-ready.yml"
 SOURCE_JOBS = ("Compatibility (macos-15)", "Gate (macos-26)", "Gate (macos-26-intel)")
 NATIVE_JOBS = {"macos-15": ("arm64", "15"), "macos-26": ("arm64", "26"),
                "macos-15-intel": ("x86_64", "15")}
+NATIVE_JOURNEYS = {"fresh": ["fresh"], "upgrade": ["predecessor", "upgrade"]}
+NATIVE_PROOFS = {f"{os_name}-{journey}": (os_name, journey)
+                 for os_name in NATIVE_JOBS for journey in NATIVE_JOURNEYS}
 METADATA = {"CHANGELOG.md", ".release-please-manifest.json", "Resources/Info.plist"}
 ASSETS = {"Jarvis.dmg", "appcast.xml"}
 ACTIONS_APP = 15368
@@ -356,7 +359,7 @@ def artifact_record(api, artifact_id, run_id, expected_digest=None):
     return {"id": artifact_id, "runID": run_id, "sha256": value}
 
 
-def native_proof(identity, candidate, manifest_hash, os_name, evidence, directory):
+def native_proof(identity, candidate, manifest_hash, os_name, journey, evidence, directory):
     import platform
     expected_arch, expected_os = NATIVE_JOBS[os_name]
     require(platform.machine() == expected_arch and platform.mac_ver()[0].split(".")[0] == expected_os,
@@ -364,14 +367,16 @@ def native_proof(identity, candidate, manifest_hash, os_name, evidence, director
     receipts = list(evidence.glob("*/readiness.json"))
     require(len(receipts) == 1, "One complete readiness result is required")
     receipt = read_json(receipts[0])
-    expected = {"schemaVersion": 1, "check": "release-readiness", "releaseReady": True,
-        "architecture": expected_arch, "candidateVersion": identity["version"],
-        "predecessorVersion": identity["predecessor"]["tag"][1:], "phases": ["fresh", "predecessor", "upgrade"],
-        "passed": True, "retainedPreferences": True, "retainedCredential": True, "retainedSessionHistory": True}
+    phases = NATIVE_JOURNEYS[journey]
+    expected = {"schemaVersion": 1, "check": "release-readiness", "architecture": expected_arch,
+                "candidateVersion": identity["version"], "phases": phases, "passed": True}
+    if journey == "upgrade":
+        expected.update(predecessorVersion=identity["predecessor"]["tag"][1:], retainedPreferences=True,
+                        retainedCredential=True, retainedSessionHistory=True)
     require(receipt == expected and all(type(receipt[key]) is type(value) for key, value in expected.items()),
             "Installed-app readiness is incomplete")
     runner = runpy.run_path(str(ROOT / "scripts/probe-release-ui.py"))
-    for phase in ("fresh", "predecessor", "upgrade"):
+    for phase in phases:
         root = receipts[0].parent / phase
         runner["validate_journey"](read_json(root / "journey.json"), phase)
         runner["validate_summary"](read_json(root / "summary.json"))
@@ -381,21 +386,21 @@ def native_proof(identity, candidate, manifest_hash, os_name, evidence, director
     directory.mkdir(mode=0o700)
     proof = {"schemaVersion": 1, "identity": identity, "candidate": candidate,
              "manifestSHA256": sha(manifest_hash, 64), "os": os_name, "architecture": expected_arch,
-             "macOS": platform.mac_ver()[0], "passed": True}
-    write_json(directory / (os_name + ".json"), proof)
+             "macOS": platform.mac_ver()[0], "journey": journey, "passed": True}
+    write_json(directory / f"{os_name}-{journey}.json", proof)
 
 
 def native_artifacts(api, identity):
     worker = identity["workerRun"]
     jobs = api.pages(f"/actions/runs/{worker['id']}/attempts/{worker['attempt']}/jobs", "jobs")
-    expected = {"Installed app (" + name + ")" for name in NATIVE_JOBS}
+    expected = {f"Installed app ({os_name}, {journey})" for os_name, journey in NATIVE_PROOFS.values()}
     selected = [job for job in jobs if job["name"] in expected]
-    require(len(selected) == 3 and {job["name"] for job in selected} == expected
+    require(len(selected) == len(expected) and {job["name"] for job in selected} == expected
             and all(job["status"] == "completed" and job["conclusion"] == "success" for job in selected),
-            "All three native jobs must succeed")
+            "Every native platform and journey must succeed")
     artifacts = api.pages(f"/actions/runs/{worker['id']}/artifacts", "artifacts")
     records = {}
-    for name in NATIVE_JOBS:
+    for name in NATIVE_PROOFS:
         matched = [item for item in artifacts if item["name"] == f"release-native-{worker['attempt']}-{name}"]
         require(len(matched) == 1, "Missing or ambiguous native evidence")
         records[name] = artifact_record(api, matched[0]["id"], worker["id"])
@@ -403,14 +408,16 @@ def native_artifacts(api, identity):
 
 
 def accept(identity, candidate, manifest_hash, records, directory, destination):
-    require({path.name for path in directory.iterdir()} == {name + ".json" for name in NATIVE_JOBS},
+    require(set(records) == set(NATIVE_PROOFS)
+            and {path.name for path in directory.iterdir()} == {name + ".json" for name in NATIVE_PROOFS},
             "Unexpected native evidence files")
     proofs = {}
-    for name, (architecture, major) in NATIVE_JOBS.items():
+    for name, (os_name, journey) in NATIVE_PROOFS.items():
+        architecture, major = NATIVE_JOBS[os_name]
         proof = read_json(directory / (name + ".json"))
-        require(set(proof) == {"schemaVersion", "identity", "candidate", "manifestSHA256", "os", "architecture", "macOS", "passed"}
+        require(set(proof) == {"schemaVersion", "identity", "candidate", "manifestSHA256", "os", "architecture", "macOS", "journey", "passed"}
                 and proof["schemaVersion"] == 1 and proof["identity"] == identity and proof["candidate"] == candidate
-                and proof["manifestSHA256"] == manifest_hash and proof["os"] == name
+                and proof["manifestSHA256"] == manifest_hash and proof["os"] == os_name and proof["journey"] == journey
                 and proof["architecture"] == architecture and proof["macOS"].split(".")[0] == major
                 and proof["passed"] is True, "Native evidence is mismatched or incomplete")
         proofs[name] = file_hash(directory / (name + ".json"))
@@ -506,8 +513,8 @@ def verify_promotion(record, acceptance_directory, candidate_directory):
     acceptance = read_json(acceptance_directory / "acceptance.json")
     for key in ("identity", "candidate", "manifestSHA256"):
         require(acceptance[key] == record[key], "Acceptance identity disagrees")
-    require(set(acceptance["nativeArtifacts"]) == set(NATIVE_JOBS)
-            and set(acceptance["nativeFiles"]) == set(NATIVE_JOBS), "Acceptance omits a native platform")
+    require(set(acceptance["nativeArtifacts"]) == set(NATIVE_PROOFS)
+            and set(acceptance["nativeFiles"]) == set(NATIVE_PROOFS), "Acceptance omits a native platform or journey")
     verify_files(candidate_directory, record["identity"], record["manifestSHA256"])
     (candidate_directory / "release-notes.md").write_text(record["identity"]["notes"] + "\n")
 
@@ -521,6 +528,7 @@ def main():
     parser.add_argument("--source", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--os", choices=tuple(NATIVE_JOBS))
+    parser.add_argument("--journey", choices=tuple(NATIVE_JOURNEYS))
     parser.add_argument("--tag")
     args = parser.parse_args()
     identity = json.loads(os.environ["RELEASE_IDENTITY"]) if os.environ.get("RELEASE_IDENTITY") else None
@@ -555,7 +563,8 @@ def main():
                 fresh(api, identity)
                 verify_files(args.directory, identity, manifest_hash)
             elif operation == "native-proof":
-                native_proof(identity, candidate, manifest_hash, args.os, args.source, args.output)
+                require(args.os is not None and args.journey is not None, "Native evidence requires a platform and journey")
+                native_proof(identity, candidate, manifest_hash, args.os, args.journey, args.source, args.output)
             elif operation == "native-artifacts":
                 records = native_artifacts(api, identity)
                 output(native_ids=",".join(str(record["id"]) for record in records.values()), native_records=records)
