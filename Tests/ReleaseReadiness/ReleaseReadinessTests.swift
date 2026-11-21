@@ -201,7 +201,9 @@ final class ReleaseReadinessTests: XCTestCase {
                         && self.grantedPermissionCount(in: onboarding) == 2
                         && onboarding.staticTexts.matching(identifier: "Refused").count == 1
                 case "Quit & Reopen":
-                    permitted = self.grantedPermissionCount(in: onboarding) == 2
+                    // The app can offer a relaunch before macOS presents the asynchronous screen prompt.
+                    permitted = acceptedConsents == ["microphone", "audio", "screen"]
+                        && self.grantedPermissionCount(in: onboarding) == 2
                         && onboarding.staticTexts.matching(identifier: "Reopen to finish").count == 1
                 default:
                     permitted = acceptedConsents == ["microphone", "audio", "screen"]
