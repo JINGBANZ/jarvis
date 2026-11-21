@@ -78,7 +78,12 @@ function run() {
 
         function attribute(element, name, optional = false) {
             const value = Ref();
-            const error = Number($.AXUIElementCopyAttributeValue(element, $(name), value));
+            let error = Number($.AXUIElementCopyAttributeValue(element, $(name), value));
+            // Retry a transient, read-only AX timeout before verifying the native form.
+            for (let retry = 0; error === -25204 && retry < 2; retry++) {
+                $.NSThread.sleepForTimeInterval(0.05);
+                error = Number($.AXUIElementCopyAttributeValue(element, $(name), value));
+            }
             if (optional && (error === -25205 || error === -25212)) { return null; }
             check(error);
             return value[0] && !value[0].isNil() ? value[0] : null;
