@@ -713,8 +713,16 @@ final class ReleaseReadinessTests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [canOpen], timeout: 10), .completed)
         let button = try XCTUnwrap(openButtons().first)
-        attachEvidence(settings, name: "recording-add-open-verified")
-        button.click()
+        let frame = button.frame
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        let owningWindow = try XCTUnwrap(settings.windows.allElementsBoundByIndex.first {
+            $0.frame.contains(center) && $0.frame.width > 0 && $0.frame.height > 0
+        })
+        let window = owningWindow.frame
+        let point = CGVector(dx: (center.x - window.minX) / window.width,
+                             dy: (center.y - window.minY) / window.height)
+        attachEvidence(settings, name: "recording-add-open-coordinate-verified")
+        owningWindow.coordinate(withNormalizedOffset: point).click()
         attachEvidence(settings, name: "recording-add-confirmed")
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             !cancel.allElementsBoundByIndex.contains { $0.isHittable }

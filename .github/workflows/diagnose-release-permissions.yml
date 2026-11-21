@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15-intel, macos-26]
+        os: [macos-26]
         journey: [predecessor]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 18
