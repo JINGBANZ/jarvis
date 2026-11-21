@@ -1,9 +1,8 @@
 name: Diagnose native release permissions
 on:
   push:
-    branches: [diagnose/release-permission-automation]
+    branches: [diagnose/pr507-predecessor-only]
 permissions:
-  actions: read
   contents: read
 jobs:
   permissions:
@@ -11,22 +10,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-15, macos-15-intel, macos-26]
-        journey: [candidate, predecessor]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
-        with:
-          github-token: ${{ github.token }}
-          run-id: 44851545996
-          artifact-ids: 14686032238
-          path: retained-candidate
-          merge-multiple: true
-          digest-mismatch: error
-      - name: Extract the two signed apps from the failed readiness run
+      - name: Extract only the signed public predecessor
         run: |
           set -euo pipefail
           umask 077
@@ -34,13 +24,9 @@ jobs:
           printf '%s  %s\n' eb2f8ebc0f78ff4d6b09773e9052652eae74ffcc9d4bebf885a8c62b9b38416c "$RUNNER_TEMP/predecessor.dmg" | shasum -a 256 -c -
           mount_point="$(mktemp -d "$RUNNER_TEMP/jarvis-permission-diagnosis.XXXXXX")"
           trap 'hdiutil detach "$mount_point" >/dev/null 2>&1 || true; rmdir "$mount_point"' EXIT
-          for phase in candidate predecessor; do
-            image=retained-candidate/Jarvis.dmg
-            if [[ "$phase" == predecessor ]]; then image="$RUNNER_TEMP/predecessor.dmg"; fi
-            hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount_point"
-            ditto "$mount_point/Jarvis.app" "$RUNNER_TEMP/Jarvis-$phase.app"
-            hdiutil detach "$mount_point"
-          done
+          hdiutil attach "$RUNNER_TEMP/predecessor.dmg" -readonly -nobrowse -mountpoint "$mount_point"
+          ditto "$mount_point/Jarvis.app" "$RUNNER_TEMP/Jarvis-predecessor.app"
+          hdiutil detach "$mount_point"
       - name: Match the release runner's audio setup
         run: |
           set -euo pipefail
@@ -55,14 +41,14 @@ jobs:
       - name: Exercise permission onboarding only
         env:
           RELEASE_READINESS_OPENAI_API_KEY: diagnostic-placeholder-unused
-        run: python3 scripts/probe-release-ui.py --setup-candidate "$RUNNER_TEMP/Jarvis-${{ matrix.journey }}.app"
+        run: python3 scripts/probe-release-ui.py --setup-candidate "$RUNNER_TEMP/Jarvis-predecessor.app"
       - name: Clean up native permission authorization
         if: always()
         run: python3 scripts/prepare-release-ui-account.py cleanup
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: permission-diagnosis-${{ matrix.os }}-${{ matrix.journey }}
+          name: permission-diagnosis-${{ matrix.os }}-predecessor
           path: |
             .jarvis/release-ui-probe/*/*/permission-trace.json
             .jarvis/release-ui-probe/*/*/permission-discovery.json
