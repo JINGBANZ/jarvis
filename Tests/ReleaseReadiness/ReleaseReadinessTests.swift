@@ -593,6 +593,10 @@ final class ReleaseReadinessTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: finalState).write(
             to: URL(fileURLWithPath: evidence).appendingPathComponent("recording-final.json"), options: .atomic)
         XCTAssertEqual(enabledResult, .completed, "Screen-recording grant must be enabled")
+        // Start the next journey with a new privacy pane after its TCC reset.
+        settings.terminate()
+        XCTAssertTrue(settings.wait(for: .notRunning, timeout: 10),
+                      "System Settings must exit after the recording grant is verified")
         return relaunches
     }
 
