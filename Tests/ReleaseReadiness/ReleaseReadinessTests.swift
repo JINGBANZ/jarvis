@@ -543,6 +543,24 @@ final class ReleaseReadinessTests: XCTestCase {
             _ = XCTWaiter.wait(for: [row], timeout: 10)
             availableSections = currentSections()
             if availableSections.isEmpty {
+                let screenLists = pane.outlines.allElementsBoundByIndex.filter {
+                    let frame = $0.frame
+                    return frame.height > 0 && frame.minY >= screenEnd && frame.maxY <= audioStart
+                }
+                if screenLists.count == 1, let list = screenLists.first, list.isHittable {
+                    for direction in [-400.0, 400.0] {
+                        list.scroll(byDeltaX: 0, deltaY: direction)
+                        attachEvidence(settings, name: direction < 0 ? "recording-scroll-down" : "recording-scroll-up")
+                        let row = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                            !currentSections().isEmpty
+                        }, object: nil)
+                        _ = XCTWaiter.wait(for: [row], timeout: 3)
+                        availableSections = currentSections()
+                        if !availableSections.isEmpty { break }
+                    }
+                }
+            }
+            if availableSections.isEmpty {
                 attachEvidence(settings, name: "recording-add-missing-app")
                 try addInstalledApp(settings: settings, pane: pane, screenEnd: screenEnd, audioStart: audioStart,
                                     evidence: evidenceDirectory)
