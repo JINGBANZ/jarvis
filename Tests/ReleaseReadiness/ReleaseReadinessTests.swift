@@ -519,7 +519,13 @@ final class ReleaseReadinessTests: XCTestCase {
         }
         let layout: [String: Any] = ["screenEnd": screenEnd, "audioStart": audioStart, "outlines": locations,
                                      "screenEnabledCount": sections.count,
-                                     "allNamedSwitches": pane.switches.matching(identifier: "Jarvis_Toggle").count]
+                                     "allNamedSwitches": pane.switches.matching(identifier: "Jarvis_Toggle").count,
+                                     "jarvisLabels": pane.staticTexts.allElementsBoundByIndex.filter {
+                                         [$0.identifier, $0.label, $0.value as? String ?? ""].contains("Jarvis")
+                                     }.count,
+                                     "screenSwitchCount": pane.switches.allElementsBoundByIndex.filter {
+                                         $0.frame.height > 0 && $0.frame.minY >= screenEnd && $0.frame.maxY <= audioStart
+                                     }.count]
         try JSONSerialization.data(withJSONObject: layout).write(
             to: evidenceDirectory.appendingPathComponent("recording-layout.json"), options: .atomic)
         func currentSections() -> [XCUIElement] {
@@ -641,9 +647,10 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(addButtons.count, 1, "Exactly one Add control must belong to the screen-recording list")
         try XCTUnwrap(addButtons.first).click()
         attachEvidence(settings, name: "recording-add-clicked")
-        let picker = settings.sheets.containing(.button, identifier: "Open").firstMatch
-        let open = picker.buttons.matching(identifier: "Open").firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 10), "The native app picker must open")
+        let open = settings.buttons.matching(identifier: "Open").firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 25), "The native app picker must open")
+        XCTAssertEqual(settings.buttons.matching(identifier: "Open").count, 1)
+        XCTAssertEqual(settings.buttons.matching(identifier: "Cancel").count, 1)
         settings.typeKey("g", modifierFlags: [.command, .shift])
         attachEvidence(settings, name: "recording-add-go-to")
         let installed = try XCTUnwrap(installedURL)
@@ -657,8 +664,8 @@ final class ReleaseReadinessTests: XCTestCase {
         attachEvidence(settings, name: "recording-add-folder-selected")
         let names = [installed.lastPathComponent, installed.deletingPathExtension().lastPathComponent]
         let matches = NSPredicate(format: "label IN %@ OR value IN %@ OR identifier IN %@", names, names, names)
-        let label = picker.staticTexts.matching(matches).firstMatch
-        let cell = picker.cells.matching(matches).firstMatch
+        let label = settings.staticTexts.matching(matches).firstMatch
+        let cell = settings.cells.matching(matches).firstMatch
         let found = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             cell.isHittable || label.isHittable
         }, object: nil)

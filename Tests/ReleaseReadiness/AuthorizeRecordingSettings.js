@@ -350,7 +350,7 @@ function run() {
                     return receipt(true);
                 }
             } catch (error) {
-                if (error.axError !== -25204) { throw error; }
+                if (![-25202, -25204].includes(error.axError)) { throw error; }
                 publish();
             }
             $.NSThread.sleepForTimeInterval(0.1);
