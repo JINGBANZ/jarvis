@@ -673,29 +673,29 @@ final class ReleaseReadinessTests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [pickerReady], timeout: 10), .completed)
         attachEvidence(settings, name: "recording-add-picker-ready")
+        let input = settings.textFields
+        let before = input.count
         settings.typeKey("g", modifierFlags: [.command, .shift])
         attachEvidence(settings, name: "recording-add-go-to")
+        let entry = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            input.count > before
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [entry], timeout: 10), .completed, "Go to Folder must expose its path field")
         let installed = try XCTUnwrap(installedURL)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        XCTAssertTrue(pasteboard.setString(installed.deletingLastPathComponent().path + "/", forType: .string))
+        XCTAssertTrue(pasteboard.setString(installed.path, forType: .string))
         defer { pasteboard.clearContents() }
         settings.typeKey("v", modifierFlags: .command)
         attachEvidence(settings, name: "recording-add-path-pasted")
-        settings.typeKey(.return, modifierFlags: [])
-        attachEvidence(settings, name: "recording-add-folder-selected")
-        let names = [installed.lastPathComponent, installed.deletingPathExtension().lastPathComponent]
-        let matches = NSPredicate(format: "label IN %@ OR value IN %@ OR identifier IN %@", names, names, names)
-        let label = settings.staticTexts.matching(matches).firstMatch
-        let cell = settings.cells.matching(matches).firstMatch
-        let found = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            cell.isHittable || label.isHittable
+        let pathPresent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            input.allElementsBoundByIndex.contains { ($0.value as? String) == installed.path }
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [found], timeout: 10), .completed,
-                       "The installed app must appear as a selectable item")
-        attachEvidence(settings, name: "recording-add-file-found")
-        (cell.isHittable ? cell : label).click()
-        attachEvidence(settings, name: "recording-add-file-selected")
+        XCTAssertEqual(XCTWaiter.wait(for: [pathPresent], timeout: 10), .completed,
+                       "The native path field must contain the exact installed app path")
+        attachEvidence(settings, name: "recording-add-path-verified")
+        settings.typeKey(.return, modifierFlags: [])
+        attachEvidence(settings, name: "recording-add-path-selected")
         let canOpen = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             open.allElementsBoundByIndex.contains { $0.isEnabled && $0.isHittable }
         }, object: nil)
