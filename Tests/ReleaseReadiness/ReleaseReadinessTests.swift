@@ -730,7 +730,7 @@ final class ReleaseReadinessTests: XCTestCase {
         let permittedOwner = [
             "com.apple.systempreferences", "com.apple.appkit.xpc.openAndSavePanelService",
             "com.apple.settings.PrivacySecurity.extension"
-        ].contains(identifier ?? "") && ["\/System/Applications/", "\/System/Library/"].contains { path.hasPrefix($0) }
+        ].contains(identifier ?? "") && ["/System/Applications/", "/System/Library/"].contains { path.hasPrefix($0) }
         let receipt = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
         let preflight = CGPreflightPostEventAccess()
         let facts: [String: Any] = ["permittedOwner": permittedOwner, "preflight": preflight,
