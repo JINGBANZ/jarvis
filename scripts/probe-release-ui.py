@@ -15,6 +15,7 @@ import runpy
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -394,9 +395,9 @@ def version_tuple(value):
     return tuple(map(int, value.split(".")))
 
 
-def verify_app(path, installed):
-    if path == installed or path.resolve(strict=True) != path or not path.is_dir():
-        raise ValueError("Candidate and predecessor must be separate verified app bundles")
+def verify_app(path):
+    if path.resolve(strict=True) != path or not path.is_dir():
+        raise ValueError("Expected an installed app bundle without symlinks")
     with (path / "Contents/Info.plist").open("rb") as source:
         info = plistlib.load(source)
     if (info.get("CFBundleIdentifier") != "com.jarvis.coach"
@@ -407,6 +408,17 @@ def verify_app(path, installed):
     run(["/usr/bin/codesign", "--verify", "--strict", "--deep", str(path)], timeout=30)
     run(["/usr/sbin/spctl", "--assess", "--type", "execute", str(path)], timeout=30)
     return version
+
+
+def install_release_image(image, app, evidence):
+    if image.suffix != ".dmg" or image.resolve(strict=True) != image or not image.is_file():
+        raise ValueError("Expected a verified release disk image")
+    with tempfile.TemporaryDirectory(dir=evidence) as directory:
+        run(["/usr/bin/hdiutil", "attach", str(image), "-readonly", "-nobrowse", "-mountpoint", directory], timeout=60)
+        try:
+            run(["/usr/bin/ditto", str(Path(directory) / "Jarvis.app"), str(app)], timeout=60)
+        finally:
+            run(["/usr/bin/hdiutil", "detach", directory], timeout=60)
 
 
 def validate_journey(receipt, phase):
@@ -509,14 +521,14 @@ def main():
         raise ValueError("Release journeys require a disposable GitHub-hosted Mac")
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--candidate", type=Path)
+    mode.add_argument("--candidate-dmg", type=Path)
     mode.add_argument("--setup-candidate", type=Path)
-    parser.add_argument("--predecessor", type=Path)
+    parser.add_argument("--predecessor-dmg", type=Path)
     arguments = parser.parse_args()
     setup = arguments.setup_candidate is not None
-    if (setup and arguments.predecessor is not None) or (not setup and arguments.predecessor is None):
-        raise ValueError("Full readiness requires candidate and predecessor; setup accepts only its candidate")
-    candidate = arguments.setup_candidate if setup else arguments.candidate
+    predecessor = arguments.predecessor_dmg
+    if setup and predecessor is not None:
+        raise ValueError("Setup accepts only its candidate")
     os.umask(0o077)
     home = Path(account.pw_dir)
     app = home / "Applications/Jarvis.app"
@@ -524,10 +536,6 @@ def main():
     preferences = home / "Library/Preferences/com.jarvis.coach.plist"
     if any(path.exists() or path.is_symlink() for path in (app, profile, preferences)):
         raise ValueError("Refusing an existing installed app or user profile")
-    candidate_version = verify_app(candidate, app)
-    predecessor_version = None if setup else verify_app(arguments.predecessor, app)
-    if not setup and version_tuple(predecessor_version) >= version_tuple(candidate_version):
-        raise ValueError("Supported upgrade requires an older predecessor release")
     evidence = ROOT / ".jarvis/release-ui-probe" / uuid.uuid4().hex
     evidence.mkdir(parents=True, mode=0o700)
     architecture = run(["/usr/bin/uname", "-m"], timeout=5).strip()
@@ -543,43 +551,45 @@ def main():
     keyfile = profile / "openai-api-key"
     ownership = runpy.run_path(str(ROOT / "scripts/test-display/supervisor.py"))
     try:
-        phases = [("fresh", candidate, candidate_version)]
-        if not setup:
-            phases += [("predecessor", arguments.predecessor, predecessor_version),
-                       ("upgrade", candidate, candidate_version)]
-        for name, source, version in phases:
+        phases = ["predecessor", "upgrade"] if predecessor is not None else ["fresh"]
+        for name in phases:
             if owned_processes([app, derived], ownership):
                 raise ValueError("Cannot replace an app with a live owned process")
             if app.exists():
                 shutil.rmtree(app)
-            run(["/usr/bin/ditto", str(source), str(app)], timeout=60)
+            if setup:
+                run(["/usr/bin/ditto", str(arguments.setup_candidate), str(app)], timeout=60)
+            else:
+                # Install only the active version so Launch Services sees one Jarvis during onboarding.
+                install_release_image(predecessor if name == "predecessor" else arguments.candidate_dmg, app, evidence)
+            version = verify_app(app)
             upgrade_profile = None
-            if name == "predecessor":
-                run(["/usr/bin/tccutil", "reset", "All", "com.jarvis.coach"], timeout=10)
-                run(["/usr/bin/defaults", "delete", "com.jarvis.coach"], timeout=10)
-                shutil.rmtree(profile)
             if name != "upgrade":
                 profile.mkdir(mode=0o700)
                 private_write(keyfile, key)
             else:
+                if version_tuple(predecessor_version) >= version_tuple(version):
+                    raise ValueError("Supported upgrade requires an older predecessor release")
                 require_preserved(profile, preferences, snapshot, check_preferences=True)
                 upgrade_profile = evidence / "private-upgrade-profile.plist"
                 private_write(upgrade_profile, plistlib.dumps(snapshot[0]))
             run_phase(name, version, app, evidence, derived, template, speech, architecture, upgrade_profile)
             if name == "predecessor":
+                predecessor_version = version
                 snapshot = profile_snapshot(profile, preferences)
             elif name == "upgrade":
                 require_preserved(profile, preferences, snapshot, check_preferences=False)
         if setup:
             receipt = {"schemaVersion": 1, "check": "setup-feasibility", "releaseReady": False,
-                       "architecture": architecture, "candidateVersion": candidate_version,
-                       "phases": ["fresh"], "passed": True}
+                       "architecture": architecture, "candidateVersion": version, "phases": phases, "passed": True}
             filename = "setup-feasibility.json"
         else:
-            receipt = {"schemaVersion": 1, "check": "release-readiness", "releaseReady": True,
-                       "architecture": architecture, "candidateVersion": candidate_version,
-                       "predecessorVersion": predecessor_version, "phases": ["fresh", "predecessor", "upgrade"],
-                       "passed": True, "retainedPreferences": True, "retainedCredential": True, "retainedSessionHistory": True}
+            receipt = {"schemaVersion": 1, "check": "release-readiness",
+                       "architecture": architecture, "candidateVersion": version,
+                       "phases": phases, "passed": True}
+            if predecessor is not None:
+                receipt.update(predecessorVersion=predecessor_version, retainedPreferences=True,
+                               retainedCredential=True, retainedSessionHistory=True)
             filename = "readiness.json"
         private_write(evidence / filename, (json.dumps(receipt) + "\n").encode())
         print("Completed " + receipt["check"] + "; proof is recorded in " + filename)

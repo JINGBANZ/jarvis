@@ -138,11 +138,11 @@ The external `ReleaseReadiness` target is an Xcode UI-test boundary because it d
 installed app through Accessibility and native consent controls. It launches the signed app outside
 the checkout, without a product diagnostic mode, injected transcript, or product-module import.
 [`probe-release-ui.py`](../scripts/probe-release-ui.py) owns the hosted command and exact app/test-runner
-process cleanup. It accepts candidate and predecessor app paths for fresh-install and retained-profile
-upgrade checks. This runner is a hosted acceptance boundary, separate from the scenario and evaluation
-command above. Predecessor preparation clears the clean-install profile and resets only Jarvis's
-privacy decisions with the system `tccutil` command, so the predecessor performs its own normal
-onboarding. The upgrade retains that predecessor's profile and permission grants.
+process cleanup. It mounts the verified disk image for each install and detaches it before app launch.
+Fresh installation and retained-profile upgrade start on separate disposable runners so macOS sees
+only one Jarvis version during each onboarding. The upgrade runner performs normal onboarding and
+creates a used profile with the predecessor, then installs the candidate at the same path with the
+predecessor's profile and permission grants intact.
 
 [`ReleaseAudioDevices`](../Tests/ReleaseReadiness/ReleaseAudioDevices.swift) selects BlackHole 16-channel
 input for silent microphone frames, preserves the hosted Mac's existing output, verifies those

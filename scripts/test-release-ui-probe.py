@@ -8,7 +8,6 @@ import json
 import os
 import plistlib
 import runpy
-import shutil
 from types import SimpleNamespace
 import subprocess
 import sys
@@ -322,22 +321,45 @@ class BasicJourneyTests(unittest.TestCase):
 
 
 class FixedPhaseOrchestrationTests(unittest.TestCase):
-    def run_driver(self, *, setup=False, predecessor_version="0.5.14"):
+    def test_failed_install_still_detaches_the_read_only_image(self):
+        install = PROBE["install_release_image"]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            image = root / "Jarvis.dmg"
+            image.touch()
+            installed = root / "Jarvis.app"
+            command = mock.Mock(side_effect=[None, ValueError("copy failed"), None])
+            with mock.patch.dict(install.__globals__, run=command):
+                with self.assertRaisesRegex(ValueError, "copy failed"):
+                    install(image, installed, root)
+            mount = Path(command.call_args_list[0].args[0][-1])
+            self.assertEqual(command.call_args_list, [
+                mock.call(["/usr/bin/hdiutil", "attach", str(image), "-readonly", "-nobrowse", "-mountpoint", str(mount)], timeout=60),
+                mock.call(["/usr/bin/ditto", str(mount / "Jarvis.app"), str(installed)], timeout=60),
+                mock.call(["/usr/bin/hdiutil", "detach", str(mount)], timeout=60),
+            ])
+            self.assertFalse(mount.exists())
+
+    def run_driver(self, *, setup=False, upgrade=False, predecessor_version="0.5.14"):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         home = root / "home"
         (home / "Library/Preferences").mkdir(parents=True)
         (home / "Library/Application Support").mkdir()
-        candidate = root / "candidate.app"
-        predecessor = root / "predecessor.app"
-        candidate.mkdir()
-        predecessor.mkdir()
+        candidate = root / ("candidate.app" if setup else "candidate.dmg")
+        predecessor = root / "predecessor.dmg"
         globals_ = PROBE["main"].__globals__
         phases = []
-        permission_resets = []
+        installed = []
         def path(value):
             return home if value == "/Users/runner" else Path(value)
+        def install(source, app, _evidence):
+            self.assertFalse(app.exists())
+            if source == candidate and upgrade:
+                self.assertEqual(phases, ["predecessor"])
+            installed.append(source)
+            app.mkdir()
         def command(arguments, **_kwargs):
             self.assertNotIn("RELEASE_READINESS_OPENAI_API_KEY", os.environ)
             self.assertNotIn("OPENAI_API_KEY", os.environ)
@@ -346,13 +368,9 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
             if arguments[0] == "/usr/bin/say":
                 Path(arguments[arguments.index("-o") + 1]).write_bytes(b"private synthetic audio")
             elif arguments[0] == "/usr/bin/ditto":
-                shutil.copytree(arguments[1], arguments[2])
-            elif arguments[0] == "/usr/bin/defaults":
-                (home / "Library/Preferences/com.jarvis.coach.plist").unlink()
-            elif arguments[0] == "/usr/bin/tccutil":
-                self.assertEqual(arguments, ["/usr/bin/tccutil", "reset", "All", "com.jarvis.coach"])
-                self.assertEqual(phases, ["fresh"])
-                permission_resets.append("predecessor")
+                install(Path(arguments[1]), Path(arguments[2]), None)
+            else:
+                self.fail(f"Unexpected command: {arguments[0]}")
             return ""
         def phase(name, _version, _app, _evidence, _derived, _template, _speech, _architecture, upgrade=None):
             phases.append(name)
@@ -368,9 +386,9 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
             session.mkdir(parents=True)
             (session / "jarvis-activity.jsonl").write_text('{"k":"sessionEnded"}\n')
             (session / "audit-health.json").write_text('{"state":"complete"}')
-        argv = ["probe-release-ui.py", "--setup-candidate" if setup else "--candidate", str(candidate)]
-        if not setup:
-            argv += ["--predecessor", str(predecessor)]
+        argv = ["probe-release-ui.py", "--setup-candidate" if setup else "--candidate-dmg", str(candidate)]
+        if upgrade:
+            argv += ["--predecessor-dmg", str(predecessor)]
         environment = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted",
                        "RELEASE_READINESS_OPENAI_API_KEY": "synthetic-protected-key-123456"}
         with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(sys, "argv", argv), \
@@ -378,20 +396,31 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
                 mock.patch.object(PROBE["pwd"], "getpwuid", return_value=SimpleNamespace(pw_name="runner", pw_dir="/Users/runner")), \
                 mock.patch.object(PROBE["runpy"], "run_path", return_value={}), \
                 mock.patch.dict(globals_, ROOT=root, Path=path, run=command,
-                                verify_app=lambda app, _: "0.5.15" if app == candidate else predecessor_version,
+                                install_release_image=install,
+                                verify_app=lambda _: "0.5.15" if installed[-1] == candidate else predecessor_version,
                                 build_ui=lambda evidence, _: (evidence / "derived", evidence / "manifest"),
                                 run_phase=phase, owned_processes=lambda *_: []):
             PROBE["main"]()
         evidence = next((root / ".jarvis/release-ui-probe").iterdir())
-        self.assertEqual(permission_resets, [] if setup else ["predecessor"])
+        self.assertEqual(installed, [predecessor, candidate] if upgrade else [candidate])
         self.assertFalse((home / "Library/Application Support/Jarvis/openai-api-key").exists())
         return phases, evidence
 
-    def test_full_run_requires_fresh_predecessor_upgrade_and_retains_real_profile(self):
+    def test_fresh_run_installs_only_the_candidate(self):
         phases, evidence = self.run_driver()
-        self.assertEqual(phases, ["fresh", "predecessor", "upgrade"])
+        self.assertEqual(phases, ["fresh"])
         receipt = json.loads((evidence / "readiness.json").read_text())
-        self.assertIs(receipt["releaseReady"], True)
+        self.assertEqual(receipt["phases"], ["fresh"])
+        self.assertNotIn("predecessorVersion", receipt)
+
+    def test_upgrade_stages_the_candidate_only_after_the_predecessor_has_run(self):
+        phases, evidence = self.run_driver(upgrade=True)
+        self.assertEqual(phases, ["predecessor", "upgrade"])
+        receipt = json.loads((evidence / "readiness.json").read_text())
+        self.assertEqual(receipt["phases"], ["predecessor", "upgrade"])
+        self.assertEqual(receipt["predecessorVersion"], "0.5.14")
+        self.assertIs(receipt["retainedPreferences"], True)
+        self.assertIs(receipt["retainedCredential"], True)
         self.assertIs(receipt["retainedSessionHistory"], True)
         self.assertFalse((evidence / "setup-feasibility.json").exists())
 
@@ -403,10 +432,10 @@ class FixedPhaseOrchestrationTests(unittest.TestCase):
         self.assertIs(receipt["releaseReady"], False)
         self.assertFalse((evidence / "readiness.json").exists())
 
-    def test_full_run_refuses_same_or_newer_predecessor(self):
+    def test_upgrade_refuses_same_or_newer_predecessor(self):
         for version in ("0.5.15", "0.6.0"):
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, "older predecessor"):
-                self.run_driver(predecessor_version=version)
+                self.run_driver(upgrade=True, predecessor_version=version)
 
 
 class NativeAuthorizationTests(unittest.TestCase):

@@ -221,23 +221,30 @@ class ReleasePromotionTests(unittest.TestCase):
         (receipt / 'setup-feasibility.json').write_text('{"passed":true,"releaseReady":false}')
         with mock.patch('platform.machine', return_value='arm64'), mock.patch('platform.mac_ver', return_value=('15.0', (), '')):
             with self.assertRaisesRegex(ValueError, 'complete readiness'):
-                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', evidence, self.root / 'proof')
+                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', 'fresh', evidence, self.root / 'proof')
             (receipt / 'readiness.json').write_text('{"passed":true,"releaseReady":false}')
             with self.assertRaisesRegex(ValueError, 'readiness is incomplete'):
-                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', evidence, self.root / 'proof')
+                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', 'fresh', evidence, self.root / 'proof')
+            (receipt / 'readiness.json').write_text(json.dumps({
+                'schemaVersion': 1, 'check': 'release-readiness', 'architecture': 'arm64',
+                'candidateVersion': self.identity['version'], 'phases': ['fresh'], 'passed': True,
+            }))
+            with self.assertRaisesRegex(ValueError, 'readiness is incomplete'):
+                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', 'upgrade', evidence, self.root / 'proof')
         with mock.patch('platform.machine', return_value='x86_64'), mock.patch('platform.mac_ver', return_value=('15.0', (), '')):
             with self.assertRaisesRegex(ValueError, 'another platform'):
-                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', evidence, self.root / 'proof')
+                self.module['native_proof'](self.identity, self.candidate, '1' * 64, 'macos-15', 'fresh', evidence, self.root / 'proof')
 
     def test_acceptance_requires_all_platforms_at_the_same_manifest(self):
         candidate_directory, manifest_hash = self.candidate_files()
         evidence = self.root / 'proofs'
         evidence.mkdir()
         records = {}
-        for index, (name, (architecture, major)) in enumerate(self.module['NATIVE_JOBS'].items()):
+        for index, (name, (os_name, journey)) in enumerate(self.module['NATIVE_PROOFS'].items()):
+            architecture, major = self.module['NATIVE_JOBS'][os_name]
             value = {'schemaVersion': 1, 'identity': self.identity, 'candidate': self.candidate,
-                     'manifestSHA256': manifest_hash, 'os': name, 'architecture': architecture,
-                     'macOS': major + '.0', 'passed': True}
+                     'manifestSHA256': manifest_hash, 'os': os_name, 'architecture': architecture,
+                     'macOS': major + '.0', 'journey': journey, 'passed': True}
             self.module['write_json'](evidence / (name + '.json'), value)
             records[name] = {'id': 100 + index, 'runID': 12, 'sha256': 'a' * 64}
         with mock.patch.dict(os.environ, {'GITHUB_OUTPUT': str(self.root / 'output')}):
@@ -249,7 +256,7 @@ class ReleasePromotionTests(unittest.TestCase):
         self.assertEqual((candidate_directory / 'release-notes.md').read_text(), self.identity['notes'] + '\n')
         with self.assertRaisesRegex(ValueError, 'Acceptance receipt changed'):
             self.module['verify_promotion']({**record, 'acceptanceSHA256': '0' * 64}, accepted, candidate_directory)
-        path = evidence / 'macos-15-intel.json'
+        path = evidence / 'macos-15-intel-upgrade.json'
         value = json.loads(path.read_text())
         value['manifestSHA256'] = '2' * 64
         path.write_text(json.dumps(value))
@@ -260,11 +267,11 @@ class ReleasePromotionTests(unittest.TestCase):
             self.module['accept'](self.identity, self.candidate, manifest_hash, records, evidence, self.root / 'rejected')
 
     def test_native_finalizer_rejects_missing_skipped_and_duplicate_jobs(self):
-        names = ['Installed app (' + name + ')' for name in self.module['NATIVE_JOBS']]
+        names = [f'Installed app ({os_name}, {journey})' for os_name, journey in self.module['NATIVE_PROOFS'].values()]
         jobs = [{'name': name, 'status': 'completed', 'conclusion': 'success'} for name in names]
         path = '/actions/runs/12/attempts/3/jobs'
         for bad in (jobs[:-1], jobs + [jobs[0]], [{**row, 'conclusion': 'skipped'} for row in jobs]):
-            with self.subTest(jobs=bad), self.assertRaisesRegex(ValueError, 'All three native jobs'):
+            with self.subTest(jobs=bad), self.assertRaisesRegex(ValueError, 'Every native platform and journey'):
                 self.module['native_artifacts'](self.api({}, {path: bad}), self.identity)
 
     def promotion_api(self, record):
