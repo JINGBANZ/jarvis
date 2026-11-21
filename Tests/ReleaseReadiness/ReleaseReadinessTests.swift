@@ -696,12 +696,31 @@ final class ReleaseReadinessTests: XCTestCase {
         attachEvidence(settings, name: "recording-add-path-verified")
         settings.typeKey(.return, modifierFlags: [])
         attachEvidence(settings, name: "recording-add-path-selected")
+        let leftPath = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !input.allElementsBoundByIndex.contains { ($0.value as? String) == installed.path }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [leftPath], timeout: 10), .completed, "The Go to Folder sheet must close")
+        let visibleCancel = try XCTUnwrap(cancel.allElementsBoundByIndex.first { $0.isHittable })
+        let footer = visibleCancel.frame
+        func openButtons() -> [XCUIElement] {
+            open.allElementsBoundByIndex.filter {
+                $0.isEnabled && $0.isHittable && abs($0.frame.midY - footer.midY) < 6
+                    && $0.frame.midX > footer.midX
+            }
+        }
         let canOpen = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            open.allElementsBoundByIndex.contains { $0.isEnabled && $0.isHittable }
+            !openButtons().isEmpty
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [canOpen], timeout: 10), .completed)
-        settings.typeKey(.return, modifierFlags: [])
+        let button = try XCTUnwrap(openButtons().first)
+        attachEvidence(settings, name: "recording-add-open-verified")
+        button.click()
         attachEvidence(settings, name: "recording-add-confirmed")
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !cancel.allElementsBoundByIndex.contains { $0.isHittable }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 10), .completed, "The app picker must close after Open")
+        attachEvidence(settings, name: "recording-add-picker-closed")
     }
 
     private func recordingToggleEnabled(_ value: Any?) -> Bool? {

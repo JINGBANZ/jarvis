@@ -517,7 +517,7 @@ def main():
     candidate = arguments.setup_candidate if setup else arguments.candidate
     os.umask(0o077)
     home = Path(account.pw_dir)
-    app = Path("/Applications/Jarvis.app")
+    app = home / "Applications/Jarvis.app"
     profile = home / "Library/Application Support/Jarvis"
     preferences = home / "Library/Preferences/com.jarvis.coach.plist"
     if any(path.exists() or path.is_symlink() for path in (app, profile, preferences)):
