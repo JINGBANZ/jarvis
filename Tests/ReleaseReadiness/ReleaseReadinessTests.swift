@@ -123,6 +123,8 @@ final class ReleaseReadinessTests: XCTestCase {
                     tracePermission("allow-clicked")
                 }
             case .onboarding(let title):
+                tracePermission("onboarding-" + title, owner: bundleID,
+                                pid: NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.processIdentifier ?? 0)
                 attachEvidence(app, name: "permission-step-\(step)-\(title)")
                 print("permissionStep=\(step) normalAction=\(title)")
                 switch title {
@@ -436,6 +438,8 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 15), .completed,
                        "Normal Quit & Reopen must replace the installed candidate process")
         let app = XCUIApplication(url: try XCTUnwrap(installedURL))
+        tracePermission("replacement-proxy", owner: bundleID,
+                        pid: NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.processIdentifier ?? 0)
         application = app
         return app
     }
