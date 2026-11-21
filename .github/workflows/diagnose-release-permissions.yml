@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-15, macos-15-intel, macos-26]
-        journey: [candidate, predecessor]
+        journey: [predecessor]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 18
     steps:
@@ -79,6 +79,7 @@ jobs:
             .jarvis/release-ui-probe/*/*/ui-stage.json
             .jarvis/release-ui-probe/*/*/ui-failure.json
             .jarvis/release-ui-probe/*/*/summary.json
+            .jarvis/release-ui-probe/*/*/ui-command.json
             .jarvis/release-ui-probe/*/*/cleanup.json
           include-hidden-files: true
           if-no-files-found: warn

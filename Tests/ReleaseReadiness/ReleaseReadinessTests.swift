@@ -10,6 +10,39 @@ final class ReleaseReadinessTests: XCTestCase {
     var audioDevices: ReleaseAudioDevices?
     private nonisolated let pendingRelaunch = OSAllocatedUnfairLock<(pid: pid_t, installedURL: URL, operation: String)?>(initialState: nil)
 
+    private nonisolated let permissionTrace = OSAllocatedUnfairLock<[[String: String]]>(initialState: [])
+
+    private nonisolated func tracePermission(_ event: String, owner: String = "", pid: pid_t = 0) {
+        let uptime = String(ProcessInfo.processInfo.systemUptime)
+        let present = pid > 0 && kill(pid, 0) == 0
+        permissionTrace.withLock {
+            $0.append(["step": event, "owner": owner, "pid": String(pid),
+                       "pidPresent": String(present), "uptime": uptime])
+            if $0.count > 80 { $0.removeFirst() }
+        }
+    }
+
+    nonisolated func writePermissionTrace(_ issue: XCTIssue? = nil) {
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"] else { return }
+        var receipt = permissionTrace.withLock { $0 }
+        if let issue {
+            let message = issue.compactDescription
+            let terms = ["UserNotificationCenter", "coreservices.uiagent", "universalAccessAuthWarn",
+                         "AccessibilityUIServer", "Jarvis", "snapshot", "not running", "communication",
+                         "connection", "failed to get matching", "query", "Application is not running", "null"]
+            let observed = terms.filter { message.localizedCaseInsensitiveContains($0) }
+            let pid = receipt.reversed().compactMap { $0["pid"].flatMap(pid_t.init) }.first { $0 > 0 } ?? 0
+            receipt.append(["step": "issue", "signals": observed.joined(separator: ","),
+                            "lastOwnerPID": String(pid), "lastOwnerPresent": String(pid > 0 && kill(pid, 0) == 0),
+                            "uptime": String(ProcessInfo.processInfo.systemUptime)])
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+            try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("permission-trace.json"),
+                           options: .withoutOverwriting)
+        } catch {}
+    }
+
     override func record(_ issue: XCTIssue) {
         UIIssueEvidence.record(issue, firstFilename: "ui-issue.json", failureFilename: "ui-failure.json")
         let reference = issue as XCTIssueReference
@@ -18,7 +51,10 @@ final class ReleaseReadinessTests: XCTestCase {
            let value = reference.value(forKey: "isFailure") as? NSNumber {
             isFailure = value.boolValue
         }
-        if isFailure { recordRelaunchState() }
+        if isFailure {
+            writePermissionTrace(issue)
+            recordRelaunchState()
+        }
         super.record(issue)
     }
 
@@ -64,12 +100,14 @@ final class ReleaseReadinessTests: XCTestCase {
                 reachedReady = true
                 completionPath = "relaunch-automatic"
             case .consent(let permissions, let dialog):
+                tracePermission("permission-consent-selected")
                 attachEvidence(name: "permission-consent-selected")
                 acceptedConsents.formUnion(permissions)
                 if permissions.contains("screen"), dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
                     let previousPID = try candidateProcessID()
                     attachEvidence(name: "permission-settings-click")
                     dialog.buttons["Open System Settings"].click()
+                    tracePermission("permission-settings-clicked")
                     attachEvidence(name: "permission-settings-clicked")
                     if try grantScreenRecordingInSettings() {
                         app = try waitForReplacement(of: previousPID)
@@ -80,9 +118,13 @@ final class ReleaseReadinessTests: XCTestCase {
                 } else {
                     let allow = consentButtons(in: dialog)
                     XCTAssertEqual(allow.count, 1, "Consent requires one unambiguous Allow control")
+                    tracePermission("allow-click")
                     allow.element.click()
+                    tracePermission("allow-clicked")
                 }
             case .onboarding(let title):
+                tracePermission("onboarding-" + title, owner: bundleID,
+                                pid: NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.processIdentifier ?? 0)
                 attachEvidence(app, name: "permission-step-\(step)-\(title)")
                 print("permissionStep=\(step) normalAction=\(title)")
                 switch title {
@@ -169,7 +211,7 @@ final class ReleaseReadinessTests: XCTestCase {
                       "com.apple.accessibility.universalAccessAuthWarn", "com.apple.AccessibilityUIServer"]
         var captured: Set<String> = []
         var action: PermissionAction?
-        var consentOwner: String?
+        var consentOwner: (String, pid_t)?
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             if let replacementPID, acceptedConsents == ["microphone", "audio", "screen"] {
                 let running = NSRunningApplication.runningApplications(withBundleIdentifier: self.bundleID)
@@ -217,7 +259,7 @@ final class ReleaseReadinessTests: XCTestCase {
                 action = .onboarding(titles[0])
                 return true
             }
-            var matches: [(String, Set<String>, XCUIElement)] = []
+            var matches: [(String, pid_t, Set<String>, XCUIElement)] = []
             guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                     as? [[String: Any]] else { return false }
             let visibleOwners = Set(windows.compactMap { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value })
@@ -248,7 +290,9 @@ final class ReleaseReadinessTests: XCTestCase {
                 if captured.insert(identifier).inserted {
                     self.attachEvidence(name: "permission-owner-first-\(identifier)")
                 }
+                self.tracePermission("query-dialogs", owner: identifier, pid: ready[0].processIdentifier)
                 let dialogs = candidate.dialogs.allElementsBoundByIndex
+                self.tracePermission("query-containers", owner: identifier, pid: ready[0].processIdentifier)
                 let containers = dialogs.isEmpty ? candidate.windows.allElementsBoundByIndex : dialogs
                 counts["dialogs"] = dialogs.count
                 counts["containers"] = containers.count
@@ -278,7 +322,7 @@ final class ReleaseReadinessTests: XCTestCase {
                     counts["openSettingsButtons", default: 0] += container.buttons.matching(identifier: "Open System Settings").count
                     let opensSettings = permissions.contains("screen")
                         && container.buttons.matching(identifier: "Open System Settings").count == 1
-                    if allow.count == 1 || opensSettings { matches.append((identifier, permissions, container)) }
+                    if allow.count == 1 || opensSettings { matches.append((identifier, ready[0].processIdentifier, permissions, container)) }
                 }
                 counts["queryFinishedMilliseconds"] = Int(ProcessInfo.processInfo.systemUptime * 1_000)
                 discovery[identifier] = counts
@@ -286,16 +330,18 @@ final class ReleaseReadinessTests: XCTestCase {
             }
             recordDiscovery()
             if matches.count == 1 {
-                let (owner, permissions, dialog) = matches[0]
+                let (owner, pid, permissions, dialog) = matches[0]
+                self.tracePermission("matched", owner: owner, pid: pid)
                 self.attachEvidence(name: "permission-consent-matched")
                 action = .consent(permissions, dialog)
-                consentOwner = owner
+                consentOwner = (owner, pid)
                 return true
             }
             return false
         }, object: nil)
         let waitStarted = ProcessInfo.processInfo.systemUptime
         let result = XCTWaiter.wait(for: [visible], timeout: 20)
+        tracePermission("wait-returned")
         recordPermissionWait(result, started: waitStarted, filename: "permission-wait.json")
         guard result == .completed, let action else {
             let path = try XCTUnwrap(ProcessInfo.processInfo.environment["JARVIS_READINESS_EVIDENCE"])
@@ -305,7 +351,8 @@ final class ReleaseReadinessTests: XCTestCase {
         }
         if case .consent(let permissions, _) = action {
             let owner = try XCTUnwrap(consentOwner)
-            print("nativeConsent=\(permissions.sorted().joined(separator: ",")) owner=\(owner)")
+            tracePermission("return-consent", owner: owner.0, pid: owner.1)
+            print("nativeConsent=\(permissions.sorted().joined(separator: ",")) owner=\(owner.0)")
         }
         return action
     }
@@ -393,6 +440,8 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 15), .completed,
                        "Normal Quit & Reopen must replace the installed candidate process")
         let app = XCUIApplication(url: try XCTUnwrap(installedURL))
+        tracePermission("replacement-proxy", owner: bundleID,
+                        pid: NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.processIdentifier ?? 0)
         application = app
         return app
     }
@@ -455,12 +504,51 @@ final class ReleaseReadinessTests: XCTestCase {
         attachEvidence(settings, name: "recording-headings-loaded")
         XCTAssertGreaterThan(screenHeading.frame.height, 0)
         XCTAssertGreaterThan(audioOnlyHeading.frame.minY, screenHeading.frame.maxY)
-        let sections = pane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex.filter {
+        let screenEnd = screenHeading.frame.maxY
+        let audioStart = audioOnlyHeading.frame.minY
+        let outlines = pane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex
+        var locations: [[String: Any]] = []
+        let sections = outlines.filter {
             let frame = $0.frame
-            return frame.height > 0 && frame.minY >= screenHeading.frame.maxY && frame.maxY <= audioOnlyHeading.frame.minY
+            let toggles = $0.switches.matching(identifier: "Jarvis_Toggle").allElementsBoundByIndex
+            locations.append(["outlineMin": frame.minY, "outlineMax": frame.maxY, "toggles": toggles.map {
+                ["min": $0.frame.minY, "max": $0.frame.maxY,
+                 "enabled": self.recordingToggleEnabled($0.value) as Any? ?? NSNull()]
+            }])
+            return frame.height > 0 && frame.minY >= screenEnd && frame.maxY <= audioStart
         }
-        XCTAssertEqual(sections.count, 1, "Exactly one Jarvis outline must belong to the screen-recording section")
-        let section = try XCTUnwrap(sections.first)
+        let layout: [String: Any] = ["screenEnd": screenEnd, "audioStart": audioStart, "outlines": locations,
+                                     "screenEnabledCount": sections.count,
+                                     "allNamedSwitches": pane.switches.matching(identifier: "Jarvis_Toggle").count]
+        try JSONSerialization.data(withJSONObject: layout).write(
+            to: evidenceDirectory.appendingPathComponent("recording-layout.json"), options: .atomic)
+        func currentSections() -> [XCUIElement] {
+            pane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex.filter {
+                let frame = $0.frame
+                return frame.height > 0 && frame.minY >= screenHeading.frame.maxY && frame.maxY <= audioOnlyHeading.frame.minY
+            }
+        }
+        var availableSections = sections
+        if pane.switches.matching(identifier: "Jarvis_Toggle").count == 0 {
+            attachEvidence(settings, name: "recording-wait-for-row")
+            let row = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !currentSections().isEmpty
+            }, object: nil)
+            _ = XCTWaiter.wait(for: [row], timeout: 10)
+            availableSections = currentSections()
+            if availableSections.isEmpty {
+                attachEvidence(settings, name: "recording-add-missing-app")
+                try addInstalledApp(settings: settings, pane: pane, screenEnd: screenEnd, audioStart: audioStart,
+                                    evidence: evidenceDirectory)
+                let added = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    !currentSections().isEmpty
+                }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [added], timeout: 10), .completed)
+                availableSections = currentSections()
+            }
+        }
+        XCTAssertEqual(availableSections.count, 1, "Exactly one Jarvis outline must belong to the screen-recording section")
+        let section = try XCTUnwrap(availableSections.first)
         attachEvidence(settings, name: "recording-section-matched")
         XCTAssertEqual(section.staticTexts["Jarvis_Title"].value as? String, "Jarvis")
         XCTAssertEqual(section.switches.matching(identifier: "Jarvis_Toggle").count, 1)
@@ -531,6 +619,57 @@ final class ReleaseReadinessTests: XCTestCase {
             to: URL(fileURLWithPath: evidence).appendingPathComponent("recording-final.json"), options: .atomic)
         XCTAssertEqual(enabledResult, .completed, "Screen-recording grant must be enabled")
         return relaunches
+    }
+
+    private func addInstalledApp(settings: XCUIApplication, pane: XCUIElement, screenEnd: CGFloat,
+                                 audioStart: CGFloat, evidence: URL) throws {
+        let buttons = pane.buttons.allElementsBoundByIndex
+        var receipts: [[String: Any]] = []
+        let addButtons = buttons.filter {
+            let frame = $0.frame
+            let titles = [$0.identifier, $0.label, $0.title]
+            let add = titles.contains { title in
+                title == "+" || title.localizedCaseInsensitiveContains("add")
+                    || title.localizedCaseInsensitiveContains("plus")
+            }
+            receipts.append(["add": add, "minus": titles.contains { $0.localizedCaseInsensitiveContains("remove") || $0 == "-" },
+                             "minY": frame.minY, "maxY": frame.maxY])
+            return add && frame.height > 0 && frame.minY >= screenEnd && frame.maxY <= audioStart
+        }
+        try JSONSerialization.data(withJSONObject: receipts).write(to: evidence.appendingPathComponent("recording-add-controls.json"),
+                                                                  options: .atomic)
+        XCTAssertEqual(addButtons.count, 1, "Exactly one Add control must belong to the screen-recording list")
+        try XCTUnwrap(addButtons.first).click()
+        attachEvidence(settings, name: "recording-add-clicked")
+        let picker = settings.sheets.containing(.button, identifier: "Open").firstMatch
+        let open = picker.buttons.matching(identifier: "Open").firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 10), "The native app picker must open")
+        settings.typeKey("g", modifierFlags: [.command, .shift])
+        attachEvidence(settings, name: "recording-add-go-to")
+        let installed = try XCTUnwrap(installedURL)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString(installed.deletingLastPathComponent().path + "/", forType: .string))
+        defer { pasteboard.clearContents() }
+        settings.typeKey("v", modifierFlags: .command)
+        attachEvidence(settings, name: "recording-add-path-pasted")
+        settings.typeKey(.return, modifierFlags: [])
+        attachEvidence(settings, name: "recording-add-folder-selected")
+        let names = [installed.lastPathComponent, installed.deletingPathExtension().lastPathComponent]
+        let matches = NSPredicate(format: "label IN %@ OR value IN %@ OR identifier IN %@", names, names, names)
+        let label = picker.staticTexts.matching(matches).firstMatch
+        let cell = picker.cells.matching(matches).firstMatch
+        let found = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            cell.isHittable || label.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [found], timeout: 10), .completed,
+                       "The installed app must appear as a selectable item")
+        attachEvidence(settings, name: "recording-add-file-found")
+        (cell.isHittable ? cell : label).click()
+        attachEvidence(settings, name: "recording-add-file-selected")
+        XCTAssertTrue(open.isEnabled)
+        settings.typeKey(.return, modifierFlags: [])
+        attachEvidence(settings, name: "recording-add-confirmed")
     }
 
     private func recordingToggleEnabled(_ value: Any?) -> Bool? {

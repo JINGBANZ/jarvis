@@ -19,6 +19,7 @@ extension ReleaseReadinessTests {
         }
         XCTAssertTrue(persistedOnboardingCompleted())
         XCTAssertTrue(app.statusItems["Jarvis is stopped"].exists)
+        writePermissionTrace()
         app.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
         try audioDevices?.restore()
