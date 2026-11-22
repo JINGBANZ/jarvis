@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0](https://github.com/JINGBANZ/jarvis/compare/v0.5.14...v0.6.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **release:** Jarvis requires macOS 15 or later on Apple silicon and Intel.
+
+### Features
+
+* **context:** record speech timing and coaching action history ([#504](https://github.com/JINGBANZ/jarvis/issues/504)) ([d0fa9bd](https://github.com/JINGBANZ/jarvis/commit/d0fa9bd6ad919a31d65d634e3305385518da18d0))
+
+
+### Bug Fixes
+
+* **release:** isolate installed-app readiness journeys ([#513](https://github.com/JINGBANZ/jarvis/issues/513)) ([6aedd78](https://github.com/JINGBANZ/jarvis/commit/6aedd78be8d4512dee9078c38557c4ce385f0dd7))
+* **release:** stabilize installed permission onboarding ([#512](https://github.com/JINGBANZ/jarvis/issues/512)) ([5df99fc](https://github.com/JINGBANZ/jarvis/commit/5df99fcb86912fe4b115537cced03cf36c454ce2))
+* **test:** reap native hosts and contain overlay windows ([#505](https://github.com/JINGBANZ/jarvis/issues/505)) ([035f5ed](https://github.com/JINGBANZ/jarvis/commit/035f5ed023889e3b709a70d8a294f0b5c02f2397))
+
+
+### Continuous Integration
+
+* **release:** require premerge release ready checks and promote tested artifacts ([#508](https://github.com/JINGBANZ/jarvis/issues/508)) ([8fabf0d](https://github.com/JINGBANZ/jarvis/commit/8fabf0dc35334c7b7ca7eb7a0475a147ad725fc8))
+
 ## [0.5.14](https://github.com/JINGBANZ/jarvis/compare/v0.5.13...v0.5.14) (2026-11-08)
 
 
