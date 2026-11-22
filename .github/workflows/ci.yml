@@ -13,6 +13,12 @@ concurrency:
 jobs:
   gate:
     name: ${{ matrix.build == 'universal' && 'universal-app' || format('{0} ({1})', matrix.os == 'macos-15' && 'Compatibility' || 'Gate', matrix.os) }}
+    # GitHub can report matrix success when a job is cancelled before it gets a runner.
+    outputs:
+      compatibility: ${{ matrix.os == 'macos-15' && steps.validated.outputs.passed || '' }}
+      apple-silicon: ${{ matrix.os == 'macos-26' && matrix.build == 'source' && steps.validated.outputs.passed || '' }}
+      intel: ${{ matrix.os == 'macos-26-intel' && steps.validated.outputs.passed || '' }}
+      universal: ${{ matrix.build == 'universal' && steps.validated.outputs.passed || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -87,6 +93,10 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+      - name: Record successful validation
+        id: validated
+        run: echo 'passed=true' >> "$GITHUB_OUTPUT"
+
   release-dispatch:
     needs: gate
     if: >-
@@ -130,13 +140,24 @@ jobs:
       - name: Require all validation jobs
         env:
           GATE_RESULT: ${{ needs.gate.result }}
+          COMPATIBILITY_PASSED: ${{ needs.gate.outputs.compatibility }}
+          APPLE_SILICON_PASSED: ${{ needs.gate.outputs.apple-silicon }}
+          INTEL_PASSED: ${{ needs.gate.outputs.intel }}
+          UNIVERSAL_PASSED: ${{ needs.gate.outputs.universal }}
           RELEASE_DISPATCH_RESULT: ${{ needs.release-dispatch.result }}
           RELEASE_SCOPE: >-
             ${{ github.head_ref == 'release-please--branches--main' || contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}
         run: |
           test "$GATE_RESULT" = success
+          if [[ "$COMPATIBILITY_PASSED" != true || "$APPLE_SILICON_PASSED" != true || "$INTEL_PASSED" != true ]]; then
+            echo "error: one or more required source jobs did not complete successfully"
+            exit 1
+          fi
           if [[ "$RELEASE_SCOPE" == true ]]; then
             test "$RELEASE_DISPATCH_RESULT" = success
+          elif [[ "$UNIVERSAL_PASSED" != true ]]; then
+            echo "error: universal-app did not complete successfully"
+            exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: >-
