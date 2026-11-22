@@ -1,0 +1,26 @@
+name: Clean up closed PR caches
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    if: github.repository == 'JINGBANZ/jarvis'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Delete caches for the closed pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "error: expected a numeric pull request number"
+            exit 1
+          fi
+          gh cache delete --all --ref "refs/pull/$PR_NUMBER/merge" \
+            --repo "$GITHUB_REPOSITORY" --succeed-on-no-caches

@@ -41,7 +41,10 @@ keep their checkout timestamps and go through the normal compiler dependency che
 The [cache warmer](../.github/workflows/warm-ci-cache.yml) builds the Intel source and unsigned
 universal configurations on trusted `main`, where fresh PRs can restore compatible caches. It runs
 on changes to build inputs and on a weekly schedule to cover runner toolchain updates and cache
-eviction. The caches include the pinned AEC dependency and the subscription helper, whose binaries
+eviction. It checks that the exact Swift and helper cache keys are available after saving.
+The [cache cleanup workflow](../.github/workflows/cleanup-ci-cache.yml) removes each closed PR's
+merge-ref caches to leave room for the caches shared by new PRs. The caches include the pinned
+AEC dependency and the subscription helper, whose binaries
 are verified by recipe, architecture, and digest. PRs still run the tests and bundle guards, and
 signed release packaging resolves its dependencies independently. Test results, session data, and
 credentials are outside the cache paths.

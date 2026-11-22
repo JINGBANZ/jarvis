@@ -16,8 +16,8 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Show toolchain
-      id: toolchain
+    - name: Describe build caches
+      id: caches
       shell: bash
       run: |
         sw_vers
@@ -26,25 +26,34 @@ runs:
         /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$(xcode-select -p)/../Info.plist"
         fingerprint="$( { xcodebuild -version; swift --version; } | shasum -a 256 | cut -d' ' -f1)"
         echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+        cat >> "$GITHUB_OUTPUT" <<'PATHS'
+        swift-paths<<SWIFT
+        .build/artifacts
+        .build/checkouts
+        .build/repositories
+        .build/workspace-state.json
+        .build/*-apple-macosx
+        .build/apple
+        .build/build.db
+        .build/debug.yaml
+        .build/release.yaml
+        .build/ci-cache-inputs.json
+        SWIFT
+        helper-paths<<HELPER
+        .build/cliproxyapi/*/*/*/cliproxyapi
+        .build/cliproxyapi/*/*/*/binary.sha256
+        .build/cliproxyapi/*/*/*/LICENSE
+        HELPER
+        PATHS
 
-    - name: Cache Swift build
+    - name: Restore Swift build
       id: swift
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: |
-          .build/artifacts
-          .build/checkouts
-          .build/repositories
-          .build/workspace-state.json
-          .build/*-apple-macosx
-          .build/apple
-          .build/build.db
-          .build/debug.yaml
-          .build/release.yaml
-          .build/ci-cache-inputs.json
-        key: swift-v2-${{ inputs.runner-label }}-${{ inputs.configuration }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', '.github/actions/ci-build/action.yml', 'scripts/ci-build-cache.py') }}-${{ github.sha }}
+        path: ${{ steps.caches.outputs.swift-paths }}
+        key: swift-v2-${{ inputs.runner-label }}-${{ inputs.configuration }}-${{ steps.caches.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', '.github/actions/ci-build/action.yml', 'scripts/ci-build-cache.py') }}-${{ github.sha }}
         restore-keys: |
-          swift-v2-${{ inputs.runner-label }}-${{ inputs.configuration }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', '.github/actions/ci-build/action.yml', 'scripts/ci-build-cache.py') }}-
+          swift-v2-${{ inputs.runner-label }}-${{ inputs.configuration }}-${{ steps.caches.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', '.github/actions/ci-build/action.yml', 'scripts/ci-build-cache.py') }}-
 
     - name: Compile targets
       if: inputs.warm-cache != 'true' || steps.swift.outputs.cache-hit != 'true'
@@ -60,18 +69,23 @@ runs:
         esac
         python3 scripts/ci-build-cache.py snapshot
 
-    - name: Cache subscription helper
-      if: inputs.helper != ''
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    - name: Save Swift build
+      if: steps.swift.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: |
-          .build/cliproxyapi/*/*/*/cliproxyapi
-          .build/cliproxyapi/*/*/*/binary.sha256
-          .build/cliproxyapi/*/*/*/LICENSE
+        path: ${{ steps.caches.outputs.swift-paths }}
+        key: ${{ steps.swift.outputs.cache-primary-key }}
+
+    - name: Restore subscription helper
+      if: inputs.helper != ''
+      id: helper
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.caches.outputs.helper-paths }}
         key: helper-${{ inputs.helper }}-v1-${{ inputs.helper == 'native' && format('{0}-', runner.arch) || '' }}${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
 
-    - name: Build subscription helper for the cache
-      if: inputs.warm-cache == 'true' && inputs.helper != ''
+    - name: Prepare subscription helper
+      if: inputs.helper != '' && (inputs.warm-cache == 'true' || steps.helper.outputs.cache-hit != 'true')
       shell: bash
       env:
         HELPER_VARIANT: ${{ inputs.helper }}
@@ -82,4 +96,41 @@ runs:
           build_cliproxyapi x86_64
         else
           build_cliproxyapi
+        fi
+
+    - name: Save subscription helper
+      if: inputs.helper != '' && steps.helper.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.caches.outputs.helper-paths }}
+        key: ${{ steps.helper.outputs.cache-primary-key }}
+
+    - name: Look up the published Swift cache
+      if: inputs.warm-cache == 'true'
+      id: verify-swift
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.caches.outputs.swift-paths }}
+        key: ${{ steps.swift.outputs.cache-primary-key }}
+        lookup-only: true
+
+    - name: Look up the published subscription helper cache
+      if: inputs.warm-cache == 'true' && inputs.helper != ''
+      id: verify-helper
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.caches.outputs.helper-paths }}
+        key: ${{ steps.helper.outputs.cache-primary-key }}
+        lookup-only: true
+
+    - name: Require the warmed caches
+      if: inputs.warm-cache == 'true'
+      shell: bash
+      env:
+        SWIFT_CACHE_READY: ${{ steps.verify-swift.outputs.cache-hit }}
+        HELPER_CACHE_READY: ${{ inputs.helper == '' || steps.verify-helper.outputs.cache-hit == 'true' }}
+      run: |
+        if [[ "$SWIFT_CACHE_READY" != true || "$HELPER_CACHE_READY" != true ]]; then
+          echo "error: cache warmer did not publish every requested cache (Swift: ${SWIFT_CACHE_READY:-missing}, helper: $HELPER_CACHE_READY)"
+          exit 1
         fi
