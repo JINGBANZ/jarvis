@@ -1358,6 +1358,9 @@ prove provider-visible ordering, raw-item preservation, or correct cache-boundar
 Multi-attempt wire regressions exercise all API families and contain the moving-footer negative
 control. The focused [live cache scenario](./live-e2e-tests.md#cache-regression-window) verifies
 provider-reported reuse beyond static instructions on the selected Luna Responses target.
+For GPT-6.2, Jarvis sends the session's stable instructions as the first `developer` item in
+`input` because the Responses API appends top-level `instructions` after the growing input.
+See the [GPT-6.2 migration guide](https://developers.openai.com/api/docs/guides/latest-model).
 
 The audit worker records bounded SHA256 fingerprints, the first changed segment, context revision
 and rewrite reason, and optional read/write/uncached/output usage. It compares encoded inputs;
@@ -1453,8 +1456,8 @@ is about 60 MB on disk and 20 MB per update.
 - **Tool choice per target.** Every target declares the runner's tool list unchanged. The OpenAI
   API and Codex enforce a narrowed choice with `allowed_tools`, a forced function, strict tools, and
   verbatim reasoning replay through the Codex path intact; the Gemini API enforces it with
-  `allowed_tools` inside `generation_config`. Anthropic has no subset choice and Claude Fable 5.1 and
-  Opus 5.5 reject a forced tool (`any` and `tool` are 400s), so every Claude request that carries
+  `allowed_tools` inside `generation_config`. Anthropic has no subset choice and adaptive thinking
+  requires `auto`, so every Claude request that carries
   tools asks for `auto` with parallel calls off, whatever the runner's choice
   (`MessagesWireFormat.encode`; the tool-less summarizer sends no choice). The runner enforces the
   narrowed choice itself: a call the request did not permit is answered as not available on a
@@ -1463,7 +1466,7 @@ is about 60 MB on disk and 20 MB per update.
   instead was rejected: it costs the prompt cache from the tools block on and, on Fable 5.1,
   invalidates every replayed thinking block bound to the earlier list. Neither enforcement is
   trusted on its own, and the runner checks every reply against the choice it asked for. Claude's
-  reasoning floors at `low`, because `none` disables thinking and Fable 5.1 and Opus 5.5 reject that.
+  reasoning floors at `low`, because `none` disables thinking and Fable 5.2 and Opus 5.5 reject that.
 - **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
   workload timeout is the output bound; forces `store: false`, which Jarvis also sends on that
   route regardless of the General preference (the Claude Messages route has no equivalent field);
@@ -1482,15 +1485,14 @@ is about 60 MB on disk and 20 MB per update.
   it. A reply with malformed tool arguments is answered with the schema in the same attempt.
   Within an attempt each reply's content blocks go back unchanged, so a thinking block
   precedes the `tool_use` it belongs to; committed history keeps the rebuilt calls and drops the
-  thinking, which Anthropic allows outside a tool round. The tool-less history summarizer on Haiku 4.5
-  sends neither thinking nor effort, which that model rejects. The helper's default cloak stays on:
+  thinking, which Anthropic allows outside a tool round. The tool-less history summarizer omits
+  thinking and effort. The helper's default cloak stays on:
   it presents Claude traffic as Anthropic's own Claude Code client so usage stays on plan limits,
   which moves Jarvis's system prompt behind that client's identity block.
-- **Models.** The Codex shares the OpenAI list; an id the Codex backend does not serve
-  fails at request time with the helper's `model_not_found`. The Claude list names releases the helper
-  routes, which is why Haiku is the dated `claude-haiku-4-5-20251001`: the helper reads the undated
-  alias as an unknown model. The Claude summarizer is Haiku; the Codex summarizer is the target model,
-  since the Codex backend serves neither mini model.
+- **Models.** Codex shares the OpenAI list. An ID the Codex backend does not serve fails at request
+  time with the helper's `model_not_found`. The Claude list names releases the helper routes.
+  The Claude summarizer uses the catalog's Haiku tier. The Codex summarizer uses the selected model
+  because the backend does not serve the OpenAI API's mini tier.
 - **Failures read as the vendor wrote them.** The helper answers each route in its API family's
   error shape, its own errors included: OpenAI's on the Codex route
   ([`OpenAIFailureClassifier`](../Sources/JarvisCore/Providers/OpenAI/OpenAIFailureClassifier.swift))
@@ -1578,8 +1580,8 @@ data from its vendor by default. Google's OpenAI-compatible layer offers only Ch
   `allowed_tools` in mode `any`, inside `generation_config`. Tools keep their schemas and drop
   `strict`, which Gemini doesn't support; the runner's own check covers the difference. Gemini has
   no parallel-call switch, so the runner runs the first call, as it does for Codex.
-- **Effort.** Low, medium, and high keep their names, and `none` becomes `minimal`. Gemini 3.8 and
-  3.7 Flash reject `minimal`, so their catalog entries floor at low. `max_output_tokens` counts
+- **Effort.** Low, medium, and high keep their names, and `none` becomes `minimal`. Gemini 4 and
+  Gemini 3.8 Flash reject `minimal`, so their catalog entries floor at low. `max_output_tokens` counts
   thought tokens, as the Responses cap does, so the effort budgets carry over.
 - **Replies.** `requires_action` (calls) and `completed` (text) finish a reply. Any other status is
   truncation, including `incomplete` at the output cap; a `failed` reply's `errors` are quoted into
@@ -1587,9 +1589,9 @@ data from its vendor by default. Google's OpenAI-compatible layer offers only Ch
   so every provider's output column includes reasoning. Implicit caching is documented only above
   4,096 tokens and showed no hit in testing even above that, so no cache discount is assumed;
   `total_cached_tokens` is logged, so a real session shows whether it ever applies.
-- **Models.** Gemini 3.8 Flash is the default. 3.7, 3.6, and 3.5 Flash are also offered, and 3.5
-  Flash-Lite, which also writes compaction summaries. Preview models and the 2.5 family, whose
-  thinking control differs, are left out.
+- **Models.** The catalog offers stable Gemini 4 and Flash releases, with 3.8 Flash as the
+  low-latency default and Flash-Lite for compaction summaries. Google routes some older Flash IDs
+  to newer releases, so the catalog lists the concrete releases that serve those requests.
 - **Failures** read through
   [`GeminiFailureClassifier`](../Sources/JarvisCore/Providers/Gemini/GeminiFailureClassifier.swift),
   which transcription shares.

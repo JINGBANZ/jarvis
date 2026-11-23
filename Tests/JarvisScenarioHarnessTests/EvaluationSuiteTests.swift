@@ -21,7 +21,7 @@ import Testing
         #expect(target.provider == provider)
         #expect(BrainModelCatalog.models(for: provider).contains { $0.id == target.modelID })
         if provider == .codexSubscription {
-            #expect(target.modelID == "gpt-5.6-terra")
+            #expect(target.modelID == "gpt-6.1-terra")
         } else {
             #expect(target == LiveE2EScenario.target(for: provider))
         }

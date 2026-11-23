@@ -39,10 +39,10 @@ import JarvisCore
     }
 
     @Test func openAITargetsCallOpenAIWithTheSavedKey() async throws {
-        let sent = try await requests(for: BrainTarget(provider: .openAI, modelID: "gpt-6-astra"))
+        let sent = try await requests(for: BrainTarget(provider: .openAI, modelID: "gpt-6.2-astra"))
         #expect(sent.coach.url == BrainProviderDescriptor.openAIResponsesEndpoint)
         #expect(sent.coach.value(forHTTPHeaderField: "Authorization") == "Bearer sk-openai")
-        #expect(try body(sent.coach)["model"] as? String == "gpt-6-astra")
+        #expect(try body(sent.coach)["model"] as? String == "gpt-6.2-astra")
         #expect((try body(sent.coach)["reasoning"] as? [String: Any])?["effort"] as? String == "low")
         #expect(try body(sent.coach)["store"] as? Bool == false)
         #expect(try body(sent.coach)["stream"] as? Bool == true)
@@ -104,22 +104,24 @@ import JarvisCore
 
         #expect(claude.summarizer.url?.absoluteString == "http://127.0.0.1:4555/v1/messages")
         let summarizer = try body(claude.summarizer)
-        #expect(summarizer["model"] as? String == "claude-haiku-4-5-20251001")
+        #expect(summarizer["model"] as? String == "claude-haiku-5-5")
         #expect(summarizer["tools"] == nil && summarizer["tool_choice"] == nil)
         #expect(summarizer["thinking"] == nil && summarizer["output_config"] == nil)
         #expect(summarizer["stream"] == nil)
         #expect(summarizer["max_tokens"] as? Int == 2_048)
     }
 
-    @Test func geminiTargetsCallGoogleWithTheGeminiKey() async throws {
+    @Test(arguments: ["gemini-3.8-flash", "gemini-4-hydrogen", "gemini-4-neon", "gemini-4-carbon", "gemini-4-argon"])
+    func geminiTargetsCallGoogleWithTheGeminiKey(modelID: String) async throws {
         let sent = try await requests(
-            for: BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash"),
+            for: BrainTarget(provider: .gemini, modelID: modelID),
             keys: [.openAIAPIKey: "sk-openai", .geminiAPIKey: "AIzaTestKey"])
         #expect(sent.coach.url == BrainProviderDescriptor.geminiInteractionsEndpoint)
         #expect(sent.coach.value(forHTTPHeaderField: "x-goog-api-key") == "AIzaTestKey")
         #expect(sent.coach.value(forHTTPHeaderField: "Authorization") == nil)
         let config = try body(sent.coach)["generation_config"] as? [String: Any]
-        #expect(config?["thinking_level"] as? String == "low")   // 3.8 rejects `minimal`
+        #expect(try body(sent.coach)["model"] as? String == modelID)
+        #expect(config?["thinking_level"] as? String == "low")
         #expect(try body(sent.coach)["stream"] == nil, "Gemini delivers a call whole, so it is never streamed")
         #expect(try body(sent.summarizer)["model"] as? String == "gemini-3.5-flash-lite")
         #expect(try body(sent.summarizer)["tools"] == nil)

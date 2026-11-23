@@ -7,8 +7,8 @@ import os
 
 @MainActor
 @Suite struct SubscriptionSignInsTests {
-    private nonisolated static let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")
-    private nonisolated static let models = #"{"data":[{"id":"gpt-6.1-sol","owned_by":"openai"}]}"#
+    private nonisolated static let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.2-sol")
+    private nonisolated static let models = #"{"data":[{"id":"gpt-6.2-sol","owned_by":"openai"}]}"#
     private nonisolated static let expired = #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"token expired","cooldowns":[]}]}"#
     private nonisolated static let active = #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"active","disabled":false,"unavailable":false,"status_message":"","cooldowns":[]}]}"#
     private nonisolated static let rejected = #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"unauthorized","cooldowns":[]}]}"#
@@ -48,10 +48,10 @@ import os
         stub?.stop()
     }
 
-    @Test(arguments: ["gpt-6.1-sol", " gpt-6.1-sol(high) "], ["quota", "transient_error"])
+    @Test(arguments: ["gpt-6.2-sol", " gpt-6.2-sol(high) "], ["quota", "transient_error"])
     func aSelectedModelCooldownSkipsThePrimaryWithoutSigningOut(modelID: String, reason: String) async throws {
         let coolingDown = Self.credentialHealth(cooldowns:
-            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"\#(reason)","remaining_seconds":60}]"#)
+            #"[{"scope":"model","model_key":"gpt-6.2-sol","reason":"\#(reason)","remaining_seconds":60}]"#)
         try await withSignIns(respond: { request in
             (200, request.contains("/v8/management/credentials") ? coolingDown : Self.models)
         }) { signIns, supervisor in
@@ -83,14 +83,14 @@ import os
     @Test(arguments: [false, true])
     func aModelCooldownAllowsAnotherModelOnTheSameSubscription(allRecordedModelsBlocked: Bool) async throws {
         let coolingDown = Self.credentialHealth(cooldowns:
-            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#,
+            #"[{"scope":"model","model_key":"gpt-6.2-sol","reason":"quota","remaining_seconds":60}]"#,
             status: allRecordedModelsBlocked ? "error" : "active", unavailable: allRecordedModelsBlocked)
         try await withSignIns(respond: { request in
             (200, request.contains("/v8/management/credentials") ? coolingDown : Self.models)
         }) { signIns, supervisor in
             signIns.record(await supervisor.readiness())
             let primary = Self.codex
-            let alternate = BrainTarget(provider: .codexSubscription, modelID: "gpt-6-astra")
+            let alternate = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.2-astra")
             let subscriptions = signIns.health(among: [primary, alternate])
             let route = BrainRouteAvailability(
                 route: BrainRoute(primary: primary, fallbackTargets: [alternate]),
@@ -111,10 +111,10 @@ import os
     }
 
     @Test(arguments: ["[]",
-        #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":0}]"#])
+        #"[{"scope":"model","model_key":"gpt-6.2-sol","reason":"quota","remaining_seconds":0}]"#])
     func theNextPassiveCheckClearsAnEndedModelCooldown(nextCooldowns: String) async throws {
         let cooldowns = OSAllocatedUnfairLock(initialState:
-            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#)
+            #"[{"scope":"model","model_key":"gpt-6.2-sol","reason":"quota","remaining_seconds":60}]"#)
         let posts = OSAllocatedUnfairLock(initialState: 0)
         try await withSignIns(respond: { request in
             if request.hasPrefix("POST ") { posts.withLock { $0 += 1 } }

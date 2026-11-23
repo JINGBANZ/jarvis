@@ -1,0 +1,2 @@
+# Unified diff context lines begin with a space, including blank and tab-indented lines.
+scripts/cliproxyapi/local-only.patch whitespace=-blank-at-eol,-space-before-tab

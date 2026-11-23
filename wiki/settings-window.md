@@ -476,28 +476,22 @@ route with one usable target can still coach. Runtime movement through the route
 saved list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
-The OpenAI API and Codex share one concrete model list; the OpenAI and Claude lists offer only the
-newest supported release of each model line, so a new supported release replaces its predecessor
-and a saved selection naming the older one reads as unknown; the Gemini API offers Gemini 3.8, 3.7, 3.6, and 3.5
-Flash and 3.5 Flash-Lite. A listed model Codex does not serve
-fails at request time with the helper's `model_not_found`, which reads as a configuration failure.
-Concrete releases, never
-rolling aliases such as `sonnet` or `opus`: a saved route must keep naming the release the user
-picked, and an alias silently retargets it the day the provider advances it. Claude Haiku 4.5 is
-listed by its dated id because the helper does not resolve the undated one and has no route for
-Haiku 5.5. Each provider remembers its own model; without a valid preference, the first entry in
-that provider's catalog is selected.
+The OpenAI API and Codex share one model list. The OpenAI and Claude lists offer the newest supported
+release of each model line. Gemini offers stable Gemini 4 and Flash releases. The catalog uses
+concrete versions because a saved route must keep naming the release the user picked. A listed model
+Codex does not serve fails at request time with the helper's `model_not_found`, which reads as a
+configuration failure. Each provider remembers its own model. Without a valid preference, Jarvis
+selects the first entry in that provider's catalog.
 Moving a route row moves that provider's remembered model with it when the row becomes the primary.
 The **Reasoning effort** group (`ReasoningEffort`: None / Low / Medium / High) is a four-segment
 control whose segments show short labels and bar glyphs, so all four fit at the window's minimum
 width. The effort is stored once and
 applies uniformly to whichever provider is active; its default lives with the others in
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). The brain client raises None to Low,
-and the output budget to at least the Low budget, for Claude Code, whose provider descriptor carries
-that floor because None disables thinking on that path and Claude Fable 5.1 and Opus 5.5 reject it, and for
-GPT-6.1 Sol and GPT-6 Astra, whose catalog entries carry it because they require reasoning, and for
-Gemini 3.8 and 3.7 Flash, whose catalog entries carry it because they reject Gemini's lowest level. The stored
-effort remains unchanged, and every other target keeps the selected effort.
+and the output budget to at least the Low budget, whenever the provider or model declares a Low floor.
+The Claude Code provider declares that floor for adaptive thinking. The model catalog records which
+OpenAI and Gemini releases require it. Jarvis applies the floor when encoding a request and retains
+the user's saved effort.
 
 Reads are validated: a persisted primary model id no longer in that provider's catalog uses the
 provider default without rewriting the invalid value, while invalid fallback rows are removed during
