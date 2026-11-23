@@ -39,7 +39,7 @@ body {
   background: radial-gradient(ellipse at 50% 35%, var(--background-center), var(--background-edge) 80%);
   line-height: 1.6;
 }
-p, h1 { margin: 0; }
+p, h1, h2 { margin: 0; }
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--purple-ink); }
 a:focus-visible { outline: 3px solid var(--purple); outline-offset: 6px; border-radius: 3px; }
@@ -55,7 +55,11 @@ h1 span { display: block; color: var(--purple); }
 .download { display: inline-flex; align-items: center; justify-content: center; gap: 10px; margin-top: 28px; padding: 14px 22px; border: 1px solid transparent; border-radius: 12px; background: var(--button-fill); color: var(--button-text); font-size: 14px; font-weight: 650; }
 .download:hover { background: var(--purple-ink); color: var(--background-edge); }
 .requirements { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.9; }
-.requirements a { text-decoration: underline; text-underline-offset: 3px; }
+.requirements a, .details a { text-decoration: underline; text-underline-offset: 3px; }
+.details { width: min(460px, 100%); margin-top: 36px; text-align: start; }
+.details section + section { margin-top: 18px; }
+.details h2 { margin-bottom: 3px; font-size: 16px; }
+.details p { color: var(--muted); font-size: 15px; }
 footer { padding-block: 12px; text-align: center; font-size: 12px; }
 footer nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; }
 footer nav a { padding-block: 10px; }
@@ -66,6 +70,7 @@ footer p { margin-top: 4px; color: var(--muted); font-size: 11px; }
   main { padding-block: 16px 28px; }
   .wordmark, .robot { margin-bottom: 20px; }
   .robot { width: 96px; }
+  h1 { font-size: clamp(28px, 8vw, 36px); letter-spacing: -1px; }
   .description { font-size: 15px; }
 }
 

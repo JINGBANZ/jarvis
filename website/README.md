@@ -25,6 +25,7 @@ navigation, and the download and footer links before shipping. Missing URLs must
 | `public/styles.css` | Layout and the light/dark CSS color variables |
 | `public/assets/robot.svg` | The static Settings robot illustration and favicon |
 | `public/_headers` | Response headers |
+| `public/robots.txt` and `public/sitemap.xml` | Crawler access and discovery of the canonical landing page |
 | `wrangler.jsonc` | Cloudflare Worker name, asset directory, and routing |
 
 The colors come from [`SettingsTheme.swift`](../Sources/JarvisApp/Settings/SettingsTheme.swift),
@@ -69,7 +70,13 @@ bypass cases (empty pushes, 3,000 or more changed files, or 20 or more commits).
 The production domain is [hijarvis.xyz](https://hijarvis.xyz/), declared as a Custom Domain in
 `wrangler.jsonc`. Cloudflare manages its DNS record and TLS certificate. The
 [workers.dev URL](https://jarvis-website.forrestzjb.workers.dev/) remains enabled as an alternate
-address. Keep the canonical URL and `og:url` in `public/index.html` aligned with the production domain.
+address. Keep the canonical URL, `og:url`, software structured data, and sitemap aligned with the
+production domain. Keep the structured data consistent with the visible description, requirements,
+and links on the landing page. After changing crawler files, verify the deployed `robots.txt` and
+`sitemap.xml` on the production domain. Cloudflare can prepend managed crawler directives, and its
+AI Crawl Control settings can block requests at the edge. Check the effective production policy for
+search crawlers such as `OAI-SearchBot`. See [Cloudflare's robots.txt settings](https://developers.cloudflare.com/bots/additional-configurations/managed-robots-txt/)
+and the [OpenAI crawler documentation](https://developers.openai.com/api/docs/bots).
 
 The same Custom Domain enables previews at `https://<preview-name>.hijarvis.xyz`, with an immutable
 deployment URL at `https://<deployment-id>-<preview-name>.hijarvis.xyz`. Cloudflare normalizes Git

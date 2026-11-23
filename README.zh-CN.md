@@ -54,7 +54,8 @@ cd jarvis
 
 ## 项目链接
 
-[Wiki](./wiki/index.md) · [贡献指南](./CONTRIBUTING.md) · [安全政策](./SECURITY.md) ·
+[官方网站](https://hijarvis.xyz/) · [Wiki](./wiki/index.md) ·
+[贡献指南](./CONTRIBUTING.md) · [安全政策](./SECURITY.md) ·
 [许可证](./LICENSE) · [第三方声明](./THIRD_PARTY_NOTICES.md)
 
 ## 隐私
