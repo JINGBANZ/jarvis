@@ -233,9 +233,12 @@ panel transfer its close action to the caller and retain cleanup on setup failur
 unrelated windows or destroy the retained display.
 
 The display-free geometry fixture verifies preserved valid frames, relocation away from a physical
-screen, and invalid-frame refusal. Native containment tests also compare actual WindowServer bounds
-with the isolated display after show, resize, and attempted off-display moves. Those tests require
-an isolated display and do not run in the ordinary hosted no-display lane. Compilation and geometry
+screen, and invalid-frame refusal. Native containment tests check AppKit visibility and requested
+sizes, then require WindowServer to report contained bounds after show, resize, and attempted
+off-display moves. Resizes must also increase the published bounds. The locked session can report
+transformed bounds, so containment uses WindowServer coordinates and exact sizing uses AppKit.
+These tests require an isolated display and do not run in the ordinary hosted no-display lane.
+Compilation and geometry
 fixtures alone do not establish native placement, absence of a transient presentation, or the cause
 of a reported desktop escape.
 

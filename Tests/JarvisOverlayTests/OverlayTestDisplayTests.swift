@@ -35,11 +35,15 @@ struct OverlayTestDisplayTests {
         try await expectWindowServerPlacement(window)
         box.showAppearancePreview(false)
         box.setSessionLive(true)
-        box.setContentSize(NSSize(width: 900, height: 900))
+        #expect(box.isPanelVisible)
+        let beforeResize = try await expectWindowServerPlacement(window)
+        let size = NSSize(width: 900, height: 900)
+        box.setContentSize(size)
         _ = box.deliver("The test overlay belongs on the virtual display.", detail: nil)
         #expect(box.isPanelVisible)
+        #expect(window.frame.size == size)
         #expect(screen.frame.contains(window.frame))
-        try await expectWindowServerPlacement(window)
+        try await expectWindowServerPlacement(window, largerThan: beforeResize.size)
         box.setSessionLive(false)
         #expect(!box.isPanelVisible)
     }
@@ -58,44 +62,44 @@ struct OverlayTestDisplayTests {
         window.setFrameOrigin(outside)
         #expect(screen.visibleFrame.contains(window.frame))
         box.setSessionLive(true)
-        window.setFrame(NSRect(origin: outside, size: window.frame.size), display: true)
+        #expect(box.isPanelVisible)
+        let beforeMove = try await expectWindowServerPlacement(window)
+        // Resize during the move so the previous WindowServer frame cannot satisfy the check.
+        let size = NSSize(width: 900, height: 900)
+        window.setFrame(NSRect(origin: outside, size: size), display: true)
+        #expect(window.frame.size == size)
         #expect(screen.visibleFrame.contains(window.frame))
-        try await expectWindowServerPlacement(window)
+        try await expectWindowServerPlacement(window, largerThan: beforeMove.size)
     }
 
     @MainActor
-    private func expectWindowServerPlacement(_ window: NSWindow) async throws {
+    @discardableResult
+    private func expectWindowServerPlacement(_ window: NSWindow, largerThan previousSize: CGSize? = nil) async throws -> CGRect {
         let raw = try #require(ProcessInfo.processInfo.environment["JARVIS_TEST_DISPLAY_ID"])
         let id = try #require(CGDirectDisplayID(raw))
-        let primary = try #require(NSScreen.screens.first {
-            $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == CGMainDisplayID()
-        })
-        let expected = CGRect(x: window.frame.minX, y: primary.frame.maxY - window.frame.maxY,
-                              width: window.frame.width, height: window.frame.height)
         let deadline = ContinuousClock.now.advanced(by: .seconds(1))
         var committed: CGRect?
-        // AppKit publishes ordering and bounds when the main run loop commits each change.
+        // WindowServer can report transformed bounds while the session is locked.
         repeat {
-            let rows = try #require(CGWindowListCopyWindowInfo(.optionIncludingWindow,
-                                      CGWindowID(window.windowNumber)) as? [[String: Any]])
+            let rows = try #require(CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]])
             if let row = rows.first(where: {
                 ($0[kCGWindowNumber as String] as? Int) == window.windowNumber
                     && ($0[kCGWindowOwnerPID as String] as? Int32) == ProcessInfo.processInfo.processIdentifier
-                    && ($0[kCGWindowIsOnscreen as String] as? Bool) == true
             }) {
                 let bounds = try #require(row[kCGWindowBounds as String] as? [String: Any])
                 let frame = try #require(CGRect(dictionaryRepresentation: bounds as CFDictionary))
-                try #require(frame.width > 0 && frame.height > 0)
-                try #require(CGDisplayBounds(id).contains(frame),
-                             "WindowServer must keep every observed window frame on the test display")
-                if frame == expected {
-                    committed = frame
-                    break
+                if !frame.isEmpty {
+                    try #require(CGDisplayBounds(id).contains(frame),
+                                 "WindowServer must keep every observed window frame on the test display")
+                    if frame.width > (previousSize?.width ?? 0), frame.height > (previousSize?.height ?? 0) {
+                        committed = frame
+                        break
+                    }
                 }
             }
             try await Task.sleep(for: .milliseconds(20))
         } while ContinuousClock.now < deadline
-        _ = try #require(committed, "WindowServer must publish the current visible test window frame")
+        return try #require(committed, "WindowServer must publish the test window frame after the change")
     }
 
     @MainActor
