@@ -10,9 +10,10 @@ tests manually.
 
 Use an Apple silicon or Intel Mac with macOS 15+, Swift 6, Python 3, and the
 [Command Line Tools](./wiki/build-and-run.md#toolchain). Keep a responsive logged-in macOS GUI session
-and run tests as your ordinary development account. A physical monitor and full Xcode are optional.
-On a headless Mac, `Jarvis Tests` serves as the main display. The offline Gate needs no API
-keys or capture permissions; SwiftPM downloads checksum-pinned dependencies on the first build,
+and run tests as your ordinary development account. The console can stay locked during the offline
+Gate. A physical monitor and full Xcode are optional. On a headless Mac, `Jarvis Tests` serves as
+the main display. The offline Gate needs no API keys or capture permissions. SwiftPM downloads
+checksum-pinned dependencies on the first build,
 including the [universal audio library](./wiki/build-and-run.md#architectures-and-audio-dependency).
 Both architectures use the same commands.
 
