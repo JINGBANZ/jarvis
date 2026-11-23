@@ -70,7 +70,6 @@ footer p { margin-top: 4px; color: var(--muted); font-size: 11px; }
   main { padding-block: 16px 28px; }
   .wordmark, .robot { margin-bottom: 20px; }
   .robot { width: 96px; }
-  h1 { font-size: clamp(28px, 8vw, 36px); letter-spacing: -1px; }
   .description { font-size: 15px; }
 }
 
