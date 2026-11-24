@@ -497,7 +497,7 @@ attempt commits one delivered hint that uses the retained reference's explicit t
 history-hit count, token-weighted cache-read floor, and beyond-static guard. A history hit compares
 cache reads with the preceding initial request's input, allowing only the provider's checkpoint
 tolerance from `prefixTokenAllowance(for:)`. The Codex allowance is calibrated against observed
-Luna behavior through the pinned CLIProxyAPI 8.0.20 helper: 1,024-token checkpoint spacing and
+Luna behavior measured through CLIProxyAPI 8.0.20: 1,024-token checkpoint spacing and
 128-token cache-read reporting increments. A controlled pair of identical requests confirms the
 next checkpoint predicted for the tested request. This observation applies to that tested route;
 it does not establish a universal checkpoint rule or a public Responses API guarantee. Repeat the

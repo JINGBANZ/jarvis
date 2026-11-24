@@ -340,7 +340,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// A refusal is a 2xx with no usable content; it names its category so Activity can say why.
     @Test func aRefusedClaudeReplyIsATemporaryRejection() async {
         let client = BrainAccessor(
-            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-fable-5-1",
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-fable-5-2",
             send: sending { _ in
                 (Data(#"{"type":"message","content":[],"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"declined"}}"#.utf8), http(200))
             })
@@ -360,7 +360,7 @@ private func speakResponseBody(arguments: String) -> Data {
 
     @Test(arguments: [BrainProvider.openAI, .codexSubscription])
     func everySelectableOpenAIModelRespectsItsEffortFloor(provider: BrainProvider) async throws {
-        let reasoningRequired = Set(["gpt-6.1-sol", "gpt-6-astra"])
+        let reasoningRequired = Set(["gpt-6.2-sol", "gpt-6.2-astra"])
         for model in BrainModelCatalog.models(for: provider) {
             for effort in ReasoningEffort.allCases {
                 let box = CapturedBody()
@@ -389,7 +389,7 @@ private func speakResponseBody(arguments: String) -> Data {
         }
     }
 
-    @Test(arguments: ["gpt-6.1-sol", "gpt-6-astra"])
+    @Test(arguments: ["gpt-6.2-sol", "gpt-6.2-astra"])
     func requiredReasoningClampsNoneWithoutReducingALargerOutputBudget(model: String) async throws {
         let box = CapturedBody()
         let client = BrainAccessor(
@@ -576,7 +576,7 @@ private func speakResponseBody(arguments: String) -> Data {
     func aClaudeRequestDeclaresEveryToolUnderAuto(choice: ToolChoice) async throws {
         let box = CapturedBody()
         let client = BrainAccessor(
-            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-fable-5-1",
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-fable-5-2",
             send: sending { request in
                 box.set(request.httpBody)
                 return (Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8), http(200))

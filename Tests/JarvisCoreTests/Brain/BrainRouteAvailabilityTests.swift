@@ -2,10 +2,10 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct BrainRouteAvailabilityTests {
-    private let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")
+    private let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.2-sol")
     private let claude = BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5")
     private let gemini = BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash")
-    private let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
+    private let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6.2-sol")
 
     private func failure(_ provider: BrainProvider) -> ProviderFailure {
         ProviderFailure(

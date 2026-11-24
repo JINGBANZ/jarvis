@@ -91,13 +91,12 @@ struct MessagesWireFormat: BrainWireFormat {
                 if stream { declared["eager_input_streaming"] = true }
                 return declared
             }
-            // Anthropic has no subset choice and Claude Fable 5.1 rejects `any` and `tool`, so the
+            // Anthropic has no subset choice and adaptive thinking rejects `any` and `tool`, so the
             // runner's own check enforces a narrowed choice; see wiki/architecture.md#capabilities.
             body["tool_choice"] = [
                 "type": "auto",
                 "disable_parallel_tool_use": true,   // the coach loop consumes one tool call per turn
             ]
-            // Haiku 4.5, the tool-less summarizer's model, rejects both fields.
             body["thinking"] = ["type": "adaptive"]
             body["output_config"] = ["effort": reasoningEffort]
         }

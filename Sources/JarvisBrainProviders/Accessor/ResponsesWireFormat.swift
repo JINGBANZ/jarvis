@@ -91,6 +91,14 @@ struct ResponsesWireFormat: BrainWireFormat {
         case .force(let name): toolChoiceJSON = ["type": "function", "name": name]
         }
 
+        let instructionText = instructions.joined(separator: "\n\n")
+        // GPT-6.2 appends top-level instructions after input, outside the reusable prefix.
+        let useDeveloperPrefix = model.hasPrefix("gpt-6.2-")
+        if useDeveloperPrefix, !instructions.isEmpty {
+            input.insert(["type": "message", "role": "developer",
+                          "content": [["type": "input_text", "text": instructionText]]], at: 0)
+        }
+
         var body: [String: Any] = [
             "model": model,
             "input": input,
@@ -102,8 +110,8 @@ struct ResponsesWireFormat: BrainWireFormat {
             "store": store,
             "prompt_cache_key": Self.promptCacheKey,
         ]
-        if !instructions.isEmpty {
-            body["instructions"] = instructions.joined(separator: "\n\n")
+        if !useDeveloperPrefix, !instructions.isEmpty {
+            body["instructions"] = instructionText
         }
         if stream {
             body["stream"] = true

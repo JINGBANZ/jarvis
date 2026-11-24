@@ -13,11 +13,12 @@ import JarvisBrainProviders
         .compose(disabledTools: [], referencesAdmitted: true, skills: [codingSkill])
     }
 
-    @Test(arguments: [BrainProvider.openAI, .claudeSubscription, .gemini], [false, true])
+    @Test(arguments: BrainProvider.allCases, [false, true])
     func completedAttemptsPreserveTheirProviderVisibleInitialPrefixes(
         provider: BrainProvider, saveConversations: Bool
     ) async throws {
-        let reasoning: [[String: Any]] = provider == .openAI ? [[
+        let usesResponses = provider.descriptor.wire == .responses
+        let reasoning: [[String: Any]] = usesResponses ? [[
             "type": "reasoning", "id": "rs_seed", "summary": [],
             "encrypted_content": "synthetic-opaque-reasoning",
         ]] : []
@@ -71,9 +72,10 @@ import JarvisBrainProviders
         #expect(captured.allSatisfy { $0.contextRevision == 0 && $0.contextRewriteReason == nil })
         let requests = try captured.map { try object($0.body) }
         if provider != .claudeSubscription {
-            #expect(requests.allSatisfy { $0["store"] as? Bool == saveConversations })
+            let storesRequests = saveConversations && !provider.servedByLocalProxy
+            #expect(requests.allSatisfy { $0["store"] as? Bool == storesRequests })
         }
-        if provider == .openAI {
+        if usesResponses {
             for index in requests.indices.dropFirst() where captured[index].attempt == 1 {
                 let request = requests[index]
                 let replayed = try #require(items(request, provider: provider).first {
@@ -92,12 +94,23 @@ import JarvisBrainProviders
         #expect(!estimatedWire.contains("audioWindowEstimate"))
         #expect(!estimatedWire.contains("estimated from"))
         #expect(try prefixResults(initialRequests, provider: provider) == Array(repeating: true, count: 7))
-        let instructionsKey = switch provider {
-        case .claudeSubscription: "system"
-        case .gemini: "system_instruction"
-        default: "instructions"
+        let instructions = try requests.map { request in
+            switch provider.descriptor.wire {
+            case .responses:
+                #expect(request["instructions"] == nil)
+                let developer = try #require(items(request, provider: provider).first)
+                #expect(developer["role"] as? String == "developer")
+                let content = try #require(developer["content"] as? [[String: Any]])
+                #expect(content.first?["type"] as? String == "input_text")
+                let text = try #require(content.first?["text"] as? String)
+                #expect(!text.isEmpty)
+                return try canonical(developer)
+            case .messages:
+                return try canonical(#require(request["system"]))
+            case .interactions:
+                return try canonical(#require(request["system_instruction"]))
+            }
         }
-        let instructions = try requests.map { try canonical(#require($0[instructionsKey])) }
         let tools = try requests.map { try canonical(#require($0["tools"])) }
         #expect(Set(instructions).count == 1)
         #expect(Set(tools).count == 1)
@@ -123,11 +136,11 @@ import JarvisBrainProviders
         for (index, id) in [(3, "a3_silent"), (7, "a7_silent")] {
             #expect(try output(id, in: initialRequests[index], provider: provider) == "Silent at 00:00.")
             let call = try #require(items(initialRequests[index], provider: provider).first { item in
-                let callID = item[provider == .openAI ? "call_id" : "id"] as? String ?? ""
+                let callID = item[usesResponses ? "call_id" : "id"] as? String ?? ""
                 return item["name"] as? String == "stay_silent" && (callID == id || callID.hasPrefix(id + "_"))
             })
             #expect(["function_call", "tool_use"].contains(call["type"] as? String ?? ""))
-            if provider == .openAI { #expect(call["arguments"] as? String == "{}") }
+            if usesResponses { #expect(call["arguments"] as? String == "{}") }
             else { #expect((call[provider == .claudeSubscription ? "input" : "arguments"] as? [String: Any])?.isEmpty == true) }
         }
         let withMovingFooter = try initialRequests.map { try addingTransientFooter(to: $0, provider: provider) }
@@ -240,9 +253,10 @@ import JarvisBrainProviders
 
     private func target(_ provider: BrainProvider) -> BrainTarget {
         let modelID = switch provider {
-        case .claudeSubscription: "claude-sonnet-5-5"
-        case .gemini: "gemini-3.8-flash"
-        default: "gpt-6.1-sol"
+        case .claudeSubscription: "claude-fable-5-2"
+        case .gemini: "gemini-4-hydrogen"
+        case .openAI: "gpt-6.2-sol"
+        case .codexSubscription: "gpt-6.2-astra"
         }
         return .init(provider: provider, modelID: modelID)
     }

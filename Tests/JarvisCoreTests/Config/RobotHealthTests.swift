@@ -2,8 +2,8 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct RobotHealthTests {
-    private let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")
-    private let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
+    private let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.2-sol")
+    private let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6.2-sol")
     private let claude = BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5")
 
     private func health(
@@ -40,7 +40,7 @@ import Testing
     }
 
     @Test func aModelCooldownUsesAmberForAnAlternateModelAndRedWithoutOne() {
-        let alternate = BrainTarget(provider: .codexSubscription, modelID: "gpt-6-astra")
+        let alternate = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.2-astra")
         let failure = ProviderFailure(
             source: .brain(.codexSubscription), stage: .process, category: .quota,
             disposition: .temporary, identity: .init(errorCode: "model_cooldown"),
