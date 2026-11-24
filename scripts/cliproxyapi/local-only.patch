@@ -1,11 +1,10 @@
 --- a/internal/util/ssh_helper.go
 +++ b/internal/util/ssh_helper.go
-@@ -1,135 +1,4 @@
+@@ -1,3 +0,0 @@
 -// Package util provides helper functions for SSH tunnel instructions and network-related tasks.
 -// This includes detecting the appropriate IP address and printing commands
 -// to help users connect to the local server from a remote machine.
- package util
- 
+@@ -6,130 +3,2 @@
 -import (
 -	"context"
 -	"fmt"
@@ -140,27 +139,17 @@
 +func PrintSSHTunnelInstructions(_ int) {}
 --- a/sdk/cliproxy/service_lifecycle.go
 +++ b/sdk/cliproxy/service_lifecycle.go
-@@ -11,7 +11,6 @@
- 	"github.com/router-for-me/CLIProxyAPI/v8/internal/home"
- 	"github.com/router-for-me/CLIProxyAPI/v8/internal/redisqueue"
- 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+@@ -14 +13,0 @@
 -	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
- 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
- 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v8/sdk/access"
- 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
-@@ -445,19 +444,7 @@
- 	s.cfgMu.RLock()
- 	cfg := s.cfg
- 	s.cfgMu.RUnlock()
+@@ -448 +446,0 @@
 -	proxyURL := ""
- 	if cfg != nil {
- 		registry.StartModelCatalogUpdaters(ctx, cfg.Models, cfg.Home.Enabled)
+@@ -451,4 +449 @@
 -		proxyURL = cfg.ProxyURL
 -	}
 -	executor.StartXAIVersionUpdater(ctx, proxyURL)
 -	sdkAuth.StartAntigravityVersionUpdaterWithProxyProvider(ctx, s.antigravityVersionProxyURL)
 +	}
- }
+@@ -456,8 +450,0 @@
 -
 -func (s *Service) antigravityVersionProxyURL() string {
 -	cfg := s.currentConfig()
@@ -171,25 +160,17 @@
 -}
 --- a/sdk/cliproxy/auth/conductor_cooldown.go
 +++ b/sdk/cliproxy/auth/conductor_cooldown.go
-@@ -24,6 +24,7 @@
- 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
- 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
- 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+@@ -26 +26,2 @@
+-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 +	"golang.org/x/net/http2"
- )
- 
- var quotaCooldownDisabled atomic.Bool
-@@ -3408,6 +3409,10 @@
- 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
- 		return true
- 	}
+@@ -3411 +3412,5 @@
+-	var dnsErr *net.DNSError
 +	var streamErr http2.StreamError
 +	if errors.As(err, &streamErr) && streamErr.Code == http2.ErrCodeProtocol {
 +		return true
 +	}
- 	var dnsErr *net.DNSError
- 	if errors.As(err, &dnsErr) && dnsErr != nil && (dnsErr.IsTimeout || dnsErr.IsTemporary || dnsErr.Timeout()) {
- 		return true
++	var dnsErr *net.DNSError
 --- /dev/null
 +++ b/sdk/cliproxy/auth/jarvis_http2_protocol_error_test.go
 @@ -0,0 +1,119 @@
