@@ -65,8 +65,9 @@ question, or tell us how Jarvis fits into your day. We'd love to hear from you.
 
 ## Project links
 
-[Wiki](./wiki/index.md) · [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) ·
-[License](./LICENSE) · [Third-party notices](./THIRD_PARTY_NOTICES.md)
+[Official website](https://hijarvis.xyz/) · [Wiki](./wiki/index.md) ·
+[Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE) ·
+[Third-party notices](./THIRD_PARTY_NOTICES.md)
 
 ## Privacy
 
