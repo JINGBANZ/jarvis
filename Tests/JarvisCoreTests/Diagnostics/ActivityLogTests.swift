@@ -109,6 +109,33 @@ import Foundation
         #expect(snap.shellHTML.contains("appendRow"))
     }
 
+    @Test func reattachingBetweenAdmissionAndPublishIncludesTheRowOnce() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog()
+        let session = UUID()
+        log.enable(directory: dir, session: session)
+        var oldUpdates: [String] = []
+        _ = log.attach { oldUpdates.append($0) }
+        let now = Date()
+        guard case .row(let admitted) = log.admit(
+            .tip(hint: "already in the snapshot"), at: now, shotFilename: nil, for: session
+        ) else { Issue.record("Expected the first row"); return }
+
+        var newUpdates: [String] = []
+        let snapshot = log.attach { newUpdates.append($0) }
+        log.publish(admitted, for: session)
+        guard case .row(let live) = log.admit(
+            .tip(hint: "a later row"), at: now, shotFilename: nil, for: session
+        ) else { Issue.record("Expected the next row"); return }
+        log.publish(live, for: session)
+
+        let row = try #require(snapshot.rows.first)
+        #expect(snapshot.rows.count == 1)
+        #expect(row.contains("already in the snapshot"))
+        #expect(oldUpdates.isEmpty)
+        #expect(newUpdates == [live.script])
+    }
+
     @Test func openingTheSessionCreatesJsonlImmediately() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (_, evidence) = ActivityLog.recordingSession(in: dir)

@@ -4,6 +4,58 @@ import WebKit
 
 // Serialized: concurrent WKWebViews starve unrelated main-actor timer tests.
 @Suite(.serialized) struct ViewerEndToEndTests {
+    @Test func onlyTheCurrentNavigationAndSubscriptionCanDeliverUpdates() {
+        let oldNavigation = NSObject()
+        let newNavigation = NSObject()
+        let oldSubscription = UUID()
+        let newSubscription = UUID()
+        var page = ActivityPage(
+            source: .history, navigation: oldNavigation, rows: [], total: 0,
+            evidenceIsComplete: true)
+        #expect(page.append("old row", from: oldSubscription) == nil)
+        #expect(page.finish(oldNavigation)?.count == 2)
+
+        page = ActivityPage(
+            source: .current(newSubscription), navigation: newNavigation, rows: ["snapshot row"],
+            total: 1, evidenceIsComplete: true)
+        #expect(page.append("old row", from: oldSubscription) == nil)
+        #expect(page.finish(oldNavigation) == nil)
+        #expect(!page.isReady)
+        #expect(page.append("queued row", from: newSubscription) == nil)
+        #expect(page.finish(newNavigation) == [
+            "snapshot row", "setMeta(\"1 lines\");", ActivityLog.evidenceScript(isComplete: true),
+            "queued row",
+        ])
+        #expect(page.isReady)
+        #expect(page.finish(newNavigation) == nil)
+        #expect(page.append("old row", from: oldSubscription) == nil)
+        #expect(page.append("live row", from: newSubscription) == "live row")
+    }
+
+    @MainActor @Test func liveEvidenceLossDuringPageLoadSurvivesSnapshotReplay() async throws {
+        let h = WebViewHarness()
+        let navigation = NSObject()
+        let subscription = UUID()
+        var page = ActivityPage(
+            source: .current(subscription), navigation: navigation,
+            rows: [ActivityLog.rowScript(time: "10:00", message: "snapshot", imageBase64: nil)],
+            total: 1, evidenceIsComplete: true)
+        #expect(page.append(ActivityLog.evidenceScript(isComplete: false), from: subscription) == nil)
+        #expect(page.append(
+            ActivityLog.rowScript(time: "10:01", message: "live", imageBase64: nil),
+            from: subscription) == nil)
+        try await h.load(ActivityLog.htmlShell())
+        let scripts = page.finish(navigation)
+        for script in try #require(scripts) { try await h.eval(script) }
+
+        let notice = try await h.eval("document.getElementById('evidence').textContent") as? String
+        let messages = try await h.eval(
+            "Array.from(document.querySelectorAll('#log .m')).map(x=>x.textContent).join('|')"
+        ) as? String
+        #expect(notice == ActivityLog.incompleteEvidenceNotice)
+        #expect(messages == "snapshot|live")
+    }
+
     @MainActor @Test func appendRowRendersTextSafely() async throws {
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())

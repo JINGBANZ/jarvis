@@ -35,12 +35,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var evaluationTask: Task<Void, Never>?
     private var sessions: [SessionStore.Session] = []
 
-    private var loaded = false
-    private var pending: [String] = []
-    private var snapshotRows: [String] = []
-    private var pendingMeta = ""
-    private var evidenceIsComplete = true
-    private var viewingCurrent = true
+    private var page: ActivityPage<WKNavigation>?
     /// UI state only, never written to Activity.
     private var readinessStatus: JarvisReadiness.Status = .stopped
 
@@ -144,6 +139,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     func teardown() {
         log.detach()
+        page = nil
         webView = nil
         picker = nil
         copySessionIDButton = nil
@@ -154,9 +150,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         findingAgentsTask?.cancel()
         findingAgentsTask = nil
         isFindingAgents = false
-        loaded = false
-        pending = []
-        snapshotRows = []
     }
 
     /// An open viewer must re-attach here: `ActivityLog.enable` dropped its previous observer.
@@ -169,7 +162,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     /// Skipped while a past session shows: `populatePicker` would reselect the current session.
     func historyDidChange() {
-        guard webView != nil, viewingCurrent else { return }
+        guard page?.isCurrent == true else { return }
         populatePicker()
     }
 
@@ -272,19 +265,17 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     // MARK: - Loading
 
     private func loadCurrent() {
-        viewingCurrent = true
+        let subscription = UUID()
         let snap = log.attach { [weak self] js in
-            DispatchQueue.main.async { self?.onAppend(js) }
+            DispatchQueue.main.async { self?.onAppend(js, from: subscription) }
         }
-        evidenceIsComplete = snap.evidenceIsComplete
-        beginLoad(shell: snap.shellHTML, rows: snap.rows, shown: snap.shown, total: snap.total)
+        beginLoad(
+            .current(subscription), shell: snap.shellHTML, rows: snap.rows, total: snap.total,
+            evidenceIsComplete: snap.evidenceIsComplete)
     }
 
     private func loadPast(_ session: SessionStore.Session) {
-        viewingCurrent = false
         log.detach()
-        // Unknown completeness, from a session older than the health record, shows no notice.
-        evidenceIsComplete = session.evidenceIsComplete ?? true
         let snapshot = store.entrySnapshot(
             for: session,
             retainingMostRecentInsertions: ActivityLog.retainedEntryLimit)
@@ -292,25 +283,26 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             ActivityLog.rowScript(time: entry.time, message: entry.message,
                                   imageBase64: data?.base64EncodedString(), response: entry.response)
         }
-        beginLoad(shell: ActivityLog.htmlShell(), rows: rows,
-                  shown: rows.count, total: snapshot.total)
+        // Unknown completeness, from a session older than the health record, shows no notice.
+        beginLoad(
+            .history, shell: ActivityLog.htmlShell(), rows: rows, total: snapshot.total,
+            evidenceIsComplete: session.evidenceIsComplete ?? true)
     }
 
-    private func beginLoad(shell: String, rows: [String], shown: Int, total: Int) {
-        loaded = false
-        pending = []
-        snapshotRows = rows
-        pendingMeta = total > shown ? "showing last \(shown) of \(total)" : "\(total) lines"
-        webView?.loadHTMLString(shell, baseURL: nil)
+    private func beginLoad(
+        _ source: ActivityPage<WKNavigation>.Source, shell: String, rows: [String], total: Int,
+        evidenceIsComplete: Bool
+    ) {
+        page = nil
+        guard let navigation = webView?.loadHTMLString(shell, baseURL: nil) else { return }
+        page = ActivityPage(
+            source: source, navigation: navigation, rows: rows, total: total,
+            evidenceIsComplete: evidenceIsComplete)
     }
 
-    private func onAppend(_ js: String) {
-        guard viewingCurrent else { return }
-        if loaded {
-            webView?.evaluateJavaScript(js, completionHandler: nil)
-        } else {
-            pending.append(js)
-        }
+    private func onAppend(_ js: String, from subscription: UUID) {
+        guard let script = page?.append(js, from: subscription) else { return }
+        webView?.evaluateJavaScript(script, completionHandler: nil)
     }
 
     // MARK: - WKNavigationDelegate
@@ -323,21 +315,15 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        loaded = true
-        // Snapshot rows before rows buffered during the load, to keep order.
-        for js in snapshotRows { webView.evaluateJavaScript(js, completionHandler: nil) }
-        for js in pending { webView.evaluateJavaScript(js, completionHandler: nil) }
-        snapshotRows = []
-        pending = []
-        webView.evaluateJavaScript("setMeta(\(jsString(pendingMeta)));", completionHandler: nil)
-        webView.evaluateJavaScript(
-            ActivityLog.evidenceScript(isComplete: evidenceIsComplete), completionHandler: nil)
+        guard self.webView === webView, let navigation, let scripts = page?.finish(navigation)
+        else { return }
+        for script in scripts { webView.evaluateJavaScript(script, completionHandler: nil) }
         refreshReadinessBadge()
     }
 
     private func refreshReadinessBadge() {
-        guard loaded else { return }
-        let badge = viewingCurrent
+        guard let page, page.isReady else { return }
+        let badge = page.isCurrent
             ? readinessStatus.activityBadge
             : (label: "Ended", state: "stopped")
         let script = "setReadiness(\(jsString(badge.label)),\(jsString(badge.state)));"
