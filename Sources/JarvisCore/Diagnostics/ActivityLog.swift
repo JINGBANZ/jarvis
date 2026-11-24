@@ -70,6 +70,7 @@ public final class ActivityLog: @unchecked Sendable {
         /// The `jarvis-activity.jsonl` line, without its trailing newline.
         let line: Data
         let script: String
+        fileprivate let observerRevision: UInt64
     }
 
     // Held only across in-memory bookkeeping, never disk access.
@@ -84,6 +85,7 @@ public final class ActivityLog: @unchecked Sendable {
     /// new Start. Every entry point is scoped by this identity to keep them off the new window.
     private var sessionID: UUID?
     private var onAppend: ((String) -> Void)?
+    private var observerRevision: UInt64 = 0
     /// Health is monotonic, so this only moves from true to false: one notice, never a flicker.
     private var evidenceIsComplete = true
 
@@ -181,19 +183,24 @@ public final class ActivityLog: @unchecked Sendable {
                     insertionIndex: chronologicalIndex,
                     insertionOrder: item.insertionOrder,
                     removedInsertionOrders: removedItems.map(\.insertionOrder),
-                    response: entry.response)))
+                    response: entry.response),
+                observerRevision: observerRevision))
         }
     }
 
-    /// The identity check guards against a session rotation between `admit` and `publish`.
     func publish(_ row: AdmittedRow, for session: UUID) {
-        let observer = lock.withLock { sessionID == session ? onAppend : nil }
+        let observer = lock.withLock { () -> ((String) -> Void)? in
+            // An observer attached since admission already has this row in its snapshot.
+            guard sessionID == session, row.observerRevision == observerRevision else { return nil }
+            return onAppend
+        }
         observer?(row.script)
     }
 
     /// Registers the observer and snapshots under one lock, so no later row is missed or doubled.
     public func attach(_ onAppend: @escaping (String) -> Void) -> Snapshot {
         lock.withLock {
+            observerRevision &+= 1
             self.onAppend = onAppend
             let rows: [String] = entries.chronologicalItems.map { item in
                 let e = item.element
@@ -270,6 +277,11 @@ public final class ActivityLog: @unchecked Sendable {
             return "appendRow({});"
         }
         return "appendRow(\(json));"
+    }
+
+    static func summaryScript(shown: Int, total: Int) -> String {
+        let summary = total > shown ? "showing last \(shown) of \(total)" : "\(total) lines"
+        return "setMeta(\(jsString(summary)));"
     }
 
     public static func evidenceScript(isComplete: Bool) -> String {
