@@ -49,6 +49,11 @@ completeness, attribution, and Stop/Start/Quit rules belong to
 | [`BrainComposition`](../Sources/JarvisApp/App/BrainComposition.swift) | Provider preflight, route construction, and between-attempt reapplication of brain preferences and credentials. |
 | [`SessionArtifacts`](../Sources/JarvisApp/App/SessionArtifacts.swift) | Session directory and evidence ownership, Activity wiring, asynchronous retention, and protection of closing sessions. |
 
+[`SessionStart`](../Sources/JarvisApp/App/SessionStart.swift) owns the pending preflight task and
+its References admission under the readiness session identity. Stop retires that pending work
+before pipeline teardown. A usable replacement takes over after preflight, and the outgoing
+session owns its drain through evidence closure.
+
 The scheduler and runner have separate locks for separate state. The transcript ledger is a leaf
 lock; neither half holds the other's lock. Composition builds concrete clients outside Core and
 injects ports into the kernel. The [ordered route policy](./architecture.md#ordered-provider-route)

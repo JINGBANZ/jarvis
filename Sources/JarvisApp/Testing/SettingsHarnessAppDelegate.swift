@@ -228,6 +228,7 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
                 launcher: AppProcessComposition.makeLauncher()),
             preferences: preferences,
             send: { request in try await traffic.send(request) })
+        try await checkSessionStarts(output: output, brain: brain)
         let acceptedStorage = preferences.saveConversations
         toggle.state = .on
         NSApp.sendAction(toggle.action!, to: toggle.target, from: toggle)
