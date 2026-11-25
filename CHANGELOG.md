@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.1](https://github.com/JINGBANZ/jarvis/compare/v0.6.0...v0.6.1) (2026-11-25)
+
+
+### Features
+
+* **website:** improve AI search discovery ([#515](https://github.com/JINGBANZ/jarvis/issues/515)) ([fc4b785](https://github.com/JINGBANZ/jarvis/commit/fc4b7859f39a02c8c992a9a08cb901ef0378c21e))
+
+
+### Bug Fixes
+
+* **activity:** isolate session page updates ([#519](https://github.com/JINGBANZ/jarvis/issues/519)) ([4aa51d9](https://github.com/JINGBANZ/jarvis/commit/4aa51d93c0bc36accf4f511bdd4a55076a75e60e))
+* **session:** give pending starts one owner ([#520](https://github.com/JINGBANZ/jarvis/issues/520)) ([d19fa93](https://github.com/JINGBANZ/jarvis/commit/d19fa93daa9ae1b2c33ad6358459c9602ae5fe30))
+* **test:** support locked macos consoles in the gate ([#516](https://github.com/JINGBANZ/jarvis/issues/516)) ([ba9e5b2](https://github.com/JINGBANZ/jarvis/commit/ba9e5b2109e70ef960dc092c87baa3fc5f6d3914))
+
 ## [0.6.0](https://github.com/JINGBANZ/jarvis/compare/v0.5.14...v0.6.0) (2026-11-21)
 
 
